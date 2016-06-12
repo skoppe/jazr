@@ -8,6 +8,7 @@ build:
           mkdir -p $WERCKER_CACHE_DIR/dub
           mkdir -p ~/.dub
           ln -s $WERCKER_CACHE_DIR/dub ~/.dub/packages
+          export CODECOV_TOKEN=1dd4c43d-1cea-47ee-9722-d177ea68bc93
     - script:
         name: unittests
         code: |
