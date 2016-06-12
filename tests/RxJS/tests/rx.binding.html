@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reactive Extensions for JavaScript Binding Tests</title>
+  <link rel="stylesheet" href="./vendor/qunit-1.11.0.css">
+</head>
+<body>
+  <div id="qunit"></div>
+  <script src="./vendor/qunit-1.11.0.js"></script>
+  <script src="../dist/rx.compat.js"></script>
+  <script src="../dist/rx.binding.js"></script>
+  <script src="../dist/rx.virtualtime.js"></script>
+  <script src="../dist/rx.testing.js"></script>
+  <script src="helpers/reactiveassert.js"></script>
+
+  <!-- Individual Tests -->
+  <script src="observable/multicast.js"></script>
+  <script src="observable/publish.js"></script>
+  <script src="observable/publishlast.js"></script>
+  <script src="observable/replay.js"></script>
+  <script src="observable/publishvalue.js"></script>
+  <script src="subjects/behaviorsubject.js"></script>
+  <script src="subjects/replaysubject.js"></script>
+  <script src="observable/connectableobservable.js"></script>
+</body>
+</html>

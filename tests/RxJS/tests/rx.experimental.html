@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reactive Extensions for JavaScript Tests</title>
+  <link rel="stylesheet" href="./vendor/qunit-1.11.0.css">
+</head>
+<body>
+  <div id="qunit"></div>
+  <script src="./vendor/qunit-1.11.0.js"></script>
+  <script src="../dist/rx.compat.js"></script>
+  <script src="../dist/rx.aggregates.js"></script>
+  <script src="../dist/rx.experimental.js"></script>
+  <script src="../dist/rx.virtualtime.js"></script>
+  <script src="../dist/rx.testing.js"></script>
+  <script src="helpers/reactiveassert.js"></script>
+
+  <!-- Individual Tests -->
+  <script src="observable/forkjoinproto.js"></script>
+  <script src="observable/forkjoin.js"></script>
+  <script src="observable/expand.js"></script>
+  <script src="observable/let.js"></script>
+  <script src="observable/manyselect.js"></script>
+  <script src="observable/while.js"></script>
+  <script src="observable/if.js"></script>
+  <script src="observable/dowhile.js"></script>
+  <script src="observable/case.js"></script>
+  <script src="observable/for.js"></script>
+</body>
+</html>

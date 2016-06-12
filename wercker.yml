@@ -1,0 +1,38 @@
+box: skoppe/es5-min-build
+
+build:
+  steps:
+    - script:
+        name: setup cache
+        code: |
+          mkdir -p $WERCKER_CACHE_DIR/dub
+          mkdir -p ~/.dub
+          ln -s $WERCKER_CACHE_DIR/dub ~/.dub/packages
+    - script:
+        name: unittests
+        code: |
+          dub test -b unittest-cov
+    - script:
+        name: minify RxJS
+        code: |
+          dub -- -i ./tests/RxJS/dist/rx.all.js -o ./tests/RxJS/dist/rx.all.min.js
+    - script:
+        name: unittest RxJS
+        code: |
+          ln -s $PWD/tests/RxJS /usr/share/nginx/html/RxJS
+          nginx
+          phantomjs ./tests/run-qunit.js http://localhost/RxJS/tests/rx.all.html
+    - script:
+        name: minify jQuery
+        code: |
+          dub -- -i ./tests/jquery/dist/jquery.js -o ./tests/jquery/dist/jquery.min.js
+    - script:
+        name: unittest jQuery
+        code: |
+          ln -s $PWD/tests/jquery /usr/share/nginx/html/jquery
+          cd tests
+          ./run-jquery.sh
+    - script:
+        name: upload-coverage
+        code: |
+          bash <(curl -s https://codecov.io/bash)

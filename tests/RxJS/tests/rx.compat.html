@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reactive Extensions for JavaScript Tests</title>
+  <link rel="stylesheet" href="./vendor/qunit-1.11.0.css">
+</head>
+<body>
+  <div id="qunit"></div>
+  <script>
+    // Backfill for Phantom.js / JSCore
+    if (!Function.prototype.bind) {
+      Function.prototype.bind = function (context) {
+        var self = this;
+        return function () {
+          return self.apply(context, arguments);
+        };
+      };
+    }
+
+    // Polyfills
+    if (!Array.prototype.forEach)
+    {
+      Array.prototype.forEach = function(fun /*, thisArg */)
+      {
+        "use strict";
+
+        if (this === void 0 || this === null)
+          throw new TypeError();
+
+        var t = Object(this);
+        var len = t.length >>> 0;
+        if (typeof fun !== "function")
+          throw new TypeError();
+
+        var thisArg = arguments.length >= 2 ? arguments[1] : void 0;
+        for (var i = 0; i < len; i++)
+        {
+          if (i in t)
+            fun.call(thisArg, t[i], i, t);
+        }
+      };
+    }
+
+    if (!Object.keys) {
+      Object.keys = (function () {
+        'use strict';
+        var hasOwnProperty = Object.prototype.hasOwnProperty,
+            hasDontEnumBug = !({toString: null}).propertyIsEnumerable('toString'),
+            dontEnums = [
+              'toString',
+              'toLocaleString',
+              'valueOf',
+              'hasOwnProperty',
+              'isPrototypeOf',
+              'propertyIsEnumerable',
+              'constructor'
+            ],
+            dontEnumsLength = dontEnums.length;
+
+        return function (obj) {
+          if (typeof obj !== 'object' && (typeof obj !== 'function' || obj === null)) {
+            throw new TypeError('Object.keys called on non-object');
+          }
+
+          var result = [], prop, i;
+
+          for (prop in obj) {
+            if (hasOwnProperty.call(obj, prop)) {
+              result.push(prop);
+            }
+          }
+
+          if (hasDontEnumBug) {
+            for (i = 0; i < dontEnumsLength; i++) {
+              if (hasOwnProperty.call(obj, dontEnums[i])) {
+                result.push(dontEnums[i]);
+              }
+            }
+          }
+          return result;
+        };
+      }());
+    }
+  </script>
+  <script src="./vendor/qunit-1.11.0.js"></script>
+
+  <script src="./vendor/rsvp.js"></script>
+  <script src="./vendor/transducers-0.4.158-min.js"></script>
+  <script src="../dist/rx.compat.js"></script>
+  <script src="../dist/rx.virtualtime.js"></script>
+  <script src="../dist/rx.time.js"></script>
+  <script src="../dist/rx.testing.js"></script>
+  <script src="helpers/reactiveassert.js"></script>
+
+  <!-- Individual Tests -->
+  <script src="internal/isequal.js"></script>
+  <script src="subjects/asyncsubject.js"></script>
+  <script src="subjects/subject.js"></script>
+
+  <script src="concurrency/scheduler.js"></script>
+  <script src="concurrency/immediatescheduler.js"></script>
+  <script src="concurrency/currentthreadscheduler.js"></script>
+  <script src="concurrency/defaultscheduler.js"></script>
+
+  <script src="disposables/compositedisposable.js"></script>
+  <script src="disposables/disposable.js"></script>
+  <script src="disposables/refcountdisposable.js"></script>
+  <script src="disposables/serialdisposable.js"></script>
+  <script src="disposables/singleassignmentdisposable.js"></script>
+
+  <script src="core/notification.js"></script>
+  <script src="core/observable.js"></script>
+  <script src="core/observer.js"></script>
+
+  <!-- Concurrency -->
+  <script src="observable/observeon.js"></script>
+  <script src="observable/subscribeon.js"></script>
+
+  <!-- Creation -->
+  <script src="observable/create.js"></script>
+  <script src="observable/defer.js"></script>
+  <script src="observable/empty.js"></script>
+  <script src="observable/from.js"></script>
+  <script src="observable/fromarray.js"></script>
+  <script src="observable/generate.js"></script>
+  <script src="observable/never.js"></script>
+  <script src="observable/of.js"></script>
+  <script src="observable/pairs.js"></script>
+  <script src="observable/range.js"></script>
+  <script src="observable/repeat.js"></script>
+  <script src="observable/return.js"></script>
+  <script src="observable/throw.js"></script>
+  <script src="observable/using.js"></script>
+
+  <!-- Multiple -->
+
+  <script src="observable/amb.js"></script>
+  <script src="observable/catch.js"></script>
+  <script src="observable/combinelatest.js"></script>
+  <script src="observable/concat.js"></script>
+  <script src="observable/merge.js"></script>
+  <script src="observable/mergeconcat.js"></script>
+  <script src="observable/mergeobservable.js"></script>
+  <script src="observable/onerrorresumenext.js"></script>
+  <script src="observable/skipuntil.js"></script>
+  <script src="observable/switch.js"></script>
+  <script src="observable/takeuntil.js"></script>
+  <script src="observable/withlatestfrom.js"></script>
+  <script src="observable/zip.js"></script>
+
+  <!-- Single -->
+
+  <script src="observable/asobservable.js"></script>
+  <script src="observable/bufferwithcount.js"></script>
+  <script src="observable/distinct.js"></script>
+  <script src="observable/distinctuntilchanged.js"></script>
+  <script src="observable/do.js"></script>
+  <script src="observable/finally.js"></script>
+  <script src="observable/ignoreelements.js"></script>
+  <script src="observable/materialize.js"></script>
+  <script src="observable/retry.js"></script>
+  <script src="observable/retrywhen.js"></script>
+  <script src="observable/scan.js"></script>
+  <script src="observable/skiplast.js"></script>
+  <script src="observable/startwith.js"></script>
+  <script src="observable/takelast.js"></script>
+  <script src="observable/takelastbuffer.js"></script>
+  <script src="observable/windowwithcount.js"></script>
+
+  <!-- Standard Query Operators -->
+  <script src="observable/concatmap.js"></script>
+  <script src="observable/concatmapobserver.js"></script>
+  <script src="observable/defaultifempty.js"></script>
+  <script src="observable/pluck.js"></script>
+  <script src="observable/select.js"></script>
+  <script src="observable/selectmany.js"></script>
+  <script src="observable/selectmanyobserver.js"></script>
+  <script src="observable/skip.js"></script>
+  <script src="observable/skipwhile.js"></script>
+  <script src="observable/take.js"></script>
+  <script src="observable/takewhile.js"></script>
+  <script src="observable/toarray.js"></script>
+  <script src="observable/where.js"></script>
+
+  <!-- Transducers -->
+  <script src="observable/transduce.js"></script>
+</body>
+</html>

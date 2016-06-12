@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reactive Extensions for JavaScript Tests</title>
+  <link rel="stylesheet" href="./vendor/qunit-1.11.0.css">
+</head>
+<body>
+  <div id="qunit"></div>
+  <script src="./vendor/qunit-1.11.0.js"></script>
+  <script src="./vendor/es6-shim.min.js"></script>
+  <script src="../dist/rx.compat.js"></script>
+  <script src="../dist/rx.aggregates.js"></script>
+  <script src="../dist/rx.virtualtime.js"></script>
+  <script src="../dist/rx.testing.js"></script>
+  <script src="helpers/reactiveassert.js"></script>
+
+  <!-- Individual Tests -->
+  <script src="observable/reduce.js"></script>
+  <script src="observable/some.js"></script>
+  <script src="observable/every.js"></script>
+  <script src="observable/includes.js"></script>
+  <script src="observable/count.js"></script>
+  <script src="observable/indexof.js"></script>
+  <script src="observable/sum.js"></script>
+  <script src="observable/min.js"></script>
+  <script src="observable/minby.js"></script>
+  <script src="observable/max.js"></script>
+  <script src="observable/maxby.js"></script>
+  <script src="observable/average.js"></script>
+  <script src="observable/sequenceequal.js"></script>
+  <script src="observable/isempty.js"></script>
+  <script src="observable/elementat.js"></script>
+  <script src="observable/first.js"></script>
+  <script src="observable/last.js"></script>
+  <script src="observable/single.js"></script>
+  <script src="observable/findindex.js"></script>
+  <script src="observable/find.js"></script>
+  <script src="observable/toset.js"></script>
+  <script src="observable/tomap.js"></script>
+  <script src="observable/slice.js"></script>
+  <script src="observable/lastindexof.js"></script>
+</body>
+</html>

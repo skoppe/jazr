@@ -1,0 +1,178 @@
+module es6.transforms.assignmentexpressions;
+
+import es6.nodes;
+import std.algorithm : map, each;
+import std.array : array;
+
+version (unittest)
+{
+	import unit_threaded;
+	import es6.parser;
+	import es6.emitter;
+	import std.stdio;
+	Node parseModule(string input)
+	{
+		auto parser = parser(input);
+		parser.scanToken();
+		return parser.parseModule();
+	}
+	void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		import std.typetuple : staticMap;
+		import std.functional : unaryFun;
+		import std.traits : ReturnType, isBoolean, hasUDA;
+
+		alias _funs = staticMap!(unaryFun, fun);
+
+		Node[] todo = [node];
+		bool runNodes(Node node, bool entry = true)
+		{
+			bool r = false;
+			foreach(c; node.children.dup)
+			{
+				if (c.type == NodeType.FunctionBodyNode)
+					todo ~= c;
+				else
+					r |= runNodes(c,false);
+			}
+			foreach(_fun; _funs)
+			{
+				if (_fun(node))
+					r |= true;
+			}
+			return r;
+		}
+		for (auto i = 0; i < todo.length; i++)
+			while(runNodes(todo[i]))
+			{
+			}
+	}
+}
+
+bool simplifyRedundantAssignmentExpressions(Node node)
+{
+	if (node.type != NodeType.ExpressionNode)
+		return false;
+	auto expr = node.as!ExpressionNode;
+
+	if (expr.isSingleExpression)
+		return false;
+	
+	if (expr.children[$-2].type != NodeType.AssignmentExpressionNode)
+		return false;
+
+	auto assignExpr = expr.children[$-2].as!AssignmentExpressionNode;
+	Node lhs = assignExpr.children[0];
+
+	if (expr.children[$-1].type == NodeType.IdentifierNode)
+	{
+		if (lhs.type != NodeType.IdentifierNode)
+			return false;
+
+		if (lhs.as!IdentifierNode.identifier != expr.children[$-1].as!IdentifierNode.identifier)
+			return false;
+	} else if (expr.children[$-1].type == NodeType.CallExpressionNode)
+	{
+		if (lhs.type != NodeType.CallExpressionNode)
+			return false;
+
+		if (diffTree(lhs,expr.children[$-1]).type != Diff.No)
+			return false;
+	} else
+		return false;
+
+	expr.children = expr.children[0..$-1];
+	return true;
+}
+
+@("simplifyRedundantAssignmentExpressions")
+unittest
+{
+	void assertTransformation(string input, string output)
+	{
+		Node got = parseModule(input);
+		Node expected = parseModule(output);
+		got.runTransform!(simplifyRedundantAssignmentExpressions);
+		auto diff = diffTree(got,expected);
+		if (diff.type == Diff.No)
+			return;
+		emit(got).shouldEqual(emit(expected));
+	}
+	assertTransformation
+	(
+		`if (a = 5, a) doBla();`,
+		`if (a = 5) doBla();`
+	);
+	assertTransformation
+	(
+		`if (a.bla = 5, a.bla) doBla();`,
+		`if (a.bla = 5) doBla();`
+	);
+	assertTransformation
+	(
+		`if (a[4] = 5, a[4]) doBla();`,
+		`if (a[ 4 ] = 5) doBla();`
+	);
+	assertTransformation
+	(
+		`if (a.bla[4].tar = 5, a.bla[4].tar) doBla();`,
+		`if (a.bla[ 4 ].tar = 5) doBla();`
+	);
+
+	assertTransformation
+	(
+		`if (a = 5, b) doBla();`,
+		`if (a = 5,b) doBla();`
+	);
+	assertTransformation
+	(
+		`if (a = 5, a.bla) doBla();`,
+		`if (a = 5,a.bla) doBla();`
+	);
+	assertTransformation
+	(
+		`if (a.bla = 5, a.ops) doBla();`,
+		`if (a.bla = 5,a.ops) doBla();`
+	);
+	assertTransformation
+	(
+		`if (a[4] = 5, a[5]) doBla();`,
+		`if (a[ 4 ] = 5,a[ 5 ]) doBla();`
+	);
+
+	assertTransformation
+	(
+		`function a() { return b = 7, b }`,
+		`function a() { return b = 7 }`
+	);
+	assertTransformation
+	(
+		`function a() { return b = 7, b ? ab() : ko() }`,
+		`function a() { return b = 7,b ? ab() : ko() }`
+	);
+	assertTransformation
+	(
+		`if (a.bla() = 4,a) ;`,
+		`if (a.bla() = 4,a) ;`
+	);
+	assertTransformation
+	(
+		`if (a = 4,a()) ;`,
+		`if (a = 4,a()) ;`
+	);
+	assertTransformation
+	(
+		`if (super.a = 4,a) ;`,
+		`if (a = 4,super.a) ;`
+	).shouldThrow();
+	assertTransformation
+	(
+		`if (123 = 4,123) ;`,
+		`if (123 = 4,123) ;`
+	);
+	assertTransformation
+	(
+		`if (b,c=56,d(),g=77,g) ;`,
+		`if (b,c=56,d(),g=77) ;`
+	);
+}

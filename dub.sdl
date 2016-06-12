@@ -1,0 +1,20 @@
+name "es6-parse"
+description "A minimal D application."
+copyright "Copyright © 2016, skoppe"
+authors "skoppe"
+configuration "application" {
+	targetType "executable"
+}
+configuration "chatty" {
+	targetType "executable"
+	versions "Chatty"	
+}
+configuration "unittest" {
+	preBuildCommands "dub run unit-threaded -c gen_ut_main -- -f bin/ut.d"
+	importPaths "bin"
+	mainSourceFile "bin/ut.d"
+	excludedSourceFiles "source/app.d"
+	targetType "executable"
+	dependency "unit-threaded" version="==0.6.3"
+	versions "Chatty"
+}
