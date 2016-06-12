@@ -1,4 +1,4 @@
-# Jazr. A tool to parse, analyse and transform javascript modules
+# Jazr. A tool to parse, analyse and transform javascript
 
 ## Status
 - [X] Parser
