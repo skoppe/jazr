@@ -65,7 +65,7 @@ Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide =
 		auto r = c.emit(sink,guide);
 		if (r & Guide.RequiresSemicolon)
 			sink.put(";");
-		else
+		else if (!(r & Guide.EndOfStatement) || delimiter != ";")
 			sink.put(delimiter);
 		//if (r & Guide.NotStartWithIdentifierStart)
 			//guide |= Guide.NotStartWithIdentifierStart;
@@ -1007,6 +1007,7 @@ unittest
 	assertEmitted(`function a(a,{b,c}){return{a,b,c}}`);
 	assertEmitted(`function a(a,{b,c}){return this}`);
 	assertEmitted(`function a(a,{b,c}){return null}`);
+	assertEmitted(`function a(){}var b;`);
 }
 @("Prefix Expression")
 unittest
@@ -1039,7 +1040,7 @@ unittest
 			(
 			)
 		}
-		`).shouldEqual(`function a(){var b=5};if(b){bla()}`);
+		`).shouldEqual(`function a(){var b=5}if(b){bla()}`);
 	// test for single and double quotes strings with singe and double quotes in them, they should be encoded
 }
 
