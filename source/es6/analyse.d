@@ -535,7 +535,7 @@ AnalysisResult analyseNode(Node root)
 	Scope all = s;
 	Branch trunk = b;
 	analyse(root,s,b);
-	//propagateGlobals(s);
+	findGlobals(s);
 	auto ar = AnalysisResult(all,trunk);
 	//ar.fetchUnresolvedIdentifiers();
 	return ar;
