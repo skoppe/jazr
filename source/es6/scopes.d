@@ -23,6 +23,15 @@ version (unittest)
 {
 	import unit_threaded;
 	import std.stdio;
+	import es6.parser;
+	import es6.analyse;
+	void assertGlobals(Scope s, string[] expecteds, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		expecteds.length.shouldEqual(s.globals.length,file,line);
+		foreach(got, expected; lockstep(s.globals,expecteds))
+			got.node.identifier.shouldEqual(expected,file,line);
+
+	}
 }
 
 enum IdentifierType
@@ -60,6 +69,7 @@ class Scope
 	Node entry;
 	/*private*/ Variable[] variables;
 	/*private*/ Identifier[] identifiers;
+	private Identifier[] globals;
 	private int nextFreeIdentifier = -1;
 	this(Node e, Scope p = null)
 	{
@@ -91,6 +101,10 @@ class Scope
 	{
 		return variables;
 	}
+	const(Identifier[]) getGlobals()
+	{
+		return globals;
+	}
 }
 class Branch
 {
@@ -110,4 +124,83 @@ class Branch
 		this.children ~= b;
 		return b;
 	}
+}
+void findGlobals(Scope scp)
+{
+	import std.algorithm : canFind, each, filter;
+	foreach(s; scp.children)
+	{
+		s.findGlobals();
+		s.globals
+			.filter!(id=>!scp.variables.canFind!"a.node.identifier == b"(id.node.identifier))
+			.each!(id=>scp.globals ~= id);
+	}
+	foreach(g; scp.identifiers.filter!(a=>!scp.variables.canFind!"a.node.identifier == b"(a.node.identifier)))
+		scp.globals ~= g;
+}
+@("findGlobals")
+unittest
+{
+	getScope(`var a,b,c;`).assertGlobals([]);
+	getScope(`a,b,c;`).assertGlobals(["a","b","c"]);
+	auto s = getScope(`var a,b; function e(c){ var d; return a*b*c*d; }`);
+	s.assertGlobals([]);
+	s.children[0].assertGlobals(["a","b"]);
+	s = getScope(`function e(c){ var d; return a*b*c*d; }`);
+	s.assertGlobals(["a","b"]);
+	s.children[0].assertGlobals(["a","b"]);
+	s = getScope(`function bla(a){function c(c){return a*c*d*b}var d,e}`);
+	s.assertGlobals(["b"]);
+	s.children[0].assertGlobals(["b"]);
+	s.children[0].children[0].assertGlobals(["a","d","b"]);
+}
+// TODO: we can use the other generateIdentifier from one of es5-min's branches
+string generateIdentifier(int idx)
+{
+	import std.conv : to;
+	if (idx < 26)
+		return (cast(char)('a'+idx)).to!string;
+	if (idx < 52)
+		return (cast(char)('A'+(idx-26))).to!string;
+	return generateIdentifier(cast(int)((idx / 52)-1))~generateIdentifier(idx % 52);
+}
+import std.regex;
+auto reservedKeyword = ctRegex!`^(break|do|in|typeof|case|else|instanceof|var|catch|export|new|void|class|extends|return|while|const|finally|super|with|continue|for|switch|yield|debugger|function|this|default|if|throw|delete|import|try|enum|await|null|true|false)$`;
+bool isValidIdentifier(string id)
+{
+	return id.matchFirst(reservedKeyword).empty();
+}
+string generateValidIdentifier(int start)
+{
+	import std.range : iota, front;
+	import std.algorithm : find, map;
+	return iota(start,int.max).map!(generateIdentifier).find!(isValidIdentifier).front();
+}
+@("generateIdentifier")
+unittest
+{
+	void assertGeneratedName(int idx, string expected, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		generateIdentifier(idx).shouldEqual(expected,file,line);
+	}
+	assertGeneratedName(0,		"a");
+	assertGeneratedName(1,		"b");
+	assertGeneratedName(26,		"A");
+	assertGeneratedName(51,		"Z");
+	assertGeneratedName(52,		"aa");
+	assertGeneratedName(103,	"aZ");
+	assertGeneratedName(104,	"ba");
+	assertGeneratedName(2755,	"ZZ");
+	assertGeneratedName(2756,	"aaa");
+	assert(!isValidIdentifier("do"));
+	assert(isValidIdentifier("doda"));
+	assert(!isValidIdentifier("function"));
+	assert(isValidIdentifier("functioned"));
+}
+@("generateValidIdentifier")
+unittest
+{
+	generateIdentifier((4*52)+14).shouldEqual("do");
+	generateValidIdentifier((4*52)+14).shouldEqual("dp");
+
 }
