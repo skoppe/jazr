@@ -1340,3 +1340,21 @@ DiffResult diffTree(Node a, Node b)
 	// we need to check the inners of the nodes to determine if they are really the same
 	return DiffResult(a,b,Diff.No);
 }
+bool startsNewScope(Node node)
+{
+	switch (node.type)
+	{
+		case NodeType.FunctionDeclarationNode:
+		case NodeType.FunctionExpressionNode:
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.GeneratorExpressionNode:
+		case NodeType.ArrowFunctionNode:
+		case NodeType.ClassGetterNode:
+		case NodeType.ClassMethodNode:
+		case NodeType.ClassGeneratorMethodNode:
+		case NodeType.ClassSetterNode:
+			return true;
+		default:
+			return false;
+	}
+}
