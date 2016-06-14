@@ -30,7 +30,7 @@ version (unittest)
 	import unit_threaded;
 	import es6.reporter;
 	import std.stdio;
-	auto parseNode(alias parseFunction, Type = ObjectBindingPatternNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
+	auto parseNode(alias parseFunction, Type = ModuleNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		auto parser = new Parser!string(r);
 		parser.scanToken();
@@ -47,6 +47,7 @@ version (unittest)
 			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
+	alias parseModule = parseNode!("parseModule",ModuleNode);
 }
 enum Attribute
 {
