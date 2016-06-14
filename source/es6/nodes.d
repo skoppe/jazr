@@ -24,7 +24,11 @@ import std.range : lockstep;
 
 version(unittest)
 {
+	import es6.parser;
+	import es6.emitter;
+	import es6.analyse;
 	import unit_threaded;
+	import std.stdio;
 }
 
 enum Keyword
@@ -1339,6 +1343,76 @@ DiffResult diffTree(Node a, Node b)
 	}
 	// we need to check the inners of the nodes to determine if they are really the same
 	return DiffResult(a,b,Diff.No);
+}
+@("diffTree")
+unittest
+{
+	import std.format;
+	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
+	diffTree(n,n).type.shouldEqual(Diff.No);
+	format("%s",n).shouldEqual("ModuleNode (plain)
+  BooleanNode (plain)
+  StringLiteralNode \"s\"
+  BinaryLiteralNode (plain)
+  OctalLiteralNode (plain)
+  DecimalLiteralNode (plain)
+  HexLiteralNode (plain)
+  TemplateLiteralNode (plain)
+    TemplateNode t
+  RegexLiteralNode /regex/
+  KeywordNode (plain)
+  IdentifierNode identifier
+  UnaryExpressionNode (plain)
+    IdentifierNode expr
+  CallExpressionNode (plain)
+    IdentifierNode obj
+    AccessorNode a
+  NewExpressionNode (plain)
+    IdentifierNode a
+  CallExpressionNode (plain)
+    IdentifierNode a
+    ArgumentsNode (plain)
+  BinaryExpressionNode (plain)
+    IdentifierNode a
+    ExpressionOperatorNode (plain)
+    IdentifierNode b
+  AssignmentExpressionNode (plain)
+    IdentifierNode c
+    AssignmentOperatorNode (plain)
+    IdentifierNode d
+  LabelledStatementNode (plain)
+  ForStatement ExprCStyle
+    SemicolonNode (plain)
+    SemicolonNode (plain)
+    EmptyStatementNode (plain)
+  ClassDeclarationNode (plain)
+    IdentifierNode b
+    ClassGetterNode (plain)
+      IdentifierNode x
+      FunctionBodyNode (plain)
+    ClassSetterNode (plain)
+      IdentifierNode x
+      IdentifierNode a
+      FunctionBodyNode (plain)
+    ClassMethodNode (plain)
+      IdentifierNode method
+      FormalParameterListNode (plain)
+      FunctionBodyNode (plain)
+    ClassGeneratorMethodNode (plain)
+      IdentifierNode gen
+      FormalParameterListNode (plain)
+      FunctionBodyNode (plain)
+  AssignmentExpressionNode (plain)
+    ArrayLiteralNode (plain)
+      ElisionNode 2
+      IdentifierNode a
+    AssignmentOperatorNode (plain)
+    IdentifierNode b
+  LexicalDeclarationNode (plain)
+    LexicalDeclarationItemNode (plain)
+      IdentifierNode b
+      IdentifierNode d
+");
 }
 bool startsNewScope(Node node)
 {
