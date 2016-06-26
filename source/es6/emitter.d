@@ -298,7 +298,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			n.children[2].emit(sink);
 			return Guide.RequiresDelimiter;
 		case NodeType.AssignmentExpressionNode:
-			node.children.emit(sink);
+			node.children.emit(sink,guide);
 			return Guide.RequiresDelimiter;
 		case NodeType.ArrowFunctionNode:
 			auto n = node.as!ArrowFunctionNode;
@@ -892,6 +892,7 @@ unittest
 	assertEmitted(`if(c,d==4){a(),d();var b}`);
 	assertEmitted(`if(a);else;`);
 	assertEmitted(`if(a){}else if(b)c;else d;`);
+	assertEmitted(`if(a)b=1;else b=2;`);
 }
 @("Switch Statement")
 unittest
