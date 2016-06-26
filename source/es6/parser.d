@@ -2495,6 +2495,12 @@ unittest
 	parseFunctionExpression("function(){return}");
 	parseFunctionExpression("function(){return 4}");
 }
+@("parseFunctionDeclaration")
+unittest
+{
+	alias parseFunctionDeclaration = parseNode!("parseFunctionDeclaration",FunctionDeclarationNode);
+	parseFunctionDeclaration("function a(){return}");
+}
 @("parseObjectBindingPattern")
 unittest
 {

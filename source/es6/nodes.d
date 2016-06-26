@@ -287,9 +287,11 @@ class Node
 	this(NodeType t, Node n)
 	{
 		_type = t;
-		n.parent = this;
 		if (n !is null)
+		{
+			n.parent = this;
 			children = [n];
+		}
 	}
 	this(NodeType t, Node[] cs)
 	{
