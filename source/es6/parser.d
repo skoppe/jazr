@@ -1839,7 +1839,7 @@ final class Parser(Source) : Lexer!(Source)
 		scanAndSkipCommentsAndTerminators();
 		Node[] methods;
 		bool staticAttr = false;
-		while(!isEndOfExpression)
+		while(!isEndOfExpression || token.type == Type.Semicolon)
 		{
 			switch(token.type)
 			{
@@ -1854,12 +1854,18 @@ final class Parser(Source) : Lexer!(Source)
 							continue;
 						case "set":
 							methods ~= parseClassSetter(staticAttr,attributes.mask!(Attribute.Yield));
+							if (methods[$-1].type == NodeType.ErrorNode)
+								return methods[$-1];
 							break;
 						case "get":
 							methods ~= parseClassGetter(staticAttr,attributes.mask!(Attribute.Yield));
+							if (methods[$-1].type == NodeType.ErrorNode)
+								return methods[$-1];
 							break;
 						default:
 							methods ~= parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield));
+							if (methods[$-1].type == NodeType.ErrorNode)
+								return methods[$-1];
 							break;
 					}
 					staticAttr = false;
@@ -1920,6 +1926,8 @@ final class Parser(Source) : Lexer!(Source)
 			return error("Expected opening parenthesis as part of class setter");
 		scanToken();
 		auto param = parseBindingElement();
+		if (param.type == NodeType.ErrorNode)
+			return param;
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of class setter");
@@ -2594,6 +2602,27 @@ unittest
 	parseClassDeclaration("class abc{static set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static get m(){}}").methods.length.shouldEqual(1);
 	parseClassDeclaration("class abc{static get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class name { a(){}/*comment*/b(){}\nc(){} // comment \nd(){}; ;; }");
+	parseClassDeclaration("class {}").shouldThrowSaying("Expected Identifier as part of ClassDeclaration");
+	parseClassDeclaration("class name").shouldThrowSaying("Expected opening brace as part of class declaration");
+	parseClassDeclaration("class name { static static }").shouldThrowSaying("Expected class method after static");
+	parseClassDeclaration("class name { static ; }").shouldThrowSaying("Expected class method after static");
+	parseClassDeclaration("class name { + }").shouldThrowSaying("Expected keyword static, class method, class generator, setter or getter");
+	parseClassDeclaration("class abc{").shouldThrowSaying("Expected closing brace as part of class declaration");
+	parseClassDeclaration("class abc{get m").shouldThrowSaying("Expected empty parenthesis as part of class getter");
+	parseClassDeclaration("class abc{get m(").shouldThrowSaying("Expected empty parenthesis as part of class getter");
+	parseClassDeclaration("class abc{get m(a)").shouldThrowSaying("Expected empty parenthesis as part of class getter");
+	parseClassDeclaration("class abc{get m()}").shouldThrowSaying("Expected opening brace");
+	parseClassDeclaration("class abc{get m(){").shouldThrowSaying("Expected closing brace");
+	parseClassDeclaration("class abc{set m").shouldThrowSaying("Expected opening parenthesis as part of class setter");
+	parseClassDeclaration("class abc{set m(){}").shouldThrowSaying("Expected BindingElement");
+	parseClassDeclaration("class abc{set m(a,b){}").shouldThrowSaying("Expected closing parenthesis as part of class setter");
+	parseClassDeclaration("class abc{set m(a)").shouldThrowSaying("Expected opening brace");
+	parseClassDeclaration("class abc{set m(a){").shouldThrowSaying("Expected closing brace");
+	parseClassDeclaration("class abc{m").shouldThrowSaying("Expected opening parenthesis as part of class method");
+	parseClassDeclaration("class abc{m(").shouldThrowSaying("Expected closing parenthesis as part of class method");
+	parseClassDeclaration("class abc{m()").shouldThrowSaying("Expected opening brace");
+	parseClassDeclaration("class abc{m(){").shouldThrowSaying("Expected closing brace");
 }
 @("parseImportDeclaration")
 unittest
