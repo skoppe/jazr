@@ -26,43 +26,13 @@ version (unittest)
 	import unit_threaded;
 	import es6.parser;
 	import es6.emitter;
+	import es6.transformer;
 	import std.stdio;
 	Node parseModule(string input)
 	{
 		auto parser = parser(input);
 		parser.scanToken();
 		return parser.parseModule();
-	}
-	void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		import std.typetuple : staticMap;
-		import std.functional : unaryFun;
-		import std.traits : ReturnType, isBoolean, hasUDA;
-
-		alias _funs = staticMap!(unaryFun, fun);
-
-		Node[] todo = [node];
-		bool runNodes(Node node, bool entry = true)
-		{
-			bool r = false;
-			foreach(c; node.children.dup)
-			{
-				if (c.type == NodeType.FunctionBodyNode)
-					todo ~= c;
-				else
-					r |= runNodes(c,false);
-			}
-			foreach(_fun; _funs)
-			{
-				if (_fun(node))
-					r |= true;
-			}
-			return r;
-		}
-		for (auto i = 0; i < todo.length; i++)
-			while(runNodes(todo[i]))
-			{
-			}
 	}
 }
 
