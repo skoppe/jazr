@@ -112,6 +112,7 @@ class Branch
 	Branch parent; 		/// The parent branch (can be null)
 	Branch[] children;	/// Any nested branches
 	Node entry;			/// The node that starts this branch
+	int hints;
 	this(Scope s, Branch p = null, Node e = null)
 	{
 		scp = s;
@@ -123,6 +124,10 @@ class Branch
 		auto b = new Branch(scp,this,entry);
 		this.children ~= b;
 		return b;
+	}
+	void addHint(Hint h)
+	{
+		hints |= h;
 	}
 }
 void findGlobals(Scope scp)

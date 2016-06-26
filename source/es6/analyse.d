@@ -412,17 +412,66 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 		}
 	}
 }
-private void analyse(Node node, Scope s = null, Branch b = null)
+private int calcHints(Node node)
+{
+	switch (node.type)
+	{
+		case NodeType.ErrorNode:
+		case NodeType.ContinueStatementNode:
+		case NodeType.BreakStatementNode:
+		case NodeType.LabelledStatementNode:
+		case NodeType.VariableStatementNode:
+		case NodeType.IfStatementNode:
+		case NodeType.SwitchStatementNode:
+		case NodeType.DoWhileStatementNode:
+		case NodeType.WhileStatementNode:
+		case NodeType.ForStatementNode:
+		case NodeType.WithStatementNode:
+		case NodeType.CatchStatementNode:
+		case NodeType.FinallyStatementNode:
+		case NodeType.TryStatementNode:
+		case NodeType.ThrowStatementNode:
+		case NodeType.DebuggerStatementNode:
+		case NodeType.ClassDeclarationNode:
+		case NodeType.FunctionDeclarationNode:
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.LexicalDeclarationNode:
+		case NodeType.ExportDeclarationNode:
+		case NodeType.ImportDeclarationNode:
+			return Hint.NonExpression;
+		case NodeType.ReturnStatementNode:
+			return node.children.length == 0 ? Hint.Return : Hint.ReturnValue;
+		default:
+			return Hint.None;
+	}
+}
+private int getHintMask(Node n)
+{
+	switch (n.type)
+	{
+		case NodeType.FunctionBodyNode:
+			return ~(Hint.Return | Hint.ReturnValue);
+		default:
+			return ~(Hint.None);
+	}
+}
+private int analyse(Node node, Scope s = null, Branch b = null)
 {
 	if (s is null)
 		s = new Scope(node);
 	if (b is null)
 		b = s.branch;
 	node.branch = b;
-	void analyseChildren(Node[] ns, Scope s, Branch b = null)
+	int hints = calcHints(node);
+	int analyseChildren(Node[] ns, Scope s, Branch b = null)
 	{
+		int hints = Hint.None;
 		foreach(idx, n; ns)
-			analyse(n,s,b);
+		{
+			auto h = analyse(n,s,b);
+			hints |= n.getHintMask() & h;
+		}
+		return hints;
 	}
 	if (node.type == NodeType.FunctionDeclarationNode || node.type == NodeType.FunctionExpressionNode || node.type == NodeType.GeneratorDeclarationNode || node.type == NodeType.GeneratorExpressionNode)
 	{
@@ -493,7 +542,7 @@ private void analyse(Node node, Scope s = null, Branch b = null)
 		analyse(node.children[0],s,b);
 		analyse(node.children[1],s,b.newBranch(node.children[1]));
 		if (node.children.length == 3)
-			analyse(node.children[2],s,b.newBranch(node.children[2]));			
+			analyse(node.children[2],s,b.newBranch(node.children[2]));
 	} else if (node.type == NodeType.SwitchStatementNode)
 	{
 		analyse(node.children[0],s,b);
@@ -525,8 +574,10 @@ private void analyse(Node node, Scope s = null, Branch b = null)
 		analyseObjectBindingPatternNode(node,s,b,IdentifierType.Identifier);
 	else
 	{
-		analyseChildren(node.children,s,b);
+		hints |= analyseChildren(node.children,s,b);
 	}
+	node.hints = hints;
+	return node.getHintMask() & hints;
 }
 AnalysisResult analyseNode(Node root)
 {
@@ -768,6 +819,13 @@ unittest
 	getFirstChildScope(`(...rest)=>{c}`).assertVariables!(IdentifierType.Parameter)(["rest"])
 		.assertIdentifiers(["c"]);
 
+}
+@("Hints")
+unittest
+{
+	getFirstChildScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.ReturnValue);
+	getFirstChildScope(`function a() { return }`).entry.hints.get.shouldEqual(Hint.Return);
+	getScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.NonExpression);
 }
 /*
 
