@@ -104,8 +104,24 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 unittest
 {
 	assertIfElseAssignmentToConditional(
+		`if (a) b = 6;`,
+		`something_that_should_fail`
+	).shouldThrow();
+	assertIfElseAssignmentToConditional(
 		`if (a) b = 6; else b = 7;`,
 		`b = a ? 6 : 7`
+	);
+	assertIfElseAssignmentToConditional(
+		`if (a) c(),b = 6; else d(),b = 7;`,
+		`b=a?(c(),6):(d(),7);`
+	);
+	assertIfElseAssignmentToConditional(
+		`if (a) c(); else b = 7;`,
+		`if (a) c(); else b = 7;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if (a) b = 7; else c();`,
+		`if (a) b = 7; else c();`
 	);
 	assertIfElseAssignmentToConditional(
 		`if (a) { b = 6; } else { b = 7; }`,
@@ -134,6 +150,10 @@ unittest
 	assertIfElseAssignmentToConditional(
 		`if (c) { for(;;) ; d = 6; } else d = 9;`,
 		`if (c) { for(;;) ; d = 6; } else d = 9;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if (c) d = 9; else { for(;;) ; d = 6; }`,
+		`if (c) d = 9; else { for(;;) ; d = 6; }`
 	);
 	assertIfElseAssignmentToConditional(
 		`if (a) c = b = 6; else c = b = 7;`,
