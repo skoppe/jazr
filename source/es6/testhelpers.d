@@ -41,4 +41,21 @@ version(unittest)
 		if (a is b)
 			throw new UnitTestException(["Expected two objects to not be the same"],file,line);
 	}
+	void shouldThrowSaying(E)(lazy E expr, string msg, in string file = __FILE__, in size_t line = __LINE__) @trusted
+	{
+		import std.format : format;	
+		import std.algorithm : find;
+		import std.range : empty;
+		try
+		{
+			expr();
+		}
+		catch (UnitTestException e)
+		{
+			if (find(e.msg, msg).empty)
+				throw new UnitTestException([format("Expected message `%s`, got `%s`",msg,e.msg)],file,line);
+			return;
+		}
+		throw new UnitTestException([format("Expected exception with message `%s`",msg)],file,line);
+	}
 }

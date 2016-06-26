@@ -23,10 +23,10 @@ import es6.lexer;
 import es6.tokens;
 import es6.nodes;
 import es6.keywords;
-import es6.testhelpers;
 
 version (unittest)
 {
+	import es6.testhelpers;
 	import unit_threaded;
 	import es6.reporter;
 	import std.stdio;
@@ -426,7 +426,7 @@ final class Parser(Source) : Lexer!(Source)
 					auto name = parsePropertyName();
 					skipCommentsAndLineTerminators();
 					if (token.type != Type.Colon)
-						error("Expected colon as part of PropertyDefinition");
+						return error("Expected colon as part of PropertyDefinition");
 					scanAndSkipCommentsAndTerminators();
 					auto expr = parseAssignmentExpression(Attribute.In | attributes);
 					children ~= new PropertyDefinitionNode(name,expr);
@@ -460,8 +460,7 @@ final class Parser(Source) : Lexer!(Source)
 								break;
 							}
 							auto iden = cast(IdentifierNode)name;
-							if (iden is null)
-								return name;
+							assert(iden !is null);
 							if (isIdentifierReservedKeyword(iden))
 								return error(format("Unexpected keyword %s",iden.identifier));
 							if (token.type == Type.Assignment)
@@ -477,13 +476,6 @@ final class Parser(Source) : Lexer!(Source)
 					break;
 				case Type.Multiply:
 					children ~= parseClassGeneratorMethod(staticAttr,attributes.mask!(Attribute.Yield));
-					break;
-				case Type.MultiLineComment:
-				case Type.SingleLineComment:
-				case Type.LineTerminator:
-					scanToken();
-					continue;
-				case Type.CloseCurlyBrace:
 					break;
 				default:
 					return error("Expected a PropertyDefinition");
@@ -2466,10 +2458,24 @@ unittest
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 
+	parseObjectLiteral("{}");
 	parseObjectLiteral(`{obj:obj}`);
 	parseObjectLiteral(`{obj}`);
 	parseObjectLiteral(`{get,set}`);
 	parseObjectLiteral(`{get:4,set:3}`);
+	parseObjectLiteral(`{get a(){return 4},set a(a){}}`);
+	parseObjectLiteral("{a(){}}");
+	parseObjectLiteral("{*a(){}}");
+	parseObjectLiteral("{\nobj:obj//comment\n,/*multiline \n*/a,b}");
+	parseObjectLiteral(`{"string":4,123:decimal,0o123:octal,0xffa:hex,0b01:binary}`);
+	parseObjectLiteral("{[a+b]:c}");
+	parseObjectLiteral("{[a+b]:c}");
+	parseObjectLiteral("{c=6}");
+	parseObjectLiteral("{c=6").shouldThrowSaying("Error: Expected closing curly brace before EndOfFile");
+	parseObjectLiteral(`{"abc"}`).shouldThrowSaying("Error: Expected colon as part of PropertyDefinition");
+	parseObjectLiteral(`{function}`).shouldThrowSaying("Error: Unexpected keyword function");
+	parseObjectLiteral(`{,}`).shouldThrowSaying("Error: Expected a PropertyDefinition");
+
 }
 @("parseFunctionExpression")
 unittest
