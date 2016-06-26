@@ -201,6 +201,42 @@ enum LexicalDeclaration
 	Let,
 	Const
 }
+enum Hint {
+	None = 0,
+	Return = 1 << 0,
+	ReturnValue = 1 << 1,
+	NonExpression = 1 << 2
+}
+struct Hints
+{
+	private int hs = Hint.None;
+	alias hs this;
+	this(int h)
+	{
+		hs = h;
+	}
+	void toString(scope void delegate(const(char)[]) sink) const
+	{
+		import std.traits : EnumMembers;
+		import std.conv : to;
+		bool emitDelimiter = false;
+		foreach(m; EnumMembers!Hint)
+		{
+			if (hs & m)
+			{
+				if (emitDelimiter)
+					sink(", ");
+				sink(m.to!string);
+				emitDelimiter = true;
+			}
+		}
+	}
+	int get() { return hs; }
+	bool has(int v)
+	{
+		return (hs & v) != 0;
+	}
+}
 struct PrettyPrintSink
 {
 	private void delegate(const(char)[]) sink;
@@ -238,8 +274,12 @@ class Node
 {
 	Branch branch;
 	Node[] children;
+	Node parent;
 	private NodeType _type;
 	@property NodeType type() const { return _type; }
+	private Hints _hints;
+	@property Hints hints() { return _hints; }
+	@property void hints(int hs) { _hints = Hints(hs); }
 	this(NodeType t)
 	{
 		_type = t;
@@ -247,12 +287,16 @@ class Node
 	this(NodeType t, Node n)
 	{
 		_type = t;
+		n.parent = this;
 		if (n !is null)
 			children = [n];
 	}
 	this(NodeType t, Node[] cs)
 	{
 		_type = t;
+		import std.algorithm :each;
+		foreach(c;cs)
+			c.parent = this;
 		children = cs;
 	}
 	void toString(scope void delegate(const(char)[]) sink) const
@@ -262,7 +306,10 @@ class Node
 	void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s (plain)\n",_type);
+		sink.formattedWrite("%s",_type);
+		if (_hints != Hint.None)
+			sink.formattedWrite(" %s",_hints);
+		sink.formattedWrite("\n");
 		sink.print(children,level+1);
 	}
 	auto as(Type)(in string file = __FILE__, in size_t line = __LINE__)
@@ -289,6 +336,20 @@ class Node
 		if (branch)
 			return branch.scp.getRoot();
 		return this; // todo: could also return parent's getRoot but this is probably pointless...
+	}
+	void replace(Node other)
+	{
+		assert(parent !is null);
+		assert(other !is null);
+		this.parent.replaceChild(this,other);
+	}
+	void replaceChild(Node child, Node other)
+	{
+		import std.algorithm : countUntil;
+		auto idx = children.countUntil!(c=>c is child);
+		assert(idx != -1);
+		children[idx] = other;
+		other.parent = this;
 	}
 }
 
@@ -733,6 +794,13 @@ class AssignmentExpressionNode : Node
 		super(NodeType.AssignmentExpressionNode,children);
 	}
 }
+void removeFirstAssignment(AssignmentExpressionNode node)
+{
+	if (node.children.length == 3)
+		node.replace(node.children[2]);
+	else
+		node.children = node.children[2..$];
+}
 class ArrowFunctionNode : Node
 {
 	this(Node parameter, Node functionBody)
@@ -824,6 +892,80 @@ class BlockStatementNode : Node
 		super(NodeType.BlockStatementNode,children);
 	}
 }
+struct IfPath
+{
+	Node node;
+	alias node this;
+	this(Node n)
+	{
+		node = n;
+	}
+	Node getLastStatement()
+	{
+		if (node.type != NodeType.BlockStatementNode)
+			return node;
+		return node.children[$-1];
+	}
+	Node convertToAssignmentExpression()
+	{
+		if (node.type == NodeType.BlockStatementNode)
+			return node.as!(BlockStatementNode).convertToAssignmentExpression();
+		return node.convertToAssignmentExpression();
+	}
+}
+Node convertToAssignmentExpression(BlockStatementNode node)
+{
+	import std.array : array;
+	import std.algorithm : each;
+	import std.array : appender;
+	version (unittest) if (node.hints.has(Hint.NonExpression)) throw new UnitTestException(["Cannot convert non-expressions"]);
+	assert(!node.hints.has(Hint.NonExpression));
+	if (node.children.length == 1)
+		return convertToAssignmentExpression(node.children[0]);
+	auto app = appender!(Node[]);
+	node.children.each!((Node child){
+		if (child.type == NodeType.ExpressionNode)
+		{
+			child.children.each!(c=>app.put(c));
+		} else
+			app.put(child);
+	});
+	return new ParenthesisNode(new ExpressionNode(app.data));
+}
+Node convertToAssignmentExpression(Node node)
+{
+	if (node.type == NodeType.ExpressionNode)
+		return new ParenthesisNode(node);
+	version (unittest) if (node.hints.has(Hint.NonExpression)) throw new UnitTestException(["Cannot convert non-expressions"]);
+	assert(!node.hints.has(Hint.NonExpression));
+	return node;
+}
+@("convertToAssignmentExpression")
+unittest
+{
+	void assertConvertBlockStatementToAssignmentExpression(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		auto node = parseNode!("parseBlockStatement",BlockStatementNode)(input);
+		auto assignExpr = node.convertToAssignmentExpression();
+		assignExpr.emit().shouldEqual(output,file,line);
+	}
+	assertConvertBlockStatementToAssignmentExpression(
+		`{ d = 5; b = 6 }`,
+		`(d=5,b=6)`
+	);
+	assertConvertBlockStatementToAssignmentExpression(
+		`{ d = 5 }`,
+		`d=5`
+	);
+	assertConvertBlockStatementToAssignmentExpression(
+		`{ for(;;) ; }`,
+		`d=5`
+	).shouldThrow();
+	assertConvertBlockStatementToAssignmentExpression(
+		`{ d = 5; b = 6, e = 5 }`,
+		`(d=5,b=6,e=5)`
+	);
+}
 class IfStatementNode : Node
 {
 	this(Node cond, Node truth, Node falsy = null)
@@ -833,6 +975,10 @@ class IfStatementNode : Node
 		else
 			super(NodeType.IfStatementNode,[cond,truth,falsy]);
 	}
+	bool hasElsePath() { return children.length == 3; }
+	IfPath truthPath() { return IfPath(children[1]); }
+	IfPath elsePath() { assert(hasElsePath); return IfPath(children[2]); }
+	Node condition() { return children[0]; }
 }
 class SwitchStatementNode : Node
 {
@@ -1350,66 +1496,66 @@ unittest
 	import std.format;
 	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
 	diffTree(n,n).type.shouldEqual(Diff.No);
-	format("%s",n).shouldEqual("ModuleNode (plain)
-  BooleanNode (plain)
+	format("%s",n).shouldEqual("ModuleNode
+  BooleanNode
   StringLiteralNode \"s\"
-  BinaryLiteralNode (plain)
-  OctalLiteralNode (plain)
-  DecimalLiteralNode (plain)
-  HexLiteralNode (plain)
-  TemplateLiteralNode (plain)
+  BinaryLiteralNode
+  OctalLiteralNode
+  DecimalLiteralNode
+  HexLiteralNode
+  TemplateLiteralNode
     TemplateNode t
   RegexLiteralNode /regex/
-  KeywordNode (plain)
+  KeywordNode
   IdentifierNode identifier
-  UnaryExpressionNode (plain)
+  UnaryExpressionNode
     IdentifierNode expr
-  CallExpressionNode (plain)
+  CallExpressionNode
     IdentifierNode obj
     AccessorNode a
-  NewExpressionNode (plain)
+  NewExpressionNode
     IdentifierNode a
-  CallExpressionNode (plain)
+  CallExpressionNode
     IdentifierNode a
-    ArgumentsNode (plain)
-  BinaryExpressionNode (plain)
+    ArgumentsNode
+  BinaryExpressionNode
     IdentifierNode a
-    ExpressionOperatorNode (plain)
+    ExpressionOperatorNode
     IdentifierNode b
-  AssignmentExpressionNode (plain)
+  AssignmentExpressionNode
     IdentifierNode c
-    AssignmentOperatorNode (plain)
+    AssignmentOperatorNode
     IdentifierNode d
-  LabelledStatementNode (plain)
+  LabelledStatementNode
   ForStatement ExprCStyle
-    SemicolonNode (plain)
-    SemicolonNode (plain)
-    EmptyStatementNode (plain)
-  ClassDeclarationNode (plain)
+    SemicolonNode
+    SemicolonNode
+    EmptyStatementNode
+  ClassDeclarationNode
     IdentifierNode b
-    ClassGetterNode (plain)
+    ClassGetterNode
       IdentifierNode x
-      FunctionBodyNode (plain)
-    ClassSetterNode (plain)
+      FunctionBodyNode
+    ClassSetterNode
       IdentifierNode x
       IdentifierNode a
-      FunctionBodyNode (plain)
-    ClassMethodNode (plain)
+      FunctionBodyNode
+    ClassMethodNode
       IdentifierNode method
-      FormalParameterListNode (plain)
-      FunctionBodyNode (plain)
-    ClassGeneratorMethodNode (plain)
+      FormalParameterListNode
+      FunctionBodyNode
+    ClassGeneratorMethodNode
       IdentifierNode gen
-      FormalParameterListNode (plain)
-      FunctionBodyNode (plain)
-  AssignmentExpressionNode (plain)
-    ArrayLiteralNode (plain)
+      FormalParameterListNode
+      FunctionBodyNode
+  AssignmentExpressionNode
+    ArrayLiteralNode
       ElisionNode 2
       IdentifierNode a
-    AssignmentOperatorNode (plain)
+    AssignmentOperatorNode
     IdentifierNode b
-  LexicalDeclarationNode (plain)
-    LexicalDeclarationItemNode (plain)
+  LexicalDeclarationNode
+    LexicalDeclarationItemNode
       IdentifierNode b
       IdentifierNode d
 ");
