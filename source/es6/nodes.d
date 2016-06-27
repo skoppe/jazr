@@ -1465,7 +1465,8 @@ enum Diff
 	No,
 	Type,
 	Children,
-	Content
+	Content,
+	Branch
 }
 struct DiffResult
 {
@@ -1473,9 +1474,38 @@ struct DiffResult
 	Node b;
 	Diff type;
 }
+void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __LINE__)
+{
+	version(unittest)
+		if (a.branch is null)
+			throw new UnitTestException([format("Node has no branch.\n%s",a)],file,line);
+	assert(a.branch !is null);
+	foreach(c; a.children)
+	{
+		assert(c.parent is a);
+		assertTreeInternals(c);
+	}
+}
+DiffResult diffBranch(Branch a, Branch b)
+{
+	import std.range : lockstep;
+	if (a.children.length != b.children.length)
+		return DiffResult(a.entry,b.entry,Diff.Branch);
+	foreach(ca,cb; lockstep(a.children,b.children))
+	{
+		auto r = diffBranch(ca,cb);
+		if (r.type != Diff.No)
+			return r;
+	}
+	return DiffResult(a.entry,b.entry,Diff.No);
+
+}
 DiffResult diffTree(Node a, Node b)
 {
 	import std.range : lockstep;
+	auto r = diffBranch(a.branch,b.branch);
+	if (r.type != Diff.No)
+		return r;
 	if (a.type != b.type)
 		return DiffResult(a,b,Diff.Type);
 	if (a.children.length != b.children.length)
@@ -1489,7 +1519,6 @@ DiffResult diffTree(Node a, Node b)
 		if (d != Diff.No)
 			return DiffResult(ca,cb,d);
 	}
-	// we need to check the inners of the nodes to determine if they are really the same
 	return DiffResult(a,b,Diff.No);
 }
 @("diffTree")

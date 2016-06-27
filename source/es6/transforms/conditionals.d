@@ -33,7 +33,9 @@ version(unittest)
 		Node got = parseModule(input);
 		Node expected = parseModule(output);
 		got.analyseNode();
+		expected.analyseNode();
 		got.runTransform!(convertIfElseAssignmentToConditionalExpression);
+		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
@@ -96,6 +98,11 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 		preExprs ~= r;
 		r = new ExpressionNode(preExprs);
 	}
+
+	r.assignBranch(ifStmt.branch);
+
+	ifStmt.truthPath.branch.remove();
+	ifStmt.elsePath.branch.remove();
 
 	ifStmt.replace(r);
 	return true;

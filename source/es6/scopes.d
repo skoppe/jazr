@@ -129,6 +129,26 @@ class Branch
 	{
 		hints |= h;
 	}
+	void remove()
+	{
+		if (parent is null)
+			return;
+		parent.removeChild(this);
+	}
+	void removeChild(Branch child)
+	{
+		import std.algorithm : countUntil;
+		import std.algorithm : remove;
+		auto idx = children.countUntil!(c=>c is child);
+		assert(idx != -1);
+		children.remove(idx);
+	}
+}
+void assignBranch(Node n, Branch b)
+{
+	n.branch = b;
+	foreach(c; n.children)
+		c.assignBranch(b);
 }
 void findGlobals(Scope scp)
 {
