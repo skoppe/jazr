@@ -1486,23 +1486,35 @@ void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __L
 		assertTreeInternals(c);
 	}
 }
-DiffResult diffBranch(Branch a, Branch b)
+private DiffResult diffBranch(Branch a, Branch b)
 {
 	import std.range : lockstep;
+	if (a is null || b is null)
+		return DiffResult(null,null,Diff.Branch);
 	if (a.children.length != b.children.length)
 		return DiffResult(a.entry,b.entry,Diff.Branch);
-	foreach(ca,cb; lockstep(a.children,b.children))
-	{
-		auto r = diffBranch(ca,cb);
-		if (r.type != Diff.No)
-			return r;
-	}
+	//todo: add a.entry !is null && a.entry.type == b.entry.type
+
+	//foreach(ca,cb; lockstep(a.children,b.children))
+	//{
+	//	auto r = diffBranch(ca,cb);
+	//	if (r.type != Diff.No)
+	//		return r;
+	//}
 	return DiffResult(a.entry,b.entry,Diff.No);
 
 }
-DiffResult diffTree(Node a, Node b)
+DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = __LINE__)
 {
 	import std.range : lockstep;
+	version (unittest)
+	{
+		if (a.branch is null)
+			throw new UnitTestException([format("Found a null on left branch while diffing\n%sand\n%s",a,b)],file,line);
+		if (b.branch is null)
+			throw new UnitTestException([format("Found a null on right branch while diffing\n%sand\n%s",a,b)],file,line);
+	}
+	assert(a.branch !is null && b.branch !is null);
 	auto r = diffBranch(a.branch,b.branch);
 	if (r.type != Diff.No)
 		return r;
@@ -1512,7 +1524,7 @@ DiffResult diffTree(Node a, Node b)
 		return DiffResult(a,b,Diff.Children);
 	foreach(ca,cb; lockstep(a.children,b.children))
 	{
-		auto r = diffTree(ca,cb);
+		auto r = diffTree(ca,cb,file,line);
 		if (r.type != Diff.No)
 			return r;
 		auto d = ca.diff(cb);
@@ -1526,8 +1538,9 @@ unittest
 {
 	import std.format;
 	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
+	n.analyseNode();
 	diffTree(n,n).type.shouldEqual(Diff.No);
-	format("%s",n).shouldEqual("ModuleNode
+	format("%s",n).shouldEqual("ModuleNode NonExpression
   BooleanNode
   StringLiteralNode \"s\"
   BinaryLiteralNode
@@ -1557,12 +1570,12 @@ unittest
     IdentifierNode c
     AssignmentOperatorNode
     IdentifierNode d
-  LabelledStatementNode
+  LabelledStatementNode NonExpression
   ForStatement ExprCStyle
     SemicolonNode
     SemicolonNode
     EmptyStatementNode
-  ClassDeclarationNode
+  ClassDeclarationNode NonExpression
     IdentifierNode b
     ClassGetterNode
       IdentifierNode x
@@ -1585,7 +1598,7 @@ unittest
       IdentifierNode a
     AssignmentOperatorNode
     IdentifierNode b
-  LexicalDeclarationNode
+  LexicalDeclarationNode NonExpression
     LexicalDeclarationItemNode
       IdentifierNode b
       IdentifierNode d
