@@ -27,6 +27,7 @@ version (unittest)
 	import es6.parser;
 	import es6.emitter;
 	import es6.transformer;
+	import es6.analyse;
 	import std.stdio;
 	Node parseModule(string input)
 	{
@@ -79,6 +80,8 @@ unittest
 	{
 		Node got = parseModule(input);
 		Node expected = parseModule(output);
+		got.analyseNode();
+		expected.analyseNode();
 		got.runTransform!(simplifyRedundantAssignmentExpressions);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
