@@ -18,6 +18,7 @@
 module es6.transpile.arrowfunctions;
 
 import es6.nodes;
+import es6.scopes;
 import std.algorithm : map, each;
 import std.array : array;
 
@@ -25,18 +26,19 @@ version (unittest)
 {
 	import unit_threaded;
 	import es6.parser;
+	import es6.analyse;
 	import std.stdio;
 	ArrowFunctionNode parseArrowFunction(string input, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = parser(input);
-		parser.scanToken();
-		return parser.parseAssignmentExpression().as!(ArrowFunctionNode)(file,line);
+		auto node = parseNode!("parseAssignmentExpression",ArrowFunctionNode)(input,file,line);
+		node.analyseNode();
+		return node;
 	}
 	FunctionExpressionNode parseFunctionExpression(string input)
 	{
-		auto parser = parser(input);
-		parser.scanToken();
-		return parser.parseFunctionExpression().as!FunctionExpressionNode;
+		auto node = parseNode!("parseFunctionExpression",FunctionExpressionNode)(input);
+		node.analyseNode();
+		return node;
 	}
 }
 ObjectBindingPatternNode objectLiteralToObjectBindingPattern(Node obj)
@@ -140,7 +142,7 @@ FormalParameterListNode arrowFunctionArgumentsToFormalParameterListNode(Node arg
 FunctionExpressionNode arrowFunctionToFunctionExpression(ArrowFunctionNode a)
 {
 	return new FunctionExpressionNode(null,
-		arrowFunctionArgumentsToFormalParameterListNode(a.children[0]),
+		arrowFunctionArgumentsToFormalParameterListNode(a.children[0]).withBranch(a.children[0].branch),
 		//arrowFunctionBodyToFunctionBody(a.children[1])
 		a.children[1]
 	);
@@ -153,7 +155,8 @@ unittest
 	{
 		auto formalParamList1 = parseArrowFunction(arrow,file,line).arrowFunctionToFunctionExpression.children[0];
 		auto formalParamList2 = parseFunctionExpression(funcExpr).children[0];
-		auto diff = diffTree(formalParamList1,formalParamList2);
+		assertTreeInternals(formalParamList1);
+		auto diff = diffTree(formalParamList1,formalParamList2,file,line);
 		diff.type.shouldEqual(Diff.No);
 	}
 	assertArrowFunctionParameterTranspile(
