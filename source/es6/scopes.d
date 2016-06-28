@@ -150,6 +150,11 @@ void assignBranch(Node n, Branch b)
 	foreach(c; n.children)
 		c.assignBranch(b);
 }
+T withBranch(T : Node)(T n, Branch b)
+{
+	n.assignBranch(b);
+	return n;
+}
 void findGlobals(Scope scp)
 {
 	import std.algorithm : canFind, each, filter;
