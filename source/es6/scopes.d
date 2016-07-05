@@ -18,6 +18,7 @@
 module es6.scopes;
 
 import es6.nodes;
+import std.format : formattedWrite;
 
 version (unittest)
 {
@@ -30,7 +31,6 @@ version (unittest)
 		expecteds.length.shouldEqual(s.globals.length,file,line);
 		foreach(got, expected; lockstep(s.globals,expecteds))
 			got.node.identifier.shouldEqual(expected,file,line);
-
 	}
 }
 
@@ -109,7 +109,7 @@ class Scope
 class Branch
 {
 	Scope scp;
-	Branch parent; 		/// The parent branch (can be null)
+	Branch parent; 		/// The parent branch (can be null but only when starting the scope)
 	Branch[] children;	/// Any nested branches
 	Node entry;			/// The node that starts this branch
 	int hints;
@@ -142,6 +142,18 @@ class Branch
 		auto idx = children.countUntil!(c=>c is child);
 		assert(idx != -1);
 		children.remove(idx);
+		children = children[0..$-1];
+	}
+	void toString(scope void delegate(const(char)[]) sink) const
+	{
+		prettyPrint(PrettyPrintSink(sink));
+	}
+	void prettyPrint(PrettyPrintSink sink, int level = 0) const
+	{
+		sink.indent(level);
+		entry.prettyPrint(sink,level);
+		sink.formattedWrite("------\n");
+		sink.print(children,level+1);
 	}
 }
 void assignBranch(Node n, Branch b)

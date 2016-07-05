@@ -19,6 +19,7 @@ module es6.nodes;
 
 import es6.tokens;
 import es6.scopes;
+import std.format : formattedWrite, format;
 
 import std.range : lockstep;
 
@@ -241,9 +242,11 @@ struct PrettyPrintSink
 {
 	private void delegate(const(char)[]) sink;
 	private char[1] chr;
-	this(void delegate(const(char)[]) sink)
+	int prefixIndent = 0;
+	this(void delegate(const(char)[]) sink, int indent = 0)
 	{
 		this.sink = sink;
+		prefixIndent = indent;
 	}
 	void put(string s)
 	{
@@ -258,9 +261,9 @@ struct PrettyPrintSink
 	{
 		import std.range : repeat;
 		import std.algorithm : copy;
-		" ".repeat(indent*2).copy(sink);
+		" ".repeat((prefixIndent+indent)*2).copy(sink);
 	}
-	void print(const Node[] children, int level)
+	void print(Child)(const Child[] children, int level)
 	{
 		foreach(c; children)
 		{
@@ -269,7 +272,6 @@ struct PrettyPrintSink
 		}
 	}
 }
-import std.format;
 class Node
 {
 	Branch branch;
@@ -344,6 +346,8 @@ class Node
 		assert(parent !is null);
 		assert(other !is null);
 		this.parent.replaceChild(this,other);
+		if (this.branch.entry is this)
+			this.branch.entry = other;
 	}
 	void replaceChild(Node child, Node other)
 	{
@@ -1099,10 +1103,16 @@ class ClassDeclarationNode : Node
 		this.base = base;
 		this.methods = methods;
 		super(NodeType.ClassDeclarationNode);
-		children ~= name;
+		if (name !is null)
+			children ~= name;
 		if (base !is null)
 			children ~= base;
 		children ~= methods;
+		foreach(c; children)
+		{
+			assert(c !is null);
+			c.parent = this;
+		}
 	}
 	override Diff diff(Node other)
 	{
@@ -1466,7 +1476,8 @@ enum Diff
 	Type,
 	Children,
 	Content,
-	Branch
+	BranchChildren,
+	BranchEntryTypes
 }
 struct DiffResult
 {
@@ -1474,26 +1485,89 @@ struct DiffResult
 	Node b;
 	Diff type;
 }
+string getDiffMessage(DiffResult d)
+{
+	final switch (d.type)
+	{
+		case Diff.No:
+			return "No difference";
+		case Diff.Type:
+			return format("Node a is of type %s but Node b is of type",d.a.type,d.b.type);
+		case Diff.Children:
+			return format("Node a has the following children\n%sYet node b has\n%s",d.a.children,d.b.children);
+		case Diff.Content:
+			return format("Node a doesn't have the same content as node b");
+		case Diff.BranchChildren:
+			return format("Branch a has %s children, but branch b has %s",d.a.branch.children.length,d.b.branch.children.length);
+		case Diff.BranchEntryTypes:
+			return format("Branch a has entry\n%swhile branch b has\n%s",d.a,d.b);
+	}
+}
+version (unittest)
+{
+	void assertNoDiff(DiffResult d, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		if (d.type == Diff.No)
+			return;
+		throw new UnitTestException([d.getDiffMessage()],file,line);
+	}	
+}
 void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __LINE__)
 {
-	version(unittest)
-		if (a.branch is null)
-			throw new UnitTestException([format("Node has no branch.\n%s",a)],file,line);
-	assert(a.branch !is null);
-	foreach(c; a.children)
+	void assertNodeInternals(Node a)
 	{
-		assert(c.parent is a);
-		assertTreeInternals(c);
+		version(unittest)
+			if (a.branch is null)
+				throw new UnitTestException([format("Node has no branch.\n%s",a)],file,line);
+		assert(a.branch !is null);
+		foreach(c; a.children)
+		{
+			version(unittest)
+				if (c.parent !is a)
+					throw new UnitTestException([format("Node's child doesn't have right parent.")],file,line);
+			assert(c.parent is a);
+			assertNodeInternals(c);
+		}
 	}
+	void assertBranchInternals(Branch a)
+	{
+		version(unittest)
+		{
+			if (a.entry is null)
+				throw new UnitTestException([format("Branch has no entry.")],file,line);
+			if (a.entry.branch !is a)
+				throw new UnitTestException([format("Branch's entry node doesn't refer to this branch\n%s",a.entry)],file,line);
+		}
+		if (a.parent is null)
+			assert(a.scp.entry == a.entry);
+		assert(a.entry !is null);
+		assert(a.entry.branch is a);
+		foreach(c; a.children)
+		{
+			assert(c.parent is a);
+			assertBranchInternals(c);
+		}
+	}
+	void assertScopeInternals(Scope a)
+	{
+		assert(a.branch !is null);
+		assertBranchInternals(a.branch);
+		foreach(c; a.children)
+			assertScopeInternals(c);
+	}
+	assertNodeInternals(a);
+	assert(a.branch !is null);
+	assert(a.branch.scp !is null);
+	assertScopeInternals(a.branch.scp);
 }
 private DiffResult diffBranch(Branch a, Branch b)
 {
 	import std.range : lockstep;
-	if (a is null || b is null)
-		return DiffResult(null,null,Diff.Branch);
+	assert(a !is null && b !is null);
 	if (a.children.length != b.children.length)
-		return DiffResult(a.entry,b.entry,Diff.Branch);
-	//todo: add a.entry !is null && a.entry.type == b.entry.type
+		return DiffResult(a.entry,b.entry,Diff.BranchChildren);
+	if (a.entry.type != b.entry.type)
+		return DiffResult(a.entry,b.entry,Diff.BranchEntryTypes);
 
 	//foreach(ca,cb; lockstep(a.children,b.children))
 	//{

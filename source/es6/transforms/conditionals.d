@@ -28,12 +28,13 @@ version(unittest)
 	import unit_threaded;
 	import es6.transformer;
 	import std.stdio;
+
 	void assertIfElseAssignmentToConditional(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		Node got = parseModule(input);
 		Node expected = parseModule(output);
-		got.analyseNode();
-		expected.analyseNode();
+		auto trunkA = got.analyseNode().trunk;
+		auto trunkB = expected.analyseNode().trunk;
 		got.runTransform!(convertIfElseAssignmentToConditionalExpression);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
@@ -77,6 +78,9 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 		truthAssign.diff(falseAssign) != Diff.No)
 		return false;
 
+	ifStmt.truthPath.branch.remove();
+	ifStmt.elsePath.branch.remove();
+
 	auto condition = ifStmt.condition();
 
 	truthAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
@@ -100,10 +104,6 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 	}
 
 	r.assignBranch(ifStmt.branch);
-
-	ifStmt.truthPath.branch.remove();
-	ifStmt.elsePath.branch.remove();
-
 	ifStmt.replace(r);
 	return true;
 }

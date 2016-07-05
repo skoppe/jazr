@@ -29,12 +29,16 @@ version (unittest)
 	Scope getScope(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		auto node = parseNode!("parseModule",ModuleNode)(js,file,line);
-		return node.analyseNode().scp;
+		auto s = node.analyseNode().scp;
+		node.assertTreeInternals(file,line);
+		return s;
 	}
 	Branch getBranch(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		auto node = parseNode!("parseModule",ModuleNode)(js,file,line);
-		return node.analyseNode().scp.branch;
+		auto b = node.analyseNode().scp.branch;
+		node.assertTreeInternals(file,line);
+		return b;
 	}
 	Scope getFirstChildScope(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
@@ -325,6 +329,7 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 				item.branch = b;
 				break;
 			case NodeType.PropertyDefinitionNode:
+				item.branch = b;
 				item.children[0].branch = b;
 				auto rhs = item.children[1];
 				switch(rhs.type)
@@ -346,6 +351,7 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 				}
 				break;
 			case NodeType.CoverInitializedName:
+				item.branch = b;
 				item.children[0].branch = b;
 				if (i == IdentifierType.Parameter)
 					s.addVariable(Variable(item.children[0].as!IdentifierNode,IdentifierType.Parameter));
@@ -417,6 +423,7 @@ private void analyseArrowFunctionParamsAssignmentExpression(Node node, Scope s, 
 	Branch b = s.branch;
 	node.branch = b;
 	auto lhs = node.children[0];
+	node.children[1].branch = b;
 	switch (lhs.type)
 	{
 		case NodeType.ArrayLiteralNode:
@@ -446,6 +453,7 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 			switch(item.type)
 			{
 				case NodeType.SpreadElementNode:
+					item.branch = b;
 					s.addVariable(Variable(item.children[0].as!IdentifierNode,IdentifierType.Parameter));
 					item.children[0].branch = b;
 					break;
@@ -588,6 +596,7 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 	{
 		foreach(decl; node.children)
 		{
+			decl.branch = b;
 			switch(decl.children[0].type)
 			{
 				case NodeType.ArrayBindingPatternNode:
@@ -621,8 +630,10 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 		analyse(node.children[0],s,b);
 		foreach(c; node.children[1..$])
 		{
+			c.branch = b;
 			if (c.type == NodeType.CaseNode)
 			{
+				c.children[0].branch = b;
 				if (c.children.length > 1)
 					analyse(c.children[1],s,b.newBranch(c.children[1]));
 			} else if (c.children.length > 0)
@@ -687,7 +698,7 @@ unittest
 
 	void testFirstChildScopeToContainReturn1(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto s = getScope(js);
+		auto s = getScope(js,file,line);
 		s.parent.shouldBeNull(file,line);
 		s.children.length.shouldEqual(1,file,line);
 		s.children[0].parent.shouldBeObject(s,file,line);
