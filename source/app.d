@@ -99,7 +99,10 @@ int main(string[] args)
 	sw.reset();
 
 	if (fileOut.length > 0)
-		write(fileOut,min);
+	{
+		if (fileOut != "/dev/null")
+			write(fileOut,min);
+	}
 	else 
 		writeln(min);
 
