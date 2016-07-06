@@ -32,7 +32,7 @@ version (unittest)
 	import std.stdio;
 	auto parseNode(alias parseFunction, Type = ModuleNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = __traits(getMember, parser, parseFunction)();
 		if (n.type == NodeType.ErrorNode)
@@ -2119,7 +2119,9 @@ final class Parser(Source) : Lexer!(Source)
 
 auto parser(Input)(Input i)
 {
-	return new Parser!Input(i);
+	import std.range : chain;
+	auto c = chain(i,"\u0000");
+	return new Parser!(typeof(c))(c);
 }
 
 @("parsePrimaryExpression")
@@ -2129,7 +2131,7 @@ unittest
 	import std.stdio;
 	auto assertNodeType(Type)(string r)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parsePrimaryExpression();
 		parser.empty.shouldBeTrue();
@@ -2157,7 +2159,7 @@ unittest
 {
 	auto parseUnaryExpression(Type = UnaryExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseUnaryExpression();
 		return shouldBeOfType!(Type)(n,file,line);
@@ -2193,7 +2195,7 @@ unittest
 	import std.stdio;
 	auto assertNodeType(Type)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseLeftHandSideExpression();
 		if (!parser.empty)
@@ -2251,7 +2253,7 @@ unittest
 	Type assertBinaryExpression(Type = BinaryExpressionNode)(in string r, ExpressionOperator[] ops, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.range : lockstep, stride, drop;
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseRightHandSideExpression(Attribute.In);
 		if (!parser.empty)
@@ -2310,7 +2312,7 @@ unittest
 {
 	auto parseAssignmentExpression(Type = AssignmentExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseAssignmentExpression();
 		//if (!parser.empty)
@@ -2351,7 +2353,7 @@ unittest
 {
 	auto parseExpression(Type = ExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseExpression();
 		if (n.type != NodeType.ErrorNode && !parser.empty)
@@ -2387,7 +2389,7 @@ unittest
 {
 	auto parseStatement(Type)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseStatement();
 		if (n.type != NodeType.ErrorNode && !parser.empty)
@@ -2420,7 +2422,7 @@ unittest
 {
 	auto parseForStatement(Type = ForStatementNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseForStatement();
 		if (n.type == NodeType.ErrorNode)
@@ -2452,7 +2454,7 @@ unittest
 {
 	auto parseObjectLiteral(Type = ObjectLiteralNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseObjectLiteral();
 		if (n.type == NodeType.ErrorNode)
@@ -2490,7 +2492,7 @@ unittest
 {
 	auto parseFunctionExpression(Type = FunctionExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseFunctionExpression();
 		if (n.type == NodeType.ErrorNode)
@@ -2541,7 +2543,7 @@ unittest
 {
 	auto parseDoWhileStatement(Type = DoWhileStatementNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseDoWhileStatement();
 		if (n.type == NodeType.ErrorNode)
@@ -2562,7 +2564,7 @@ unittest
 {
 	auto parseStatementList(string r, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanToken();
 		return parser.parseStatementList();
 	}
@@ -2629,7 +2631,7 @@ unittest
 {
 	void assertImportDeclarationError(Type = ImportDeclarationNode)(string r, string error, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto parser = new Parser!string(r);
+		auto parser = parser(r);
 		parser.scanAndSkipCommentsAndTerminators();
 		auto n = parser.parseImportDeclaration();
 		n.type.shouldEqual(NodeType.ErrorNode);

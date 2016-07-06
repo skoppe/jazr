@@ -63,8 +63,8 @@ int main(string[] args)
 			writeln("File `",fileIn,"` doesn't exist.");
 			assert(false);
 		}
-		sw.start();
 		input = readText(fileIn);
+		sw.start();
 		auto parser = parser(input);
 		parser.scanToken();
 		node = parser.parseModule();

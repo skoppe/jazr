@@ -52,8 +52,8 @@ auto next(Source)(ref Source s)
 }
 bool popNextIf(Source, Elem)(ref Source s, Elem e, in string file = __FILE__, in size_t line = __LINE__)
 {
-	import std.format : format;
-	assert(!s.empty,format("Invalid popNextIf from %s @ %s",file,line));
+	//import std.format : format;
+	//assert(!s.empty,format("Invalid popNextIf from %s @ %s",file,line));
 	if (s.front != e)
 		return false;
 	s.popFront();
@@ -174,15 +174,15 @@ class Lexer(Source)
 		import std.format : format;
 		foreach(_; 0..4)
 		{
-			if (s.empty)
-				return Token(Type.Error,"Found eof before finishing parsing UnicodeEscapeSequence");
 			auto chr = s.next();
-			tokenLength++;
 			if ((chr <= '0' || chr >= '9') && (chr <= 'a' && chr >= 'z') && (chr <= 'A' && chr >= 'Z'))
 			{
+				if (chr == '\u0000')
+					return Token(Type.Error,"Found eof before finishing parsing UnicodeEscapeSequence");
 				// TODO: if chr is lineterminator (as well as the \r\n one) we need to reset column and line++
 				return Token(Type.Error,format("Invalid hexdigit %s for UnicodeEscapeSequence",chr));
 			}
+			tokenLength++;
 			sink.put(chr);
 		}
 		return Token(Type.UnicodeEscapeSequence);
@@ -194,12 +194,14 @@ class Lexer(Source)
 		tokenLength++;
 		if (chr == '\\')
 		{
-			if (s.empty)
-				return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
 			chr = s.next();
 			tokenLength++;
 			if (chr != 'u')
+			{
+				if (chr == '\u0000')
+					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
 				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+			}
 			return lexUnicodeEscapeSequence(sink);
 		}
 
@@ -213,28 +215,28 @@ class Lexer(Source)
 	Token lexTailIdentifier(Sink)(ref Sink sink)
 	{
 		import std.format : format;
-		if (s.empty)
-			return Token(Type.EndIdentifier);
 		auto chr = s.front();
 		if (chr == '\\')
 		{
 			s.popFront();
 			tokenLength++;
-			if (s.empty)
-				return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
 			chr = s.next();
 			tokenLength++;
 			if (chr != 'u')
+			{
+				if (chr == '\u0000')
+					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
 				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+			}
 			return lexUnicodeEscapeSequence(sink);
-		}
-		if (chr.isTailIdentifier)
+		} else if (chr.isTailIdentifier)
 		{
 			s.popFront();
 			tokenLength++;
 			sink.put(chr);
 			return Token(Type.TailIdentifier);
-		}
+		} else if (chr == '\u0000')
+			return Token(Type.EndIdentifier);
 		return Token(Type.EndIdentifier);
 	}
 	Token lexIdentifier()
@@ -253,14 +255,14 @@ class Lexer(Source)
 	}
 	auto popWhitespace()
 	{
-		while (!s.empty)
+		while (s.front.isWhitespace)
 		{
-			if (!s.front.isWhitespace)
-				return State.TokensRemaining;
 			column++;
 			s.popFront();
 		}
-		return State.EndOfFile;
+		if (s.front == '\u0000')
+			return State.EndOfFile;
+		return State.TokensRemaining;
 	}
 	auto lookAheadRegex()
 	{
@@ -271,27 +273,29 @@ class Lexer(Source)
 		cpy.popFront();
 		auto incr = 1;
 		if (cpy.front == '*' || cpy.front == '/')
-			return s[0..0];
-		while (!cpy.empty)
+			return "";
+		while (true)
 		{
 			auto chr = cpy.next();
 			if (chr.isLineTerminator)
-				return s[0..0];
+				return "";
+			if (chr == '\u0000')
+				return "";
 			incr++;
 			if (chr == '\\')
 			{
-				if (cpy.empty)
-					return s[0..0];
 				str.put(chr);
 				chr = cpy.next;
 				incr++;
 				if (chr.isLineTerminator)
-					return s[0..0];
+					return "";
+				if (chr == '\u0000')
+					return "";
 				str.put(chr);
 			} else if (chr == '/')
 			{
 				str.put(chr);
-				while (!cpy.empty)
+				while (true)
 				{
 					chr = cpy.front();
 					if (chr.isTailIdentifier)
@@ -299,7 +303,9 @@ class Lexer(Source)
 						str.put(chr);
 						cpy.popFront();
 						incr++;
-					} else
+					} else if (chr == '\u0000')
+						break;
+					else
 						break;
 				}
 				column += incr;
@@ -308,7 +314,6 @@ class Lexer(Source)
 			} else
 				str.put(chr);
 		}
-		return s[0..0];
 	}
 	Token lexString()
 	{
@@ -317,7 +322,7 @@ class Lexer(Source)
 		s.popFront();
 		tokenLength++;
 		auto str = appender!string;
-		while (!s.empty)
+		while (true)
 		{
 			auto chr = s.next();
 			tokenLength++;
@@ -330,9 +335,9 @@ class Lexer(Source)
 			switch (chr)
 			{
 				case '\\': 
-					if (s.empty)
-						goto eof;
 					chr = s.next();
+					if (chr == '\u0000')
+						goto eof;
 					tokenLength++;
 					str.put(chr);
 					if (chr == '\x0D' && s.popNextIf('\x0A'))
@@ -341,6 +346,8 @@ class Lexer(Source)
 						str.put('\x0A');
 					}
 					break;
+				case '\u0000':
+					goto eof;
 				default:
 					str.put(chr);
 					break;
@@ -356,7 +363,8 @@ class Lexer(Source)
 		auto str = appender!string;
 		bool fraction = false;
 		bool exponent = false;
-		while (!s.empty)
+		bool expectingNumbers = true;
+		while (true)
 		{
 			auto chr = s.front();
 			if (chr == '.' && isFloat)
@@ -386,9 +394,11 @@ class Lexer(Source)
 					str.put(chr);
 					tokenLength++;
 					s.popFront();
+					expectingNumbers = false;
 					break;
 				case 'A': .. case 'F':
 				case 'a': .. case 'f':
+					expectingNumbers = false;
 					static if (base < 11)
 						goto default;
 					else
@@ -405,6 +415,12 @@ class Lexer(Source)
 						break;
 					}
 				default:
+					if (chr == '\u0000')
+					{
+						if (expectingNumbers)
+							return Token(Type.Error,format("Invalid eof in base %s literal",base));
+						return Token(TokenType,str.data);
+					}
 					static if (base == 10)
 					{
 						if (chr == 'e' || chr == 'E')
@@ -415,17 +431,14 @@ class Lexer(Source)
 							str.put(chr);
 							tokenLength++;
 							s.popFront();
-							if (s.empty)
-								return Token(Type.Error,format("Expected exponent part before eof"));
 							chr = s.front();
 							if (chr == '+' || chr == '-')
 							{
 								str.put(chr);
 								tokenLength++;
 								s.popFront();
-								if (s.empty)
-									return Token(Type.Error,format("Expected exponent part before eof"));
 							}
+							expectingNumbers = true;
 							continue;
 						}
 					}
@@ -454,7 +467,7 @@ class Lexer(Source)
 	{
 		import std.array : appender;
 		auto str = appender!string;
-		while (!s.empty)
+		while (true)
 		{
 			auto chr = s.next();
 			if (chr.isLineTerminator)
@@ -466,8 +479,6 @@ class Lexer(Source)
 				tokenLength++;
 			if (chr == '$')
 			{
-				if (s.empty)
-					goto eof;
 				chr = s.next();
 				tokenLength++;
 				if (chr == '{')
@@ -479,14 +490,19 @@ class Lexer(Source)
 			}
 			if (chr == '\u0060')
 				return Token(t,str.data);
+			if (chr == '\u0000')
+				goto eof;
 			str.put(chr);
 			if (chr == '\\')
 			{
 				tokenLength++;
-				str.put(s.next);
+				chr = s.next();
+				if (chr == '\u0000')
+					goto eof;
+				str.put(chr);
 			}
 		}
-		eof: return Token(Type.Error,"Found eof before finishing lexing template");
+		eof: return Token(Type.Error,"Found eof before finishing lexing TemplateLiteral");
 	}
 	auto empty()
 	{
@@ -537,21 +553,20 @@ class Lexer(Source)
 	Token lexMultiLineComment()
 	{
 		auto str = appender!string;
-		while (!s.empty)
+		while (true)
 		{
 			auto chr = s.front();
 			if (chr == '*')
 			{
 				s.popFront();
 				column++;
-				if (s.empty)
-					break;
 				chr = s.front();
 				if (chr == '/')
 				{
 					s.popFront();
 					return Token(Type.MultiLineComment,str.data);
-				}
+				} else if (chr == '\u0000')
+					goto eof;
 				str.put('*');
 			}
 			if (chr.isLineTerminator())
@@ -562,32 +577,34 @@ class Lexer(Source)
 				column=0;
 				tokenLength=0;
 
-				if (!s.empty && chr == '\u000D' && s.popNextIf('\u000A'))
+				if (chr == '\u000D' && s.popNextIf('\u000A'))
 					str.put('\u000A');
-				//s.popFront();
+
 				continue;
-			}
+			} else if (chr == '\u0000')
+				goto eof;
 			str.put(chr);
 			s.popFront();
 			column++;
 		}
 		// TODO eat chars until */ or eof
-		return Token(Type.Error,"Expected end of MultiLineComment before eof");
+		eof: return Token(Type.Error,"Expected end of MultiLineComment before eof");
 	}
 	Token lexSingleLineComment()
 	{
 		auto str = appender!string;
-		while (!s.empty)
+		while (true)
 		{
 			auto chr = s.front();
 			if (chr.isLineTerminator())
 			{
 				s.popFront();
 				newLine=true;
-				if (!s.empty && chr == '\u000D')
+				if (chr == '\u000D')
 					s.popNextIf('\u000A');
 				break;
-			}
+			} else if (chr == '\u0000')
+				break;
 			str.put(chr);
 			s.popFront();
 			tokenLength++;
@@ -608,7 +625,7 @@ class Lexer(Source)
 			case '\u000D':
 				newLine=true;
 				s.popFront();
-				if (!s.empty && chr == '\u000D')
+				if (chr == '\u000D')
 					s.popNextIf('\u000A');
 				return Token(Type.LineTerminator);
 			case '{': tokenLength++; s.popFront(); return Token(Type.OpenCurlyBrace);
@@ -846,8 +863,6 @@ class Lexer(Source)
 					return lexDecimalLiteral();
 				tokenLength++;
 				s.popFront();
-				if (s.empty)
-					return Token(Type.DecimalLiteral,"0");
 				if (s.popNextIf('b') || s.popNextIf('B'))
 				{
 					tokenLength++;
@@ -865,6 +880,8 @@ class Lexer(Source)
 				}
 				if (s.front() < '0' || s.front() > '9')
 					return Token(Type.DecimalLiteral,"0");
+				if (s.front() == '\u0000')
+					return Token(Type.EndOfFile);
 				return Token(Type.Error,"Not expecting NumericLiteral to start with 0");
 			case '1': .. case '9':
 				return lexDecimalLiteral;
@@ -872,6 +889,9 @@ class Lexer(Source)
 				tokenLength++;
 				s.popFront();
 				return lexTemplateLiteral();
+			case '\u0000':
+				s.popFront();
+				return Token(Type.EndOfFile);
 			default:
 				return lexIdentifier();
 		}
@@ -879,7 +899,9 @@ class Lexer(Source)
 }
 auto createLexer(Source)(Source s)
 {
-	return new Lexer!Source(s);
+	import std.range : chain;
+	auto c = chain(s,"\u0000");
+	return new Lexer!(typeof(c))(c);
 }
 @("lexIdentifier")
 unittest
@@ -902,40 +924,35 @@ unittest
 {
 	auto lexer = createLexer("/abcd/");
 	lexer.lookAheadRegex.shouldEqual("/abcd/");
-	lexer.s.empty.shouldBeTrue;
-	lexer = createLexer("no regex");
-	lexer.lookAheadRegex.empty.shouldBeTrue();
-	lexer.s.shouldEqual("no regex");
 	lexer = createLexer(`/ab\/ab/`);
 	lexer.lookAheadRegex.shouldEqual(`/ab\/ab/`);
-	lexer.s.empty.shouldBeTrue;
 	lexer = createLexer(`/also no
 		regex`);
-	lexer.lookAheadRegex.empty.shouldBeTrue();
+	lexer.scanToken.shouldEqual(Token(Type.Division));
 	lexer.empty.shouldBeFalse;
 	lexer.column.shouldEqual(0);
 	lexer = createLexer(`/regex with modifiers/gi;`);
 	lexer.lookAheadRegex.shouldEqual("/regex with modifiers/gi");
-	lexer.s.shouldEqual(";");
+	lexer.scanToken.shouldEqual(Token(Type.Semicolon));
 }
 @("lexString")
 unittest
 {
 	auto lexer = createLexer(`"a string"`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"a string"));
-	lexer.s.empty.shouldBeTrue;
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`"a stringin'"`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"a stringin\\'"));
-	lexer.s.empty.shouldBeTrue;
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`'another string'`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"another string"));
-	lexer.s.empty.shouldBeTrue;
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`"escaped \"string\""`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`escaped "string"`));
-	lexer.s.empty.shouldBeTrue;
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`'escaped \'string\''`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"escaped \'string\'"));
-	lexer.s.empty.shouldBeTrue;
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 }
 @("lexBinaryLiteral")
 unittest
@@ -994,7 +1011,7 @@ unittest
 	lexer.lexTemplateLiteral.shouldEqual(Token(Type.Template,"some\n$template\\\u0060\rstring"));
 	lexer = createLexer("some\n$template\\\u0060\rstring${identifier}\u0060");
 	lexer.lexTemplateLiteral.shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\rstring"));
-	lexer.s.shouldEqual("identifier}\u0060");
+	lexer.s.shouldEqual("identifier}\u0060\u0000");
 
 	lexer = createLexer("\u0060some\n$template\\\u0060\rstring${identifier}\u0060");
 	lexer.lexToken().shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\rstring"));
@@ -1045,4 +1062,11 @@ unittest
 	lexer.lookAheadForAny!(Type.Comma).shouldBeTrue();
 	lexer.lookAheadForAny!(Type.Multiply).shouldBeFalse();
 	lexer.lookAheadForAny!(Type.Multiply,Type.Comma).shouldBeTrue();
+}
+@("degenerate")
+unittest
+{
+	auto lexer = createLexer(".");
+	lexer.scanToken().shouldEqual(Token(Type.Dot));
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 }
