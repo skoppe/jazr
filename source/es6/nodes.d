@@ -20,8 +20,9 @@ module es6.nodes;
 import es6.tokens;
 import es6.scopes;
 import std.format : formattedWrite, format;
-
+import std.algorithm : each, countUntil;
 import std.range : lockstep;
+import option;
 
 version(unittest)
 {
@@ -328,6 +329,13 @@ class Node
 		assert(r !is null,format("Assertion this != %s. In %s @ %s",Type.stringof,file,line));
 		return r;
 	}
+	auto opt(Type)()
+	{
+		auto r = cast(Type)this;
+		if (r is null)
+			return None!Type;
+		return Some(r);
+	}
 	// this won't diff the children
 	Diff diff(Node other)
 	{
@@ -341,6 +349,7 @@ class Node
 			return branch.scp.getRoot();
 		return this; // todo: could also return parent's getRoot but this is probably pointless...
 	}
+	deprecated("Use replaceWith")
 	void replace(Node other)
 	{
 		assert(parent !is null);
@@ -349,6 +358,10 @@ class Node
 		if (this.branch.entry is this)
 			this.branch.entry = other;
 	}
+	void replaceWith(Node other)
+	{
+		this.replace(other);
+	}
 	void replaceChild(Node child, Node other)
 	{
 		import std.algorithm : countUntil;
@@ -356,6 +369,22 @@ class Node
 		assert(idx != -1);
 		children[idx] = other;
 		other.parent = this;
+		other.branch = child.branch;
+	}
+	void addChildren(Node[] children)
+	{
+		children.each!(c=>c.branch = branch);
+		this.children ~= children;
+	}
+	void addChildren(Option!(Node[]) children)
+	{
+		if (children.isDefined)
+			addChildren(children.get);
+	}
+	void addChild(Node child)
+	{
+		child.branch = branch;
+		this.children ~= child;
 	}
 }
 
@@ -897,6 +926,34 @@ class BlockStatementNode : Node
 	{
 		super(NodeType.BlockStatementNode,children);
 	}
+	Node[] detachStatementsAfter(Node node)
+	{
+		// TODO: Need to test this
+		Node[] r;
+		auto idx = children.countUntil!(c => c is node);
+		if (idx == -1)
+			return r;
+		r = children[idx..$];
+		children = children[0..idx];
+		r.each!(c => c.branch = null);
+		return r;
+	}
+	void dropAllAfter(Node node)
+	{
+		// TODO: need to test this
+		auto idx = children.countUntil!(c => c is node);
+		if (idx == -1)
+			return;
+		children = children[0..idx];
+	}
+	void dropAllAfter(NodeType type)
+	{
+		// TODO: need to test this
+		auto idx = children.countUntil!(c => c.type == type);
+		if (idx == -1)
+			return;
+		children = children[0..idx];
+	}
 }
 struct IfPath
 {
@@ -917,6 +974,37 @@ struct IfPath
 		if (node.type == NodeType.BlockStatementNode)
 			return node.as!(BlockStatementNode).convertToAssignmentExpression();
 		return node.convertToAssignmentExpression();
+	}
+	bool isBlockStatement()
+	{
+		return node.type == NodeType.BlockStatementNode;
+	}
+	bool isSingleStatement()
+	{
+		return !isBlockStatement() || node.children.length == 1;
+	}
+	void clearStatements()
+	{
+		if (isBlockStatement)
+			node.children = node.children[0..0];
+		else
+		{
+			node.replaceWith(new BlockStatementNode([]));
+		}
+	}
+	void addStatements(Node[] children)
+	{
+		if (isBlockStatement)
+			return node.addChildren(children);
+		Node p = node.parent;
+		Node block = new BlockStatementNode([node]);
+		p.replaceChild(node, block);
+		node = block;
+	}
+	void addStatements(Option!(Node[]) children)
+	{
+		if (children.isDefined)
+			addStatements(children.get);
 	}
 }
 Node convertToAssignmentExpression(BlockStatementNode node)
@@ -985,6 +1073,13 @@ class IfStatementNode : Node
 	IfPath truthPath() { return IfPath(children[1]); }
 	IfPath elsePath() { assert(hasElsePath); return IfPath(children[2]); }
 	Node condition() { return children[0]; }
+	void removeElsePath() { children = children[0..2]; }
+	void forceElsePath()
+	{
+		if (hasElsePath)
+			return;
+		addChild(new BlockStatementNode([]));
+	}
 }
 class SwitchStatementNode : Node
 {

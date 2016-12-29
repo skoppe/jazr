@@ -656,6 +656,11 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 		analyseArrayBindingPatternNode(node,s,b,IdentifierType.Identifier);
 	else if (node.type == NodeType.ObjectBindingPatternNode)
 		analyseObjectBindingPatternNode(node,s,b,IdentifierType.Identifier);
+	else if (node.type == NodeType.ReturnStatementNode)
+	{
+		b.addHint(node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
+		hints |= analyseChildren(node.children,s,b);
+	}
 	else
 	{
 		hints |= analyseChildren(node.children,s,b);

@@ -125,6 +125,10 @@ class Branch
 		this.children ~= b;
 		return b;
 	}
+	bool hasHint(Hint h)()
+	{
+		return (hints & h) == h;
+	}
 	void addHint(Hint h)
 	{
 		hints |= h;

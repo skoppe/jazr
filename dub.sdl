@@ -2,6 +2,7 @@ name "es6-parse"
 description "A minimal D application."
 copyright "Copyright © 2016, skoppe"
 authors "skoppe"
+dependency "d-option" version="~>0.0.7"
 configuration "application" {
 	targetType "executable"
 }

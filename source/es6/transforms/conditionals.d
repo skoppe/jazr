@@ -42,6 +42,20 @@ version(unittest)
 			return;
 		emit(got).shouldEqual(emit(expected));
 	}
+
+	void assertNegateCondition(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		auto got = parseNode!("parseIfStatement",IfStatementNode)(input);
+		auto expected = parseNode!("parseIfStatement",IfStatementNode)(output);
+		auto trunkA = got.analyseNode().trunk;
+		auto trunkB = expected.analyseNode().trunk;
+		got.negateCondition();
+		got.assertTreeInternals(file,line);
+		auto diff = diffTree(got,expected);
+		if (diff.type == Diff.No)
+			return;
+		emit(got).shouldEqual(emit(expected));
+	}
 }
 
 bool convertIfElseAssignmentToConditionalExpression(Node node)
@@ -174,7 +188,20 @@ unittest
 		`if(y) b=2; else if(k) b=5; else b=7;`,
 		`b = y ? 2 : k ? 5 : 7`
 	);
+}	
+bool negateCondition(IfStatementNode node)
+{
+	return false;
 }
-
+@("negateCondition")
+unittest
+{
+	assertNegateCondition(`if (45 > 46) b;`,`if (!(45 > 46)) b;`);
+	assertNegateCondition(`if (b > 6) b = 5;`,`if (!(b > 6)) b = 5;`);
+	assertNegateCondition(`if (c) b = 5;`,`if (!c) b = 5;`);
+	assertNegateCondition(`if (!!a) b = 5;`,`if (!a) b = 5;`);
+	assertNegateCondition(`if (!(a && b)) b = 5;`,`if ((a && b)) b = 5;`);
+	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);
+}
 
 
