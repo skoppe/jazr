@@ -169,12 +169,12 @@ class Lexer(Source)
 		//writeln("Scan: ",token," ",file,"@",l);
 		return token;
 	}
-	Token lexUnicodeEscapeSequence(Sink)(ref Sink sink)
+	Token lexUnicodeEscapeSequence(size_t idx)
 	{
 		import std.format : format;
-		foreach(_; 0..4)
+		foreach(i; 0..4)
 		{
-			auto chr = s.next();
+			auto chr = s[idx+i];
 			if ((chr <= '0' || chr >= '9') && (chr <= 'a' && chr >= 'z') && (chr <= 'A' && chr >= 'Z'))
 			{
 				if (chr == '\u0000')
@@ -182,19 +182,21 @@ class Lexer(Source)
 				// TODO: if chr is lineterminator (as well as the \r\n one) we need to reset column and line++
 				return Token(Type.Error,format("Invalid hexdigit %s for UnicodeEscapeSequence",chr));
 			}
-			tokenLength++;
-			sink.put(chr);
 		}
 		return Token(Type.UnicodeEscapeSequence);
 	}
-	Token lexStartIdentifier(Sink)(ref Sink sink)
+	Token lexStartIdentifier(ref size_t idx)
 	{
 		import std.format : format;
-		auto chr = s.next();
+		dchar chr = s[idx];
 		tokenLength++;
+		idx++;
+		if (chr.isStartIdentifier)
+			return Token(Type.StartIdentifier);
 		if (chr == '\\')
 		{
-			chr = s.next();
+			chr = s[idx];
+			idx++;
 			tokenLength++;
 			if (chr != 'u')
 			{
@@ -202,25 +204,22 @@ class Lexer(Source)
 					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
 				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
 			}
-			return lexUnicodeEscapeSequence(sink);
-		}
-
-		if (chr.isStartIdentifier)
-		{
-			sink.put(chr);
-			return Token(Type.StartIdentifier);
+			idx += 4;
+			tokenLength += 4;
+			return lexUnicodeEscapeSequence(idx-4);
 		}
 		return Token(Type.Error,format("Invalid character %s to start identifier",chr));
 	}
-	Token lexTailIdentifier(Sink)(ref Sink sink)
+	Token lexTailIdentifier(ref size_t idx)
 	{
 		import std.format : format;
-		auto chr = s.front();
+		dchar chr = s[idx];
+		idx++;
+		tokenLength++;
 		if (chr == '\\')
 		{
-			s.popFront();
-			tokenLength++;
-			chr = s.next();
+			chr = s[idx];
+			idx++;
 			tokenLength++;
 			if (chr != 'u')
 			{
@@ -228,12 +227,11 @@ class Lexer(Source)
 					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
 				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
 			}
-			return lexUnicodeEscapeSequence(sink);
+			idx += 4;
+			tokenLength += 4;
+			return lexUnicodeEscapeSequence(idx-4);
 		} else if (chr.isTailIdentifier)
 		{
-			s.popFront();
-			tokenLength++;
-			sink.put(chr);
 			return Token(Type.TailIdentifier);
 		} else if (chr == '\u0000')
 			return Token(Type.EndIdentifier);
@@ -241,28 +239,31 @@ class Lexer(Source)
 	}
 	Token lexIdentifier()
 	{
-		import std.array : appender;
-		auto str = appender!string;
-		lexStartIdentifier(str);
-		while(1)
+		size_t idx = 0;
+		auto t = lexStartIdentifier(idx);
+		for(;;)
 		{
-			auto t = lexTailIdentifier(str);
 			if (t.type == Type.Error)
+			{
+				s = s[idx..$];
 				return t;
+			}
+			t = lexTailIdentifier(idx);
 			if (t.type == Type.EndIdentifier)
-				return Token(Type.Identifier,str.data);
+			{
+				auto tok = Token(Type.Identifier,s[0..idx-1]);
+				s = s[idx-1..$];
+				return tok;
+			}
 		}
 	}
-	auto popWhitespace()
+	void popWhitespace()
 	{
 		while (s.front.isWhitespace)
 		{
 			column++;
 			s.popFront();
 		}
-		if (s.front == '\u0000')
-			return State.EndOfFile;
-		return State.TokensRemaining;
 	}
 	auto lookAheadRegex()
 	{
@@ -544,7 +545,7 @@ class Lexer(Source)
 					case t:
 						return true;
 				}
-					version(LDC) break;
+					//version(LDC) break;
 				default:
 					return false;
 			}
@@ -552,69 +553,67 @@ class Lexer(Source)
 	}
 	Token lexMultiLineComment()
 	{
-		auto str = appender!string;
-		while (true)
+		size_t idx = 0;
+		for(;;)
 		{
-			auto chr = s.front();
+			dchar chr = s[idx];
 			if (chr == '*')
 			{
-				s.popFront();
 				column++;
-				chr = s.front();
+				idx++;
+				chr = s[idx];
 				if (chr == '/')
 				{
-					s.popFront();
-					return Token(Type.MultiLineComment,str.data);
-				} else if (chr == '\u0000')
-					goto eof;
-				str.put('*');
+					auto tok = Token(Type.MultiLineComment,s[0..idx-1]);
+					s = s[idx+1..$];
+					return tok;
+				}
 			}
 			if (chr.isLineTerminator())
 			{
-				str.put(chr);
-				s.popFront();
+				idx++;
 				line++;
 				column=0;
 				tokenLength=0;
-
-				if (chr == '\u000D' && s.popNextIf('\u000A'))
-					str.put('\u000A');
-
+				if (s[idx] == '\u000A')
+					idx++;
 				continue;
 			} else if (chr == '\u0000')
 				goto eof;
-			str.put(chr);
-			s.popFront();
+			idx++;
 			column++;
 		}
-		// TODO eat chars until */ or eof
-		eof: return Token(Type.Error,"Expected end of MultiLineComment before eof");
+		eof: 
+		s = s[idx..$];
+		return Token(Type.Error,"Expected end of MultiLineComment before eof");
 	}
 	Token lexSingleLineComment()
 	{
-		auto str = appender!string;
-		while (true)
+		size_t idx = 0;
+		for (;;)
 		{
-			auto chr = s.front();
+			dchar chr = s[idx];
 			if (chr.isLineTerminator())
 			{
-				s.popFront();
+				idx++;
 				newLine=true;
-				if (chr == '\u000D')
-					s.popNextIf('\u000A');
-				break;
+				auto tok = Token(Type.SingleLineComment,s[0..idx-1]);
+				if (chr == '\u000D' && s[idx] == '\u000A')
+					idx++;
+				s = s[idx..$];
+				return tok;
 			} else if (chr == '\u0000')
 				break;
-			str.put(chr);
-			s.popFront();
+			idx++;
 			tokenLength++;
 		}
-		return Token(Type.SingleLineComment,str.data);
+		auto tok = Token(Type.SingleLineComment,s[0..idx]);
+		s = s[idx..$];
+		return tok;
 	}
 	Token lexToken()
 	{
-		if (popWhitespace() == State.EndOfFile)
-			return Token(Type.EndOfFile);
+		popWhitespace();
 		auto chr = s.front();
 
 		switch(chr)
@@ -890,22 +889,21 @@ class Lexer(Source)
 				s.popFront();
 				return lexTemplateLiteral();
 			case '\u0000':
-				s.popFront();
 				return Token(Type.EndOfFile);
 			default:
 				return lexIdentifier();
 		}
 	}
 }
-auto createLexer(Source)(Source s)
+auto createLexer(string s)
 {
-	import std.range : chain;
-	auto c = chain(s,"\u0000");
-	return new Lexer!(typeof(c))(c);
+	auto input = s ~ "\u0000";
+	return new Lexer!(string)(input);
 }
 @("lexIdentifier")
 unittest
 {
+	// TODO: need to test unicode escape sequence stuff
 	auto lexer = createLexer("abcde");
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"abcde"));
 }
@@ -913,10 +911,10 @@ unittest
 unittest
 {
 	auto lexer = createLexer("  \u0009abc");
-	lexer.popWhitespace.shouldEqual(State.TokensRemaining);
+	lexer.popWhitespace();
 	lexer.column.shouldEqual(3);
 	lexer = createLexer("  ");
-	lexer.popWhitespace.shouldEqual(State.EndOfFile);
+	lexer.popWhitespace();
 	lexer.column.shouldEqual(2);
 }
 @("lookAheadRegex")
@@ -1025,9 +1023,44 @@ unittest
 	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment," comment "));
 	lexer.lexToken.shouldEqual(Token(Type.Identifier,"identifier"));
 
+	lexer = createLexer("// comment");
+	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment," comment"));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
+	lexer = createLexer("//");
+	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+	
+	lexer = createLexer("//\r\n");
+	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+	
+	lexer = createLexer("//\n");
+	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
 	lexer = createLexer("/* multi \n line \r\n\n comment */ identifier");
 	lexer.lexToken.shouldEqual(Token(Type.MultiLineComment," multi \n line \r\n\n comment "));
 	lexer.lexToken.shouldEqual(Token(Type.Identifier,"identifier"));
+
+	lexer = createLexer("/**/");
+	lexer.lexToken.shouldEqual(Token(Type.MultiLineComment,""));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
+	lexer = createLexer("/*a*b*/");
+	lexer.lexToken.shouldEqual(Token(Type.MultiLineComment,"a*b"));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
+	lexer = createLexer("/*");
+	lexer.lexToken.shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
+	lexer.s.shouldEqual("\u0000");
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 }
 @("save")
 unittest

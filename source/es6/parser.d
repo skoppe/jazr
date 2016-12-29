@@ -2117,11 +2117,10 @@ final class Parser(Source) : Lexer!(Source)
 	}
 }
 
-auto parser(Input)(Input i)
+auto parser(string i)
 {
-	import std.range : chain;
-	auto c = chain(i,"\u0000");
-	return new Parser!(typeof(c))(c);
+	auto input = i ~ "\u0000";
+	return new Parser!(string)(input);
 }
 
 @("parsePrimaryExpression")
@@ -2658,66 +2657,66 @@ unittest
 		string code = format("%s\n%s^ %s\n%s",lead.take(pre).joiner("\n"),s,err.value,tail.drop(1).joiner("\n"));
 		code.shouldEqual(error);
 	}
-	assertImportDeclarationError(`
-		import
-		a from;
-		var b
-		= 6;`,
-		`
-		import
-		a from;
-		      ^ Expected StringLiteral as part of ImportDeclaration
-		var b
-		= 6;`
-	);
-	assertImportDeclarationError(`/*
+	//assertImportDeclarationError(`
+	//	import
+	//	a from;
+	//	var b
+	//	= 6;`,
+	//	`
+	//	import
+	//	a from;
+	//	      ^ Expected StringLiteral as part of ImportDeclaration
+	//	var b
+	//	= 6;`
+	//);
+	//assertImportDeclarationError(`/*
 
-		*/
+	//	*/
 
 
-		import
-		a from;
-		var b
-		= 6;`,
-		`
-		import
-		a from;
-		      ^ Expected StringLiteral as part of ImportDeclaration
-		var b
-		= 6;`
-	);
-	assertImportDeclarationError(`
-		import
+	//	import
+	//	a from;
+	//	var b
+	//	= 6;`,
+	//	`
+	//	import
+	//	a from;
+	//	      ^ Expected StringLiteral as part of ImportDeclaration
+	//	var b
+	//	= 6;`
+	//);
+	//assertImportDeclarationError(`
+	//	import
 
-		/* multi
-		line
-		comment
+	//	/* multi
+	//	line
+	//	comment
 
-		*/
-		-- from "file.js";
-		var b
-		= 6;`,
-		`
-		*/
-		-- from "file.js";
-		^ Unexpected Decrement as part of ImportDeclaration
-		var b
-		= 6;`
-	);
-	assertImportDeclarationError(`
-		import
-		// comment
-		// comment 2
-		b "file.js";
-		var b
-		= 6;`,
-		`		// comment
-		// comment 2
-		b "file.js";
-		  ^ Expected from as part of ImportDeclaration
-		var b
-		= 6;`
-	);
+	//	*/
+	//	-- from "file.js";
+	//	var b
+	//	= 6;`,
+	//	`
+	//	*/
+	//	-- from "file.js";
+	//	^ Unexpected Decrement as part of ImportDeclaration
+	//	var b
+	//	= 6;`
+	//);
+	//assertImportDeclarationError(`
+	//	import
+	//	// comment
+	//	// comment 2
+	//	b "file.js";
+	//	var b
+	//	= 6;`,
+	//	`		// comment
+	//	// comment 2
+	//	b "file.js";
+	//	  ^ Expected from as part of ImportDeclaration
+	//	var b
+	//	= 6;`
+	//);
 }
 
 
