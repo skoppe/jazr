@@ -16,6 +16,6 @@ configuration "unittest" {
 	mainSourceFile "bin/ut.d"
 	excludedSourceFiles "source/app.d"
 	targetType "executable"
-	dependency "unit-threaded" version="==0.6.3"
+	dependency "unit-threaded" version="==0.7.2"
 	versions "Chatty"
 }
