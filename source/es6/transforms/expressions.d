@@ -21,11 +21,11 @@ import es6.nodes;
 import es6.scopes;
 import es6.transforms.conditionals;
 import option;
+import es6.analyse;
 
 version(unittest)
 {
 	import es6.parser;
-	import es6.analyse;
 	import es6.emitter;
 	import unit_threaded;
 	import es6.transformer;

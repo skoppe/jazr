@@ -553,7 +553,7 @@ private int getHintMask(Node n)
 void reanalyseHints(Node node)
 {
 	auto start = node;
-	import std.algorithm : reduce;
+	import std.algorithm : reduce, map;
 	while(node !is null) {
 		int hints = calcHints(node);
 		hints |= node.children.map!(c => c.getHintMask() & c.hints.get).reduce!((a,b)=>a|b);
