@@ -575,6 +575,8 @@ final class Parser(Source) : Lexer!(Source)
 					return new ParenthesisNode([new ExpressionNode(children),spread]);
 				case Type.CloseParenthesis:
 					scanAndSkipCommentsAndTerminators();
+					if (children.length == 1)
+						return new ParenthesisNode(children[0]);
 					return new ParenthesisNode(new ExpressionNode(children));
 				default:
 					comma = false;

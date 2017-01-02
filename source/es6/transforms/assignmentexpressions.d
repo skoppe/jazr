@@ -76,13 +76,14 @@ bool simplifyRedundantAssignmentExpressions(Node node)
 @("simplifyRedundantAssignmentExpressions")
 unittest
 {
-	void assertTransformation(string input, string output)
+	void assertTransformation(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		Node got = parseModule(input);
 		Node expected = parseModule(output);
 		got.analyseNode();
 		expected.analyseNode();
 		got.runTransform!(simplifyRedundantAssignmentExpressions);
+		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;

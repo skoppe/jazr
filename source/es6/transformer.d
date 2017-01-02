@@ -18,7 +18,18 @@
 module es6.transformer;
 
 import es6.nodes;
+import es6.scopes;
 
+// NOTE: Can be replaced with `import std.traits : Parameters;` when gdc/ldc support it
+import std.traits : isCallable, FunctionTypeOf;
+template Parameters(func...)
+	if (func.length == 1 && isCallable!func)
+{
+	static if (is(FunctionTypeOf!func P == function))
+		alias Parameters = P;
+	else
+		static assert(0, "argument has no parameters");
+}
 void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
 {
 	import std.typetuple : staticMap;
@@ -40,8 +51,16 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 		}
 		foreach(_fun; _funs)
 		{
-			if (_fun(node))
-				r |= true;
+			pragma(msg,Parameters!_fun[0]);
+			static if (is(Parameters!_fun[0] : Node))
+			{
+				if (_fun(node))
+					r |= true;
+			} else static if (is(Parameters!_fun[0] : Scope))
+			{
+				if (entry && _fun(node.branch.scp))
+					r |= true;
+			}
 		}
 		return r;
 	}

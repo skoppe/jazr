@@ -480,6 +480,19 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 						}
 					}
 					break;
+				case NodeType.IdentifierNode:
+					s.addVariable(Variable(item.as!IdentifierNode,IdentifierType.Parameter));
+					item.branch = b;
+					break;
+				case NodeType.ObjectLiteralNode:
+					analyseArrowFunctionParamsObjectLiteral(item,s,IdentifierType.Parameter);
+					break;
+				case NodeType.ArrayLiteralNode:
+					analyseArrowFunctionParamsArrayLiteral(item,s,IdentifierType.Parameter);
+					break;
+				case NodeType.AssignmentExpressionNode:
+					analyseArrowFunctionParamsAssignmentExpression(item,s,IdentifierType.Parameter);
+					break;
 				default: assert(0);
 			}
 		}
@@ -514,6 +527,13 @@ private int calcHints(Node node)
 			return Hint.NonExpression;
 		case NodeType.ReturnStatementNode:
 			return node.children.length == 0 ? Hint.Return : Hint.ReturnValue;
+		case NodeType.ExpressionOperatorNode:
+			switch(node.as!(ExpressionOperatorNode).operator)
+			{
+				case ExpressionOperator.LogicalOr:
+					return Hint.Or;
+				default: return Hint.None;
+			}
 		default:
 			return Hint.None;
 	}
@@ -524,8 +544,23 @@ private int getHintMask(Node n)
 	{
 		case NodeType.FunctionBodyNode:
 			return ~(Hint.Return | Hint.ReturnValue);
+		case NodeType.ParenthesisNode:
+			return ~(Hint.Or);
 		default:
 			return ~(Hint.None);
+	}
+}
+void reanalyseHints(Node node)
+{
+	auto start = node;
+	import std.algorithm : reduce;
+	while(node !is null) {
+		int hints = calcHints(node);
+		hints |= node.children.map!(c => c.getHintMask() & c.hints.get).reduce!((a,b)=>a|b);
+		if (start !is node && node.hints.get == hints)
+			return;
+		node.hints = hints;
+		node = node.parent;
 	}
 }
 private int analyse(Node node, Scope s = null, Branch b = null)

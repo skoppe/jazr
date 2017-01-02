@@ -58,6 +58,7 @@ version(unittest)
 	}
 }
 
+// TODO: we can detect ifs faster by walking branches
 bool convertIfElseAssignmentToConditionalExpression(Node node)
 {
 	if (node.type != NodeType.IfStatementNode)
@@ -188,20 +189,62 @@ unittest
 		`if(y) b=2; else if(k) b=5; else b=7;`,
 		`b = y ? 2 : k ? 5 : 7`
 	);
-}	
-bool negateCondition(IfStatementNode node)
+}
+void negateBinaryExpression(BinaryExpressionNode node)
 {
-	return false;
+	auto paren = new ParenthesisNode();
+	node.replaceWith(new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Negation)],paren)).withBranch(node.branch);
+	paren.addChild(node);
+}
+void negateUnaryExpression(UnaryExpressionNode node)
+{
+	if (node.prefixs.length > 0 && node.prefixs[0].type == NodeType.PrefixExpressionNode)
+	{
+		auto prefix = node.prefixs[0].as!PrefixExpressionNode;
+		if (prefix.prefix == Prefix.Negation)
+		{
+			if (node.prefixs.length == 1)
+			{
+				node.replaceWith(node.children[0]);
+				return;
+			}
+			node.prefixs = node.prefixs[1..$];
+			return;
+		}
+	}
+}
+void negateNode(Node node)
+{
+	auto unary = new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Negation)]).withBranch(node.branch);
+	node.replaceWith(unary);
+	unary.addChild(node);
+}
+void negateCondition(IfStatementNode node)
+{
+	auto bin = node.condition().opt!(BinaryExpressionNode);
+	if (bin.isDefined)
+	{
+		negateBinaryExpression(bin.get);
+		return;
+	}
+	auto unary = node.condition().opt!(UnaryExpressionNode);
+	if (unary.isDefined)
+	{
+		negateUnaryExpression(unary.get);
+		return;
+	}
+	negateNode(node.condition());
+	return;
 }
 @("negateCondition")
 unittest
 {
-	/*assertNegateCondition(`if (45 > 46) b;`,`if (!(45 > 46)) b;`);
+	assertNegateCondition(`if (45 > 46) b;`,`if (!(45 > 46)) b;`);
 	assertNegateCondition(`if (b > 6) b = 5;`,`if (!(b > 6)) b = 5;`);
 	assertNegateCondition(`if (c) b = 5;`,`if (!c) b = 5;`);
 	assertNegateCondition(`if (!!a) b = 5;`,`if (!a) b = 5;`);
 	assertNegateCondition(`if (!(a && b)) b = 5;`,`if ((a && b)) b = 5;`);
-	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);*/
+	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);
 }
 
 

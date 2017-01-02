@@ -207,7 +207,8 @@ enum Hint {
 	None = 0,
 	Return = 1 << 0,
 	ReturnValue = 1 << 1,
-	NonExpression = 1 << 2
+	NonExpression = 1 << 2,
+	Or = 1 << 3
 }
 struct Hints
 {
@@ -319,10 +320,10 @@ class Node
 	}
 	auto as(Type)(in string file = __FILE__, in size_t line = __LINE__)
 	{
-		import std.format;
 		auto r = cast(Type)this;
 		version (unittest)
 		{
+			import std.format;
 			if (r is null)
 				throw new UnitTestException([format("Tried to interpret as %s, but got %s",Type.stringof,this)],file,line);
 		}
@@ -341,6 +342,8 @@ class Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		return Diff.No;
 	}
 	Node getRoot()
@@ -352,15 +355,29 @@ class Node
 	deprecated("Use replaceWith")
 	void replace(Node other)
 	{
-		assert(parent !is null);
+		if (other is this)
+			return;
+		version (unittest)
+		{
+			if (other.parent !is this)
+				assert(other.parent is null, "Please first detach node before using");
+		}
 		assert(other !is null);
-		this.parent.replaceChild(this,other);
-		if (this.branch.entry is this)
+		if (parent !is null)
+			this.parent.replaceChild(this,other);
+		else if (other.branch != this.branch)
+			other.assignBranch(this.branch);
+
+		if (this.branch !is null && this.branch.entry is this)
+		{
 			this.branch.entry = other;
+			assert(other.branch is this.branch);
+		}
 	}
-	void replaceWith(Node other)
+	Node replaceWith(Node other)
 	{
 		this.replace(other);
+		return other;
 	}
 	void replaceChild(Node child, Node other)
 	{
@@ -369,12 +386,19 @@ class Node
 		assert(idx != -1);
 		children[idx] = other;
 		other.parent = this;
-		other.branch = child.branch;
+		if (other.branch != child.branch)
+			other.assignBranch(child.branch);
 	}
 	void addChildren(Node[] children)
 	{
-		children.each!(c=>c.branch = branch);
+		children.each!((c){c.branch = branch; c.parent = this;});
 		this.children ~= children;
+	}
+	void prependChildren(Node[] children)
+	{
+		children.each!((c){c.branch = branch; c.parent = this;});
+		import std.array : insertInPlace;
+		this.children.insertInPlace(0,children);
 	}
 	void addChildren(Option!(Node[]) children)
 	{
@@ -383,8 +407,32 @@ class Node
 	}
 	void addChild(Node child)
 	{
+		child.parent = this;
 		child.branch = branch;
 		this.children ~= child;
+	}
+	Node[] detachStatementsAfter(Node node)
+	{
+		// TODO: Need to test this
+		Node[] r;
+		auto idx = children.countUntil!(c => c is node);
+		if (idx == -1)
+			return r;
+		if (idx+1 == children.length)
+			return r;
+		r = children[idx+1..$];
+		children = children[0..idx+1];
+		r.each!(c => c.branch = null);
+		return r;
+	}
+	Node findFirst(NodeType t)
+	{
+		if (type == t)
+			return this;
+		foreach(c; children)
+			if (auto f = c.findFirst(t))
+				return f;
+		return null;
 	}
 }
 
@@ -412,6 +460,8 @@ class ErrorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!ErrorNode();
 		return o.value == value && o.line == line && o.column == column ? Diff.No : Diff.Content;
 	}
@@ -428,6 +478,8 @@ class BooleanNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -450,6 +502,8 @@ class StringLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -466,6 +520,8 @@ class BinaryLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -482,6 +538,8 @@ class OctalLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -502,6 +560,8 @@ class DecimalLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -518,6 +578,8 @@ class HexLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -551,6 +613,8 @@ class TemplateNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -573,6 +637,8 @@ class RegexLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
 	}
@@ -589,6 +655,8 @@ class KeywordNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.keyword == keyword ? Diff.No : Diff.Content;
 	}
@@ -615,6 +683,8 @@ class IdentifierNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.identifier == identifier ? Diff.No : Diff.Content;
 	}
@@ -664,6 +734,8 @@ class PrefixExpressionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.prefix == prefix ? Diff.No : Diff.Content;
 	}
@@ -699,6 +771,8 @@ class AccessorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.identifier == identifier ? Diff.No : Diff.Content;
 	}
@@ -747,6 +821,8 @@ class NewExpressionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.news == news ? Diff.No : Diff.Content;
 	}
@@ -763,6 +839,8 @@ class CallExpressionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.news == news ? Diff.No : Diff.Content;
 	}
@@ -771,15 +849,24 @@ class UnaryExpressionNode : Node
 {
 	Node[] prefixs;
 	Postfix postfix = Postfix.None;
-	this(Node[] ps, Node n)
+	this(Node[] ps, Node n = null)
 	{
 		prefixs = ps;
 		super(NodeType.UnaryExpressionNode,n);
+	}
+	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
+	{
+		sink.indent(level);
+		sink.formattedWrite("%s\n",type);
+		sink.print(prefixs,level+1);
+		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		if (prefixs.length != o.prefixs.length)
 			return Diff.Content;
@@ -804,6 +891,8 @@ class ExpressionOperatorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.operator == operator ? Diff.No : Diff.Content;
 	}
@@ -855,6 +944,8 @@ class AssignmentOperatorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.assignment == assignment ? Diff.No : Diff.Content;
 	}
@@ -892,6 +983,8 @@ class LabelledStatementNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.label == label ? Diff.No : Diff.Content;
 	}
@@ -925,18 +1018,6 @@ class BlockStatementNode : Node
 	this(Node[] children)
 	{
 		super(NodeType.BlockStatementNode,children);
-	}
-	Node[] detachStatementsAfter(Node node)
-	{
-		// TODO: Need to test this
-		Node[] r;
-		auto idx = children.countUntil!(c => c is node);
-		if (idx == -1)
-			return r;
-		r = children[idx..$];
-		children = children[0..idx];
-		r.each!(c => c.branch = null);
-		return r;
 	}
 	void dropAllAfter(Node node)
 	{
@@ -997,8 +1078,10 @@ struct IfPath
 		if (isBlockStatement)
 			return node.addChildren(children);
 		Node p = node.parent;
-		Node block = new BlockStatementNode([node]);
-		p.replaceChild(node, block);
+		Node block = new BlockStatementNode([]);
+		node.replaceWith(block);
+		block.addChild(node);
+		block.addChildren(children);
 		node = block;
 	}
 	void addStatements(Option!(Node[]) children)
@@ -1073,7 +1156,7 @@ class IfStatementNode : Node
 	IfPath truthPath() { return IfPath(children[1]); }
 	IfPath elsePath() { assert(hasElsePath); return IfPath(children[2]); }
 	Node condition() { return children[0]; }
-	void removeElsePath() { children = children[0..2]; }
+	void removeElsePath() { children[2].branch.remove(); children[2].parent = null; children = children[0..2]; }
 	void forceElsePath()
 	{
 		if (hasElsePath)
@@ -1134,6 +1217,8 @@ class ForStatementNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.loopType == loopType ? Diff.No : Diff.Content;
 	}
@@ -1213,6 +1298,8 @@ class ClassDeclarationNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		return Diff.No;
 	}
 }
@@ -1228,6 +1315,8 @@ class ClassGetterNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
@@ -1244,6 +1333,8 @@ class ClassMethodNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
@@ -1260,6 +1351,8 @@ class ClassGeneratorMethodNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
@@ -1276,6 +1369,8 @@ class ClassSetterNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
@@ -1401,6 +1496,8 @@ class ElisionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.cnt == cnt ? Diff.No : Diff.Content;
 	}
@@ -1424,6 +1521,8 @@ class LexicalDeclarationNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.declaration == declaration ? Diff.No : Diff.Content;
 	}
@@ -1572,7 +1671,8 @@ enum Diff
 	Children,
 	Content,
 	BranchChildren,
-	BranchEntryTypes
+	BranchEntryTypes,
+	Hints
 }
 struct DiffResult
 {
@@ -1587,7 +1687,7 @@ string getDiffMessage(DiffResult d)
 		case Diff.No:
 			return "No difference";
 		case Diff.Type:
-			return format("Node a is of type %s but Node b is of type",d.a.type,d.b.type);
+			return format("Node a is of type %s but Node b is of type %s",d.a.type,d.b.type);
 		case Diff.Children:
 			return format("Node a has the following children\n%sYet node b has\n%s",d.a.children,d.b.children);
 		case Diff.Content:
@@ -1596,6 +1696,8 @@ string getDiffMessage(DiffResult d)
 			return format("Branch a has %s children, but branch b has %s",d.a.branch.children.length,d.b.branch.children.length);
 		case Diff.BranchEntryTypes:
 			return format("Branch a has entry\n%swhile branch b has\n%s",d.a,d.b);
+		case Diff.Hints:
+			return format("Node a has hints\n%swhile node b has\n%s",d.a,d.b);
 	}
 }
 version (unittest)
@@ -1619,24 +1721,31 @@ void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __L
 		{
 			version(unittest)
 				if (c.parent !is a)
+				{
+					import std.stdio;
+					writeln(a);
 					throw new UnitTestException([format("Node's child doesn't have right parent.")],file,line);
+				}
 			assert(c.parent is a);
 			assertNodeInternals(c);
 		}
 	}
+			import std.stdio;
 	void assertBranchInternals(Branch a)
 	{
 		version(unittest)
 		{
 			if (a.entry is null)
 				throw new UnitTestException([format("Branch has no entry.")],file,line);
-			if (a.entry.branch !is a)
+			if (a.entry.branch !is a) {
 				throw new UnitTestException([format("Branch's entry node doesn't refer to this branch\n%s",a.entry)],file,line);
+			}
 		}
 		if (a.parent is null)
 			assert(a.scp.entry == a.entry);
 		assert(a.entry !is null);
 		assert(a.entry.branch is a);
+
 		foreach(c; a.children)
 		{
 			assert(c.parent is a);
@@ -1683,10 +1792,6 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 		if (b.branch is null)
 			throw new UnitTestException([format("Found a null on right branch while diffing\n%sand\n%s",a,b)],file,line);
 	}
-	assert(a.branch !is null && b.branch !is null);
-	auto r = diffBranch(a.branch,b.branch);
-	if (r.type != Diff.No)
-		return r;
 	if (a.type != b.type)
 		return DiffResult(a,b,Diff.Type);
 	if (a.children.length != b.children.length)
@@ -1700,7 +1805,9 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 		if (d != Diff.No)
 			return DiffResult(ca,cb,d);
 	}
-	return DiffResult(a,b,Diff.No);
+
+	assert(a.branch !is null && b.branch !is null);
+	return diffBranch(a.branch,b.branch);
 }
 @("diffTree")
 unittest
@@ -1722,6 +1829,7 @@ unittest
   KeywordNode
   IdentifierNode identifier
   UnaryExpressionNode
+    PrefixExpressionNode Negation
     IdentifierNode expr
   CallExpressionNode
     IdentifierNode obj

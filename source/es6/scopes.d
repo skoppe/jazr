@@ -133,6 +133,10 @@ class Branch
 	{
 		hints |= h;
 	}
+	void removeHint(Hint h)()
+	{
+		hints = hints & ~h;
+	}
 	void remove()
 	{
 		if (parent is null)

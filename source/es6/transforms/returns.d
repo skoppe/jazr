@@ -30,25 +30,44 @@ version(unittest)
 	import unit_threaded;
 	import es6.transformer;
 	import std.stdio;
+	Node parseModule(string input)
+	{
+		auto parser = parser(input);
+		parser.scanToken();
+		return parser.parseModule();
+	}
 }
 
 bool negateReturningIf(Scope s)
 {
-	// TODO: test this stuff
 	foreach(branch; s.branch.children)
 	{
 		if (branch.entry.parent.type != NodeType.IfStatementNode ||
 			!branch.hasHint!(Hint.Return))
 			continue;
 		auto ifStmt = branch.entry.parent.as!IfStatementNode;
+		branch.removeHint!(Hint.Return);
 
-		auto transfers = ifStmt.parent.opt!(BlockStatementNode).detachStatementsAfter(ifStmt);
-		if (transfers.length == Some(0))
+		auto transfers = ifStmt.parent.detachStatementsAfter(ifStmt);
+		if (transfers.length == 0)
 		{
+			if (ifStmt.hasElsePath)
+			{
+				ifStmt.negateCondition();
+
+				auto elsePath = ifStmt.elsePath.node;
+				ifStmt.removeElsePath();
+				ifStmt.truthPath.node.replaceWith(elsePath);
+				return true;
+			}
 			if (ifStmt.truthPath.isSingleStatement())
+			{
 				ifStmt.replaceWith(ifStmt.condition);
-			else
+			}
+			else {
 				ifStmt.truthPath.as!(BlockStatementNode).dropAllAfter(NodeType.ReturnStatementNode);
+				return false;
+			}
 			return true;
 		}
 		IfPath target;
@@ -57,8 +76,9 @@ bool negateReturningIf(Scope s)
 			ifStmt.negateCondition();
 			if (ifStmt.hasElsePath)
 			{
-				ifStmt.truthPath.node = ifStmt.elsePath.node;
+				auto elsePath = ifStmt.elsePath.node;
 				ifStmt.removeElsePath();
+				ifStmt.truthPath.node.replaceWith(elsePath);
 			} else
 			{
 				ifStmt.truthPath.clearStatements();
@@ -73,4 +93,118 @@ bool negateReturningIf(Scope s)
 		target.addStatements(transfers);
 	}
 	return false;
+}
+
+@("negateReturningIf")
+unittest
+{
+	void assertReturnIfNegation(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		Node got = parseModule(input);
+		Node expected = parseModule(output);
+		got.analyseNode();
+		expected.analyseNode();
+		got.assertTreeInternals(file,line);
+		got.runTransform!(negateReturningIf);
+		got.assertTreeInternals(file,line);
+		auto diff = diffTree(got,expected);
+		if (diff.type == Diff.No)
+			return;
+		emit(got).shouldEqual(emit(expected));
+	}
+	// Note: Need to test that we don't apply this optimisation if the `if (c) return;` is nested in a if-statement
+	assertReturnIfNegation(
+		`function a() { if (a) return; a = 5; }`,
+		`function a() { if (!a) { a = 5; } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) return; }`,
+		`function a() { b }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		"function d() { if (!a) { return; }; }",
+		"function d() { !a }"
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (a) return; a = 5; if (b) return; a = 7; }`,
+		`function a() { if (!a) { a = 5; if (!b) { a = 7 } } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) { d = 5; return; } e = 5; }`,
+		`function a() { if (b) { d = 5; } else { e = 5; } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (e) if (b) if (c) return; d = 5; }`,
+		`function a() { if (e) if (b) if (c) return; d = 5; }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (e && b && c) return; d = 5; }`,
+		`function a() { if (!(e && b && c)) { d = 5; } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) return; else d = 4; }`,
+		`function a() { if (!b) d = 4; }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) return; else d = 4; f = 5;}`,
+		`function a() { if (!b) { d = 4; f = 5; } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) { return; } else { d = 4; } f = 5;}`,
+		`function a() { if (!b) { d = 4; f = 5; } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) { g = 6; return; } else { d = 4; } f = 5;}`,
+		`function a() { if (b) { g=6 } else { d=4; f=5 } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) { d = 5; return; } }`,
+		`function a() { if (b) { d = 5; } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { if (b) { d = 5; return; } else d = 4; f = 5;}`,
+		`function a() { if (b) { d=5 } else { d=4; f=5 } }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function a() { for (var k in keys) { if (b) { return; } else d = 4; f = 5; } g = 66; }`,
+		`function a() { for (var k in keys) { if (b) { return } else  d = 4; f = 5; } g = 66; }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function b(z) { if (z.p !== 'value') return; if (z.q === k) return; k = z.v; }`,
+		"function b(z) { if (!(z.p !== 'value')) { if (!(z.q === k)) { k=z.v } } }"
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function b(z) { if (z.p !== 'value') { return; } if (z.q === k) { return; } k = z.v; }`,
+		"function b(z) { if (!(z.p !== 'value')) { if (!(z.q === k)) { k=z.v } } }"
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function b() { switch (bla) { case 5: return; }; op() }`,
+		`function b() { switch (bla) { case 5: return; }; op() }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function b() { if (a) for(;;)return; op() }`,
+		`function b() { if (a) for(;;)return; op() }`
+	);
+	/// ditto
+	assertReturnIfNegation(
+		`function b() { if (a) { for(;;)return; } op() }`,
+		`function b() { if (a) { for(;;)return }; op() }`
+	);
 }
