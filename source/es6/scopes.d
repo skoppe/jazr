@@ -20,7 +20,7 @@ module es6.scopes;
 import es6.nodes;
 import es6.utils;
 import std.format : formattedWrite;
-import std.algorithm : each;
+import std.algorithm : each, countUntil;
 
 version (unittest)
 {

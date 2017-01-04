@@ -19,11 +19,11 @@ module es6.transforms.conditionals;
 
 import es6.nodes;
 import es6.scopes;
+import es6.analyse;
 
 version(unittest)
 {
 	import es6.parser;
-	import es6.analyse;
 	import es6.emitter;
 	import unit_threaded;
 	import es6.transformer;
@@ -113,13 +113,13 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 	if (condition.type == NodeType.ExpressionNode)
 	{
 		auto preExprs = condition.children[0..$-1];
-		condition.replace(condition.children[$-1]);
+		condition.replaceWith(condition.children[$-1]);
 		preExprs ~= r;
 		r = new ExpressionNode(preExprs);
 	}
 
 	r.assignBranch(ifStmt.branch);
-	ifStmt.replace(r);
+	ifStmt.replaceWith(r);
 	return true;
 }
 @("convertIfElseAssignmentToConditionalExpression")

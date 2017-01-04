@@ -17,6 +17,8 @@
  */
 module es6.analyse;
 
+import std.algorithm : each;
+
 version (unittest)
 {
 	import unit_threaded;

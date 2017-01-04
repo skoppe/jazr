@@ -24,12 +24,12 @@ import std.algorithm : each, countUntil;
 import std.range : lockstep;
 import option;
 import es6.utils;
+import es6.analyse;
 
 version(unittest)
 {
 	import es6.parser;
 	import es6.emitter;
-	import es6.analyse;
 	import unit_threaded;
 	import std.stdio;
 }
@@ -353,11 +353,10 @@ class Node
 			return branch.scp.getRoot();
 		return this; // todo: could also return parent's getRoot but this is probably pointless...
 	}
-	deprecated("Use replaceWith")
-	void replace(Node other)
+	Node replaceWith(Node other)
 	{
 		if (other is this)
-			return;
+			return other;
 		version (unittest)
 		{
 			if (other.parent !is this)
@@ -374,10 +373,6 @@ class Node
 			this.branch.entry = other;
 			assert(other.branch is this.branch);
 		}
-	}
-	Node replaceWith(Node other)
-	{
-		this.replace(other);
 		return other;
 	}
 	void replaceChild(Node child, Node other)
@@ -914,7 +909,7 @@ class AssignmentExpressionNode : Node
 void removeFirstAssignment(AssignmentExpressionNode node)
 {
 	if (node.children.length == 3)
-		node.replace(node.children[2]);
+		node.replaceWith(node.children[2]);
 	else
 		node.children = node.children[2..$];
 }

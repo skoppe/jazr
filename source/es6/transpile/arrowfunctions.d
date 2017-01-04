@@ -21,12 +21,12 @@ import es6.nodes;
 import es6.scopes;
 import std.algorithm : map, each;
 import std.array : array;
+import es6.analyse;
 
 version (unittest)
 {
 	import unit_threaded;
 	import es6.parser;
-	import es6.analyse;
 	import std.stdio;
 	ArrowFunctionNode parseArrowFunction(string input, in string file = __FILE__, in size_t line = __LINE__)
 	{
