@@ -40,7 +40,7 @@ version(unittest)
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected));
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 
 	void assertNegateCondition(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
@@ -54,7 +54,7 @@ version(unittest)
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected));
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 }
 
@@ -239,6 +239,10 @@ void negateCondition(IfStatementNode node)
 @("negateCondition")
 unittest
 {
+	assertNegateCondition(
+		`if (a) b = 6;`,
+		`if (c) something_that_should_fail`
+	).shouldThrow();
 	assertNegateCondition(`if (45 > 46) b;`,`if (!(45 > 46)) b;`);
 	assertNegateCondition(`if (b > 6) b = 5;`,`if (!(b > 6)) b = 5;`);
 	assertNegateCondition(`if (c) b = 5;`,`if (!c) b = 5;`);

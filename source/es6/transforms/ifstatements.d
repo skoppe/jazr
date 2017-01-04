@@ -44,9 +44,6 @@ bool combineNestedIfs(Node node)
 	if (node.type != NodeType.IfStatementNode)
 		return false;
 
-	if (node.parent is null)
-		return false;
-
 	auto parent = node.as!IfStatementNode;
 
 	if (parent.hasElsePath)
@@ -68,9 +65,9 @@ bool combineNestedIfs(Node node)
 	if (child.hasElsePath)
 		return false;
 
-	combineExpressions(parent.condition, child.condition);
-
 	child.truthPath.node.branch.remove();
+
+	combineExpressions(parent.condition, child.condition);
 
 	child.truthPath.node.parent = null;
 	parent.truthPath.node.replaceWith(child.truthPath.node);
@@ -93,11 +90,19 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected));
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertCombineNestedIfs(
 		"function a() { if (a) if (c && d) return bla; }",
+		"function a() { if (a && c && d) return ook; }"
+	).shouldThrow();
+	assertCombineNestedIfs(
+		"function a() { if (a) if (c && d) return bla; }",
 		"function a() { if (a && c && d) return bla; }"
+	);
+	assertCombineNestedIfs(
+		"function a() { if (a) { c = d; if (c && d) return bla; } }",
+		"function a() { if (a) { c = d; if (c && d) return bla; } }"
 	);
 	/// ditto
 	assertCombineNestedIfs(
@@ -124,11 +129,21 @@ unittest
 		"function a() { if (a && b) { if (c || d) { return bla; } } }",
 		"function a() { if (a && b && (c || d)) { return bla } }"
 	);
+	/// ditto
 	assertCombineNestedIfs(
 		`if (b()) if (c()) d()`,
 		`if (b() && c()) d()`
 	);
-	// TODO: test cases where combining is not possible
+	/// ditto
+	assertCombineNestedIfs(
+		`if (b()) if (c()) d(); else e()`,
+		`if (b()) if (c()) d(); else e()`
+	);
+	/// ditto
+	assertCombineNestedIfs(
+		`if (b()) { if (c()) d() } else e()`,
+		`if (b()) { if (c()) d() } else e()`
+	);
 }
 
 // TODO: we can detect ifs faster by walking branches
@@ -185,14 +200,16 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		import std.stdio;
-		writeln(diff.getDiffMessage());
-		emit(got).shouldEqual(emit(expected),file,line);
+		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertConvertIfsToExpressionStatements(
 		"if (a) d = 5;",
 		"a && (d = 5)"
 	);
+	assertConvertIfsToExpressionStatements(
+		"if (a) d = 5;",
+		"b && (d = 5)"
+	).shouldThrow();
 	assertConvertIfsToExpressionStatements(
 		"if (a) d = 5; if (b) g = 5;",
 		"a && (d = 5); b && (g = 5)"
@@ -216,6 +233,14 @@ unittest
 	assertConvertIfsToExpressionStatements(
 		`if (a) { b = 7; for(;;) ; }`,
 		`if (a) { b = 7; for(;;) ; }`
+	);
+	assertConvertIfsToExpressionStatements(
+		`if (a) { b = 7; } else { }`,
+		`if (a) { b = 7; } else { }`
+	);
+	assertConvertIfsToExpressionStatements(
+		`if (a) { b = 7; }`,
+		`a && (b = 7)`
 	);
 }
 

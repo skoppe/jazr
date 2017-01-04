@@ -18,7 +18,9 @@
 module es6.scopes;
 
 import es6.nodes;
+import es6.utils;
 import std.format : formattedWrite;
+import std.algorithm : each;
 
 version (unittest)
 {
@@ -125,6 +127,21 @@ class Branch
 		this.children ~= b;
 		return b;
 	}
+	Branch newBranchAfter(Branch sibling, Node entry)
+	{
+		import std.array : insertInPlace;
+		auto idx = children.countUntil!(c=>c is sibling);
+		if (idx == -1)
+			return newBranch(entry);
+		auto b = new Branch(scp,this,entry);
+		children.insertInPlace(idx+1, b);
+		return b;
+	}
+	Branch newSiblingAfter(Node entry)
+	{
+		assert(this.parent);
+		return this.parent.newBranchAfter(this, entry);
+	}
 	bool hasHint(Hint h)()
 	{
 		return (hints & h) == h;
@@ -152,6 +169,20 @@ class Branch
 		children.remove(idx);
 		children = children[0..$-1];
 	}
+	Branch[] detachChildrenAfter(Branch b)
+	{
+		return this.removeChildrenAfter(b);
+	}
+	Branch[] detachSiblingsAfter() {
+		if (this.parent)
+			return this.parent.removeChildrenAfter(this);
+		assert(false);
+	}
+	void addChildren(Branch[] bs)
+	{
+		this.children ~= bs;
+		bs.each!(b => b.parent = this);
+	}
 	void toString(scope void delegate(const(char)[]) sink) const
 	{
 		prettyPrint(PrettyPrintSink(sink));
@@ -163,17 +194,6 @@ class Branch
 		sink.formattedWrite("------\n");
 		sink.print(children,level+1);
 	}
-}
-void assignBranch(Node n, Branch b)
-{
-	n.branch = b;
-	foreach(c; n.children)
-		c.assignBranch(b);
-}
-T withBranch(T : Node)(T n, Branch b)
-{
-	n.assignBranch(b);
-	return n;
 }
 void findGlobals(Scope scp)
 {

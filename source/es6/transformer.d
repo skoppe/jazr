@@ -20,6 +20,9 @@ module es6.transformer;
 import es6.nodes;
 import es6.scopes;
 
+version (unittest) {
+	import es6.parser;
+}
 // NOTE: Can be replaced with `import std.traits : Parameters;` when gdc/ldc support it
 import std.traits : isCallable, FunctionTypeOf;
 template Parameters(func...)
@@ -38,6 +41,7 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 
 	alias _funs = staticMap!(unaryFun, fun);
 
+	auto root = node;
 	Node[] todo = [node];
 	bool runNodes(Node node, bool entry = true)
 	{
@@ -51,15 +55,35 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 		}
 		foreach(_fun; _funs)
 		{
-			pragma(msg,Parameters!_fun[0]);
 			static if (is(Parameters!_fun[0] : Node))
 			{
 				if (_fun(node))
+				{
+					version (unittest) {
+						import std.stdio;
+						import es6.emitter;
+						import es6.analyse;
+						import unit_threaded;
+						auto str = emit(root);
+						auto expected = parseModule(str);
+						expected.analyseNode();
+						auto diff = diffTree(root,expected);
+						if (diff.type != Diff.No)
+							throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
+					}
 					r |= true;
+				}
 			} else static if (is(Parameters!_fun[0] : Scope))
 			{
 				if (entry && _fun(node.branch.scp))
+				{
+					version (unittest) {
+						import std.stdio;
+						import es6.emitter;
+						writeln(emit(root));
+					}
 					r |= true;
+				}
 			}
 		}
 		return r;

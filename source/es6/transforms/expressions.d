@@ -30,12 +30,6 @@ version(unittest)
 	import unit_threaded;
 	import es6.transformer;
 	import std.stdio;
-	Node parseExpression(string input)
-	{
-		auto parser = parser(input);
-		parser.scanToken();
-		return parser.parseExpression();
-	}
 }
 
 Node parenthesizeExpression(Node a)
@@ -64,12 +58,16 @@ Node combineExpressions(Node a, Node b)
 			a.addChild(new ExpressionOperatorNode(ExpressionOperator.LogicalAnd));
 			a.addChildren(b.children);
 		} else
+		{
+			b.assignBranch(a.branch);
 			a.addChildren([new ExpressionOperatorNode(ExpressionOperator.LogicalAnd), b]);
+		}
 		a.reanalyseHints();
 		return a;
 	} else if (b.type == NodeType.BinaryExpressionNode)
 	{
 		b.parent = null;
+		b.assignBranch(a.branch);
 		a.replaceWith(b).prependChildren([a, new ExpressionOperatorNode(ExpressionOperator.LogicalAnd)]);
 		b.reanalyseHints();
 		return b;
@@ -77,6 +75,7 @@ Node combineExpressions(Node a, Node b)
 	else
 	{
 		auto bin = new BinaryExpressionNode([]);
+		b.assignBranch(a.branch);
 		a.replaceWith(bin).addChildren([a, new ExpressionOperatorNode(ExpressionOperator.LogicalAnd), b]);
 		bin.reanalyseHints();
 		return bin;
@@ -100,13 +99,14 @@ unittest {
 
 		if (diff.type == Diff.No)
 			return;
-		import std.stdio;
-		writeln(diff.getDiffMessage());
-		emit(got).shouldEqual(emit(expected));
+
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
+	assertCombineExpressions(`a`,`b`,`a or b`).shouldThrow();
 	assertCombineExpressions(`a`,`b`,`a && b`);
 	assertCombineExpressions(`a && b`,`c`,`a && b && c`);
 	assertCombineExpressions(`a`,`b && c`,`a && b && c`);
+	assertCombineExpressions(`a && b`,`c && d`,`a && b && c && d`);
 	assertCombineExpressions(`a || b`,`c`,`(a || b) && c`);
 	assertCombineExpressions(`a`,`b || c`,`a && (b || c)`);
 	assertCombineExpressions(`a ? 1 : 2`,`b`,`(a ? 1 : 2) && b`);

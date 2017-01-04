@@ -43,8 +43,7 @@ bool simplifyRedundantAssignmentExpressions(Node node)
 		return false;
 	auto expr = node.as!ExpressionNode;
 
-	if (expr.isSingleExpression)
-		return false;
+	assert(!expr.isSingleExpression);
 	
 	if (expr.children[$-2].type != NodeType.AssignmentExpressionNode)
 		return false;
@@ -70,6 +69,9 @@ bool simplifyRedundantAssignmentExpressions(Node node)
 		return false;
 
 	expr.children = expr.children[0..$-1];
+
+	if (expr.children.length == 1)
+		expr.replaceWith(expr.children[0]);
 	return true;
 }
 
@@ -87,8 +89,13 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected));
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
+	assertTransformation
+	(
+		`if (a = 5) doBla();`,
+		`if (a = 5) doBla();`
+	);
 	assertTransformation
 	(
 		`if (a = 5, a) doBla();`,

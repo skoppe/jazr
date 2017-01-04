@@ -21,11 +21,12 @@ import es6.nodes;
 import es6.scopes;
 import es6.transforms.conditionals;
 import option;
+import std.algorithm : each;
+import es6.analyse;
 
 version(unittest)
 {
 	import es6.parser;
-	import es6.analyse;
 	import es6.emitter;
 	import unit_threaded;
 	import es6.transformer;
@@ -40,7 +41,8 @@ version(unittest)
 
 bool negateReturningIf(Scope s)
 {
-	foreach(branch; s.branch.children)
+	auto r = false;
+	foreach_reverse(branch; s.branch.children)
 	{
 		if (branch.entry.parent.type != NodeType.IfStatementNode ||
 			!branch.hasHint!(Hint.Return))
@@ -62,17 +64,22 @@ bool negateReturningIf(Scope s)
 			}
 			if (ifStmt.truthPath.isSingleStatement())
 			{
-				ifStmt.replaceWith(ifStmt.condition);
+				ifStmt.truthPath.branch.remove();
+				ifStmt.replaceWith(ifStmt.condition).reanalyseHints();
 			}
 			else {
-				ifStmt.truthPath.as!(BlockStatementNode).dropAllAfter(NodeType.ReturnStatementNode);
-				return false;
+				ifStmt.truthPath.as!(BlockStatementNode).dropAllFrom(NodeType.ReturnStatementNode);
+				ifStmt.truthPath.reanalyseHints();
 			}
 			return true;
 		}
 		IfPath target;
+
+		// THE Problem with the transfer is that we might end up moving branches inside this if statement and in that case we need to move the branches in the branches-children array as well
+		// // simply move all branches after this one into this one :)
 		if (ifStmt.truthPath.isSingleStatement())
 		{
+			branch.addChildren(branch.detachSiblingsAfter());
 			ifStmt.negateCondition();
 			if (ifStmt.hasElsePath)
 			{
@@ -86,11 +93,15 @@ bool negateReturningIf(Scope s)
 			target = ifStmt.truthPath;
 		} else
 		{
-			ifStmt.truthPath.as!(BlockStatementNode).dropAllAfter(NodeType.ReturnStatementNode);
+			ifStmt.truthPath.as!(BlockStatementNode).dropAllFrom(NodeType.ReturnStatementNode);
+			ifStmt.truthPath.reanalyseHints();
 			ifStmt.forceElsePath();
 			target = ifStmt.elsePath();
 		}
+		transfers.each!(t => t.assignBranch(target.branch));
 		target.addStatements(transfers);
+
+		return true;
 	}
 	return false;
 }
@@ -104,15 +115,18 @@ unittest
 		Node expected = parseModule(output);
 		got.analyseNode();
 		expected.analyseNode();
-		got.assertTreeInternals(file,line);
 		got.runTransform!(negateReturningIf);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected));
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	// Note: Need to test that we don't apply this optimisation if the `if (c) return;` is nested in a if-statement
+	assertReturnIfNegation(
+		`function a() { if (a) return; a = 5; }`,
+		`function a() { if (!a) { b = 5; } }`
+	).shouldThrow();
 	assertReturnIfNegation(
 		`function a() { if (a) return; a = 5; }`,
 		`function a() { if (!a) { a = 5; } }`
@@ -129,8 +143,8 @@ unittest
 	);
 	/// ditto
 	assertReturnIfNegation(
-		`function a() { if (a) return; a = 5; if (b) return; a = 7; }`,
-		`function a() { if (!a) { a = 5; if (!b) { a = 7 } } }`
+		`function a() { if (a) return; b = 5; if (c) return; d = 7; }`,
+		`function a() { if (!a) { b = 5; if (!c) { d = 7 } } }`
 	);
 	/// ditto
 	assertReturnIfNegation(

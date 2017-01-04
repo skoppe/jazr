@@ -23,6 +23,7 @@ import std.format : formattedWrite, format;
 import std.algorithm : each, countUntil;
 import std.range : lockstep;
 import option;
+import es6.utils;
 
 version(unittest)
 {
@@ -413,17 +414,9 @@ class Node
 	}
 	Node[] detachStatementsAfter(Node node)
 	{
-		// TODO: Need to test this
-		Node[] r;
-		auto idx = children.countUntil!(c => c is node);
-		if (idx == -1)
-			return r;
-		if (idx+1 == children.length)
-			return r;
-		r = children[idx+1..$];
-		children = children[0..idx+1];
-		r.each!(c => c.branch = null);
-		return r;
+		auto removed = this.removeChildrenAfter(node);
+		removed.each!(c => c.branch = null);
+		return removed;
 	}
 	Node findFirst(NodeType t)
 	{
@@ -1019,7 +1012,7 @@ class BlockStatementNode : Node
 	{
 		super(NodeType.BlockStatementNode,children);
 	}
-	void dropAllAfter(Node node)
+	void dropAllFrom(Node node)
 	{
 		// TODO: need to test this
 		auto idx = children.countUntil!(c => c is node);
@@ -1027,7 +1020,7 @@ class BlockStatementNode : Node
 			return;
 		children = children[0..idx];
 	}
-	void dropAllAfter(NodeType type)
+	void dropAllFrom(NodeType type)
 	{
 		// TODO: need to test this
 		auto idx = children.countUntil!(c => c.type == type);
@@ -1070,24 +1063,30 @@ struct IfPath
 			node.children = node.children[0..0];
 		else
 		{
-			node.replaceWith(new BlockStatementNode([]));
+			node = node.replaceWith(new BlockStatementNode([]));
 		}
 	}
 	void addStatements(Node[] children)
 	{
+		import es6.analyse;
 		if (isBlockStatement)
-			return node.addChildren(children);
-		Node p = node.parent;
-		Node block = new BlockStatementNode([]);
-		node.replaceWith(block);
-		block.addChild(node);
-		block.addChildren(children);
-		node = block;
+		{
+			node.addChildren(children);
+		} else {
+			Node block = new BlockStatementNode([]);
+			node.replaceWith(block);
+			block.addChild(node);
+			block.addChildren(children);
+			node = block;
+		}
+		this.reanalyseHints();
 	}
 	void addStatements(Option!(Node[]) children)
 	{
 		if (children.isDefined)
+		{
 			addStatements(children.get);
+		}
 	}
 }
 Node convertToAssignmentExpression(BlockStatementNode node)
@@ -1161,7 +1160,10 @@ class IfStatementNode : Node
 	{
 		if (hasElsePath)
 			return;
-		addChild(new BlockStatementNode([]));
+		auto block = new BlockStatementNode([]);
+		auto branch = truthPath.node.branch.newSiblingAfter(block);
+		addChild(block);
+		block.branch = branch;
 	}
 }
 class SwitchStatementNode : Node
@@ -1687,15 +1689,15 @@ string getDiffMessage(DiffResult d)
 		case Diff.No:
 			return "No difference";
 		case Diff.Type:
-			return format("Node a is of type %s but Node b is of type %s",d.a.type,d.b.type);
+			return format("Node a is of type %s but Node b is of type %s\n%s%s",d.a.type,d.b.type,d.a,d.b);
 		case Diff.Children:
 			return format("Node a has the following children\n%sYet node b has\n%s",d.a.children,d.b.children);
 		case Diff.Content:
 			return format("Node a doesn't have the same content as node b");
 		case Diff.BranchChildren:
-			return format("Branch a has %s children, but branch b has %s",d.a.branch.children.length,d.b.branch.children.length);
+			return format("Branch a has %s children, but branch b has %s\n%s%sFrom nodes\n%s%s",d.a.branch.children.length,d.b.branch.children.length,d.a.branch,d.b.branch,d.a,d.b);
 		case Diff.BranchEntryTypes:
-			return format("Branch a has entry\n%swhile branch b has\n%s",d.a,d.b);
+			return format("Branch a has entry\n%swhile branch b has\n%s--%s++%s",d.a,d.b,d.a.branch,d.b.branch);
 		case Diff.Hints:
 			return format("Node a has hints\n%swhile node b has\n%s",d.a,d.b);
 	}
@@ -1738,7 +1740,7 @@ void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __L
 			if (a.entry is null)
 				throw new UnitTestException([format("Branch has no entry.")],file,line);
 			if (a.entry.branch !is a) {
-				throw new UnitTestException([format("Branch's entry node doesn't refer to this branch\n%s",a.entry)],file,line);
+				throw new UnitTestException([format("Branch's entry node doesn't refer to this branch\n%s%s",a.entry.branch,a)],file,line);
 			}
 		}
 		if (a.parent is null)
@@ -1764,14 +1766,14 @@ void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __L
 	assert(a.branch.scp !is null);
 	assertScopeInternals(a.branch.scp);
 }
-private DiffResult diffBranch(Branch a, Branch b)
+private DiffResult diffBranch(Branch a, Branch b, Node c, Node d)
 {
 	import std.range : lockstep;
 	assert(a !is null && b !is null);
 	if (a.children.length != b.children.length)
-		return DiffResult(a.entry,b.entry,Diff.BranchChildren);
+		return DiffResult(c,d,Diff.BranchChildren);
 	if (a.entry.type != b.entry.type)
-		return DiffResult(a.entry,b.entry,Diff.BranchEntryTypes);
+		return DiffResult(c,d,Diff.BranchEntryTypes);
 
 	//foreach(ca,cb; lockstep(a.children,b.children))
 	//{
@@ -1779,7 +1781,7 @@ private DiffResult diffBranch(Branch a, Branch b)
 	//	if (r.type != Diff.No)
 	//		return r;
 	//}
-	return DiffResult(a.entry,b.entry,Diff.No);
+	return DiffResult(c,d,Diff.No);
 
 }
 DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = __LINE__)
@@ -1796,6 +1798,11 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 		return DiffResult(a,b,Diff.Type);
 	if (a.children.length != b.children.length)
 		return DiffResult(a,b,Diff.Children);
+
+	assert(a.branch !is null && b.branch !is null);
+	auto r = diffBranch(a.branch,b.branch,a,b);
+	if (r.type != Diff.No)
+		return r;
 	foreach(ca,cb; lockstep(a.children,b.children))
 	{
 		auto r = diffTree(ca,cb,file,line);
@@ -1805,9 +1812,7 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 		if (d != Diff.No)
 			return DiffResult(ca,cb,d);
 	}
-
-	assert(a.branch !is null && b.branch !is null);
-	return diffBranch(a.branch,b.branch);
+	return DiffResult(a,b,Diff.No);
 }
 @("diffTree")
 unittest

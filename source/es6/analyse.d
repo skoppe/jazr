@@ -542,10 +542,20 @@ private int getHintMask(Node n)
 {
 	switch (n.type)
 	{
-		case NodeType.FunctionBodyNode:
-			return ~(Hint.Return | Hint.ReturnValue);
 		case NodeType.ParenthesisNode:
 			return ~(Hint.Or);
+		case NodeType.IfStatementNode:
+			return ~(Hint.Return | Hint.ReturnValue);
+		default:
+			return ~(Hint.None);
+	}
+}
+private int getParentHintMask(Node n)
+{
+	switch (n.type)
+	{
+		case NodeType.FunctionBodyNode:
+			return ~(Hint.Return | Hint.ReturnValue);
 		default:
 			return ~(Hint.None);
 	}
@@ -556,12 +566,55 @@ void reanalyseHints(Node node)
 	import std.algorithm : reduce, map;
 	while(node !is null) {
 		int hints = calcHints(node);
-		hints |= node.children.map!(c => c.getHintMask() & c.hints.get).reduce!((a,b)=>a|b);
+		hints |= (node.getHintMask() & reduce!((a,b)=>a|b) (cast(int)Hint.None,node.children.map!(c => c.getParentHintMask() & c.hints.get)) );
 		if (start !is node && node.hints.get == hints)
 			return;
 		node.hints = hints;
 		node = node.parent;
 	}
+}
+void assignBranch(Node n, Branch b)
+{
+	n.branch = b;
+	switch(n.type)
+	{
+		case NodeType.FunctionDeclarationNode:
+		case NodeType.FunctionExpressionNode:
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.GeneratorExpressionNode:
+		case NodeType.ClassGetterNode:
+			n.children[0].assignBranch(b);
+			return;
+		case NodeType.ArrowFunctionNode:
+			return;
+		case NodeType.ClassMethodNode:
+		case NodeType.ClassGeneratorMethodNode:
+			n.children[1].assignBranch(b);
+			return;
+		case NodeType.ClassSetterNode:
+			n.children[0].assignBranch(b);
+			n.children[1].assignBranch(b);
+			return;
+		case NodeType.IfStatementNode:
+		case NodeType.SwitchStatementNode:
+		case NodeType.WhileStatementNode:
+			n.children[0].assignBranch(b);
+			return;
+		case NodeType.ForStatementNode:
+			n.children[0..$-1].each!(c => c.assignBranch(b));
+			return;
+		case NodeType.DoWhileStatementNode:
+			n.children[1].assignBranch(b);
+			return;
+		default:
+	}
+	foreach(c; n.children)
+		c.assignBranch(b);
+}
+T withBranch(T : Node)(T n, Branch b)
+{
+	n.assignBranch(b);
+	return n;
 }
 private int analyse(Node node, Scope s = null, Branch b = null)
 {
@@ -576,8 +629,7 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 		int hints = Hint.None;
 		foreach(idx, n; ns)
 		{
-			auto h = analyse(n,s,b);
-			hints |= n.getHintMask() & h;
+			hints |= (n.getParentHintMask() & analyse(n,s,b));
 		}
 		return hints;
 	}
@@ -700,8 +752,9 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 	{
 		hints |= analyseChildren(node.children,s,b);
 	}
+	hints = node.getHintMask() & hints;
 	node.hints = hints;
-	return node.getHintMask() & hints;
+	return hints & node.getParentHintMask();
 }
 AnalysisResult analyseNode(Node root)
 {
