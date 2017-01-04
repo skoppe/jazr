@@ -1027,13 +1027,14 @@ final class Parser(Source) : Lexer!(Source)
 	}
 	bool isIdentifierReservedKeyword(IdentifierNode i)
 	{
-		return (i.identifier == "break" || i.identifier == "do" || i.identifier == "in" || i.identifier == "typeof" || i.identifier == "case" || i.identifier == "else" ||
-			i.identifier == "instanceof" || i.identifier == "var" || i.identifier == "catch" || i.identifier == "export" || i.identifier == "new" ||
-			i.identifier == "void" || i.identifier == "class" || i.identifier == "extends" || i.identifier == "return" || i.identifier == "while" || i.identifier == "const" ||
-			i.identifier == "finally" || i.identifier == "super" || i.identifier == "with" || i.identifier == "continue" || i.identifier == "for" || i.identifier == "switch" ||
-			i.identifier == "yield" || i.identifier == "debugger" || i.identifier == "function" || i.identifier == "this" || i.identifier == "default" || i.identifier == "if" ||
-			i.identifier == "throw" || i.identifier == "delete" || i.identifier == "import" || i.identifier == "try" || i.identifier == "enum" || i.identifier == "await" ||
-			i.identifier == "null" || i.identifier == "true" || i.identifier == "false");
+		return i.identifier.isReservedKeyword();
+		//return (i.identifier == "break" || i.identifier == "do" || i.identifier == "in" || i.identifier == "typeof" || i.identifier == "case" || i.identifier == "else" ||
+		//	i.identifier == "instanceof" || i.identifier == "var" || i.identifier == "catch" || i.identifier == "export" || i.identifier == "new" ||
+		//	i.identifier == "void" || i.identifier == "class" || i.identifier == "extends" || i.identifier == "return" || i.identifier == "while" || i.identifier == "const" ||
+		//	i.identifier == "finally" || i.identifier == "super" || i.identifier == "with" || i.identifier == "continue" || i.identifier == "for" || i.identifier == "switch" ||
+		//	i.identifier == "yield" || i.identifier == "debugger" || i.identifier == "function" || i.identifier == "this" || i.identifier == "default" || i.identifier == "if" ||
+		//	i.identifier == "throw" || i.identifier == "delete" || i.identifier == "import" || i.identifier == "try" || i.identifier == "enum" || i.identifier == "await" ||
+		//	i.identifier == "null" || i.identifier == "true" || i.identifier == "false");
 	}
 	Node parseIdentifier(int attributes = 0)
 	{
@@ -2627,6 +2628,13 @@ unittest
 	parseClassDeclaration("class abc{m()").shouldThrowSaying("Expected opening brace");
 	parseClassDeclaration("class abc{m(){").shouldThrowSaying("Expected closing brace");
 }
+
+// TODO: This kills the parser/lexer
+	//assertCombineNestedIfs(
+	//	`if (b()) if (c()) d(); else e()`,
+	//	`if (b()) if (c()) d(); else e()`
+	//);
+
 @("parseImportDeclaration")
 unittest
 {

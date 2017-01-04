@@ -24,6 +24,7 @@ import es6.tokens;
 version (unittest)
 {
 	import unit_threaded;
+	import std.stdio;
 }
 enum State
 {
@@ -32,6 +33,76 @@ enum State
 	LexingTemplateLiteral
 }
 
+static string[] keywords = [
+	"await",
+	"break",
+	"case",
+	"catch",
+	"class",
+	"const",
+	"continue",
+	"debugger",
+	"default",
+	"delete",
+	"do",
+	"else",
+	"enum",
+	"export",
+	"extends",
+	"false",
+	"finally",
+	"for",
+	"function",
+	"if",
+	"import",
+	"in",
+	"instanceof",
+	"new",
+	"null",
+	"return",
+	"super",
+	"switch",
+	"this",
+	"throw",
+	"true",
+	"try",
+	"typeof",
+	"var",
+	"void",
+	"while",
+	"with",
+	"yield"
+];
+bool isReservedKeyword(string keyword)
+{
+	if (keyword.length == 0)
+		return false;
+	size_t start = 0, end = keywords.length;
+	foreach(size_t idx, dchar c; keyword)
+	{
+		foreach(word; keywords[start..end])
+		{
+			if (idx < word.length && word[idx] == c)
+				break;
+			start++;
+		}
+		if (start == end)
+			return false;
+		foreach(len, string word; keywords[start+1..end])
+		{
+			if (idx < word.length && word[idx] != c)
+			{
+				end = start + 1 + len;
+				break;
+			}
+		}
+		if (start == end)
+			return false;
+	}
+	if (keywords[start].length != keyword.length)
+		return false;
+	return true;
+}
 bool isWhitespace(Char)(Char c)
 {
 	return (c == '\u0009' || c == '\u000B' || c == '\u000C' || c == '\u0020' || c == '\u00A0' || c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
@@ -1102,4 +1173,14 @@ unittest
 	auto lexer = createLexer(".");
 	lexer.scanToken().shouldEqual(Token(Type.Dot));
 	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
+}
+@("keywords")
+unittest
+{
+	isReservedKeyword("await").shouldBeTrue;
+	isReservedKeyword("default").shouldBeTrue;
+	isReservedKeyword("default2").shouldBeFalse;
+	isReservedKeyword("yield").shouldBeTrue;
+	isReservedKeyword("").shouldBeFalse;
+	isReservedKeyword("a").shouldBeFalse;
 }
