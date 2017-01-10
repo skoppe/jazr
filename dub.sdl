@@ -19,3 +19,12 @@ configuration "unittest" {
 	dependency "unit-threaded" version="==0.7.2"
 	versions "Chatty"
 }
+configuration "pgo-profile" {
+	targetType "executable"
+	dflags "-fprofile-instr-generate=profile.raw"
+}
+configuration "pgo-build" {
+	preBuildCommands "./es6-parse \"--DRT-gcopt=disable:1\" -i ./tests/react-0.13.3.js --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
+	targetType "executable"
+	dflags "-fprofile-instr-use=profile.data"
+}

@@ -528,7 +528,7 @@ private int calcHints(Node node)
 		case NodeType.ImportDeclarationNode:
 			return Hint.NonExpression;
 		case NodeType.ReturnStatementNode:
-			return node.children.length == 0 ? Hint.Return : Hint.ReturnValue;
+			return Hint.NonExpression | (node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
 		case NodeType.ExpressionOperatorNode:
 			switch(node.as!(ExpressionOperatorNode).operator)
 			{
@@ -547,6 +547,8 @@ private int getHintMask(Node n)
 		case NodeType.ParenthesisNode:
 			return ~(Hint.Or);
 		case NodeType.IfStatementNode:
+			if (n.as!(IfStatementNode).bothPathsReturn)
+				return ~(Hint.None);
 			return ~(Hint.Return | Hint.ReturnValue);
 		default:
 			return ~(Hint.None);
@@ -1003,8 +1005,8 @@ unittest
 @("Hints")
 unittest
 {
-	getFirstChildScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.ReturnValue);
-	getFirstChildScope(`function a() { return }`).entry.hints.get.shouldEqual(Hint.Return);
+	getFirstChildScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.ReturnValue | Hint.NonExpression);
+	getFirstChildScope(`function a() { return }`).entry.hints.get.shouldEqual(Hint.Return | Hint.NonExpression);
 	getScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.NonExpression);
 }
 /*

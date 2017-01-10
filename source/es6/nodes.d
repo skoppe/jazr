@@ -24,6 +24,7 @@ import std.algorithm : each, countUntil;
 import std.range : lockstep;
 import option;
 import es6.utils;
+import es6.lexer : Keyword;
 import es6.analyse;
 
 version(unittest)
@@ -34,11 +35,6 @@ version(unittest)
 	import std.stdio;
 }
 
-enum Keyword
-{
-	This,
-	Null
-}
 enum Prefix {
 	Delete,
 	Void,
@@ -421,6 +417,18 @@ class Node
 			if (auto f = c.findFirst(t))
 				return f;
 		return null;
+	}
+	void removeChild(Node child)
+	{
+		import std.algorithm : remove;
+		this.children = this.children.remove!(c => c is child);
+	}
+	void detach()
+	{
+		if (this.parent is null)
+			return;
+		this.parent.removeChild(this);
+		this.parent = null;
 	}
 }
 
@@ -1151,6 +1159,14 @@ class IfStatementNode : Node
 	IfPath elsePath() { assert(hasElsePath); return IfPath(children[2]); }
 	Node condition() { return children[0]; }
 	void removeElsePath() { children[2].branch.remove(); children[2].parent = null; children = children[0..2]; }
+	bool bothPathsReturn()
+	{
+		// TODO: need to test
+		if (!hasElsePath)
+			return false;
+		return truthPath.node.hints.has(Hint.Return | Hint.ReturnValue) &&
+			elsePath.node.hints.has(Hint.Return | Hint.ReturnValue);
+	}
 	void forceElsePath()
 	{
 		if (hasElsePath)

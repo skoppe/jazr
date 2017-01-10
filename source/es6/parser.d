@@ -23,6 +23,7 @@ import es6.lexer;
 import es6.tokens;
 import es6.nodes;
 import es6.keywords;
+import std.array : appender;
 
 version (unittest)
 {
@@ -105,16 +106,16 @@ final class Parser(Source) : Lexer!(Source)
 	}
 	Node parseModule()
 	{
-		Node[] children;
+		auto children = appender!(Node[]);
 		while(token.type != Type.EndOfFile)
 		{
 			switch(token.type)
 			{
 				case Type.Identifier:
 					if (token.match == "import")
-						children ~= parseImportDeclaration();
+						children.put(parseImportDeclaration());
 					else if (token.match == "export")
-						children ~= parseExportDeclaration();
+						children.put(parseExportDeclaration());
 					else
 						goto default;
 					break;
@@ -124,11 +125,11 @@ final class Parser(Source) : Lexer!(Source)
 					scanAndSkipCommentsAndTerminators();
 					break;
 				default:
-					children ~= parseStatementListItem();
+					children.put(parseStatementListItem());
 					break;
 			}
 		}
-		return new ModuleNode(children);
+		return new ModuleNode(children.data);
 	}
 	Node parseImportDeclaration()
 	{
@@ -254,12 +255,12 @@ final class Parser(Source) : Lexer!(Source)
 		} else if (token.type == Type.Identifier && token.match == "default")
 		{
 			scanAndSkipCommentsAndTerminators();
-			switch(token.match)
+			switch(Keywords.get(token.match))
 			{
-				case "function":
+				case Keyword.Function:
 					decl = new ExportDefaultDeclarationNode(parseFunctionDeclaration(Attribute.Default));
 					break;
-				case "class":
+				case Keyword.Class:
 					decl = new ExportDefaultDeclarationNode(parseClassDeclaration(Attribute.Default));
 					break;
 				default:
@@ -432,14 +433,14 @@ final class Parser(Source) : Lexer!(Source)
 					children ~= new PropertyDefinitionNode(name,expr);
 					break;
 				case Type.Identifier:
-					switch (token.match)
+					switch (Keywords.get(token.match))
 					{
-						case "set":
+						case Keyword.Set:
 							if (lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon))
 								goto default;
 							children ~= parseClassSetter(staticAttr,attributes.mask!(Attribute.Yield));
 							break;
-						case "get":
+						case Keyword.Get:
 							if (lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon))
 								goto default;
 							children ~= parseClassGetter(staticAttr,attributes.mask!(Attribute.Yield));
@@ -592,14 +593,14 @@ final class Parser(Source) : Lexer!(Source)
 		switch (token.type)
 		{
 			case Type.Identifier:
-				switch(token.match)
+				switch(Keywords.get(token.match))
 				{
-					case "this": scanToken(); return new KeywordNode(Keyword.This);
-					case "null": scanToken(); return new KeywordNode(Keyword.Null);
-					case "true": scanToken(); return new BooleanNode(true);
-					case "false": scanToken(); return new BooleanNode(false);
-					case "function": return parseFunctionExpression();
-					case "class": return parseClassExpression(attributes);
+					case Keyword.This: scanToken(); return new KeywordNode(Keyword.This);
+					case Keyword.Null: scanToken(); return new KeywordNode(Keyword.Null);
+					case Keyword.True: scanToken(); return new BooleanNode(true);
+					case Keyword.False: scanToken(); return new BooleanNode(false);
+					case Keyword.Function: return parseFunctionExpression();
+					case Keyword.Class: return parseClassExpression(attributes);
 					default:
 						auto node = parseIdentifier(attributes);
 						return node;
@@ -710,7 +711,9 @@ final class Parser(Source) : Lexer!(Source)
 
 		if (empty)
 			return cond;
-		Node[] children = [cond];
+		Node[] children;
+		children.reserve(3);
+		children ~= cond;
 		while (!empty)
 		{
 			switch (token.type)
@@ -783,13 +786,13 @@ final class Parser(Source) : Lexer!(Source)
 			switch (token.type)
 			{
 				case Type.Identifier:
-					switch (token.match)
+					switch (Keywords.get(token.match))
 					{
-						case "instanceof":
+						case Keyword.Instanceof:
 							children ~= new ExpressionOperatorNode(ExpressionOperator.InstanceOf);
 							scanToken();
 							break;
-						case "in":
+						case Keyword.In:
 							if (!attributes.has!(Attribute.In))
 							{
 								if (children.length == 1)
@@ -841,15 +844,15 @@ final class Parser(Source) : Lexer!(Source)
 			switch (token.type)
 			{
 				case Type.Identifier:
-					switch (token.match)
+					switch (Keywords.get(token.match))
 					{
-						case "delete": prefixExprs ~= new PrefixExpressionNode(Prefix.Delete);
+						case Keyword.Delete: prefixExprs ~= new PrefixExpressionNode(Prefix.Delete);
 							scanToken();
 							break;
-						case "void": prefixExprs ~= new PrefixExpressionNode(Prefix.Void);
+						case Keyword.Void: prefixExprs ~= new PrefixExpressionNode(Prefix.Void);
 							scanToken();
 							break;
-						case "typeof": prefixExprs ~= new PrefixExpressionNode(Prefix.Typeof);
+						case Keyword.Typeof: prefixExprs ~= new PrefixExpressionNode(Prefix.Typeof);
 							scanToken();
 							break;
 						default:
@@ -943,12 +946,12 @@ final class Parser(Source) : Lexer!(Source)
 			switch (token.type)
 			{
 				case Type.Identifier:
-					switch (token.match)
+					switch (Keywords.get(token.match))
 					{
-						case "super":
+						case Keyword.Super:
 							content = parseSuperProperty(attributes);
 							break;
-						case "new":
+						case Keyword.New:
 							news++;
 							scanToken();
 							break;
@@ -1144,21 +1147,21 @@ final class Parser(Source) : Lexer!(Source)
 			case Type.OpenCurlyBrace:
 				return parseBlockStatement(attributes);
 			case Type.Identifier:
-				switch (token.match)
+				switch (Keywords.get(token.match))
 				{
-					case "var": node = parseVariableStatement(attributes.mask!(Attribute.Yield)); break;
-					case "if": node = parseIfStatement(attributes); break;
-					case "switch": node = parseSwitchStatement(attributes); break;
-					case "do": node = parseDoWhileStatement(attributes); break;
-					case "while": node = parseWhileStatement(attributes); break;
-					case "for": node = parseForStatement(attributes); break;
-					case "continue": scanToken(); node = new ContinueStatementNode(); break;
-					case "break": scanToken(); node = new BreakStatementNode(); break;
-					case "with": node = parseWithStatement(attributes); break;
-					case "throw": node = parseThrowStatement(attributes); break;
-					case "try": node = parseTryStatement(attributes); break;
-					case "debugger": node = parseDebuggerStatement(); break;
-					case "return":
+					case Keyword.Var: node = parseVariableStatement(attributes.mask!(Attribute.Yield)); break;
+					case Keyword.If: node = parseIfStatement(attributes); break;
+					case Keyword.Switch: node = parseSwitchStatement(attributes); break;
+					case Keyword.Do: node = parseDoWhileStatement(attributes); break;
+					case Keyword.While: node = parseWhileStatement(attributes); break;
+					case Keyword.For: node = parseForStatement(attributes); break;
+					case Keyword.Continue: scanToken(); node = new ContinueStatementNode(); break;
+					case Keyword.Break: scanToken(); node = new BreakStatementNode(); break;
+					case Keyword.With: node = parseWithStatement(attributes); break;
+					case Keyword.Throw: node = parseThrowStatement(attributes); break;
+					case Keyword.Try: node = parseTryStatement(attributes); break;
+					case Keyword.Debugger: node = parseDebuggerStatement(); break;
+					case Keyword.Return:
 						if (!attributes.has!(Attribute.Return))
 						{
 							scanAndSkipCommentsAndTerminators();
@@ -1250,16 +1253,16 @@ final class Parser(Source) : Lexer!(Source)
 		Node node;
 		if (token.type == Type.Identifier)
 		{
-			switch(token.match)
+			switch(Keywords.get(token.match))
 			{
-				case "class":
+				case Keyword.Class:
 					node = parseClassDeclaration(attributes.mask!(Attribute.Yield));
 					break;
-				case "function":
+				case Keyword.Function:
 					node = parseFunctionDeclaration(attributes.mask!(Attribute.Yield));
 					break;
-				case "let":
-				case "const":
+				case Keyword.Let:
+				case Keyword.Const:
 					node = parseLexicalDeclaration(Attribute.In | attributes.mask!(Attribute.Yield));
 					break;
 				default:
@@ -1277,9 +1280,9 @@ final class Parser(Source) : Lexer!(Source)
 		while(token.type == Type.MultiLineComment || token.type == Type.SingleLineComment || token.type == Type.LineTerminator)
 			scanToken();
 	}
-	void scanAndSkipCommentsAndTerminators(in string file = __FILE__, in size_t line = __LINE__)
+	void scanAndSkipCommentsAndTerminators()
 	{
-		scanToken(file,line);
+		scanToken();
 		skipCommentsAndLineTerminators();
 	}
 	Node parseVariableStatement(int attributes = 0)
@@ -1443,9 +1446,9 @@ final class Parser(Source) : Lexer!(Source)
 			switch(token.type)
 			{
 				case Type.Identifier:
-					switch(token.match)
+					switch(Keywords.get(token.match))
 					{
-						case "case":
+						case Keyword.Case:
 							scanToken();
 							Node[] caseChildren = [parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
 							if (token.type != Type.Colon)
@@ -1455,7 +1458,7 @@ final class Parser(Source) : Lexer!(Source)
 							caseChildren ~= parseStatementList(attributes);
 							children ~= new CaseNode(caseChildren);
 							break;
-						case "default":
+						case Keyword.Default:
 							Node[] caseChildren = [];
 							scanAndSkipCommentsAndTerminators();
 							if (token.type != Type.Colon)
@@ -1561,9 +1564,9 @@ final class Parser(Source) : Lexer!(Source)
 			switch(token.type)
 			{
 				case Type.Identifier:
-					switch (token.match)
+					switch (Keywords.get(token.match))
 					{
-						case "var":
+						case Keyword.Var:
 							scanAndSkipCommentsAndTerminators();
 							auto varStmt = parseVariableDeclarationList(attributes.mask!(Attribute.Yield));
 							// todo what abour error
@@ -1610,8 +1613,8 @@ final class Parser(Source) : Lexer!(Source)
 							scanAndSkipCommentsAndTerminators();
 							children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
 							return new ForStatementNode(ForLoop.VarCStyle,children);
-						case "let":
-						case "const":
+						case Keyword.Let:
+						case Keyword.Const:
 							bool constDecl = token.match == "const";
 							auto lexDecl = parseLexicalDeclaration(attributes.mask!(Attribute.Yield));
 							if (lexDecl.children.length == 1 && lexDecl.children[0].children.length == 1 && token.type == Type.Identifier)
@@ -1847,20 +1850,20 @@ final class Parser(Source) : Lexer!(Source)
 			switch(token.type)
 			{
 				case Type.Identifier:
-					switch (token.match)
+					switch (Keywords.get(token.match))
 					{
-						case "static":
+						case Keyword.Static:
 							if (staticAttr)
 								return error("Expected class method after static");
 							staticAttr = true;
 							scanAndSkipCommentsAndTerminators();
 							continue;
-						case "set":
+						case Keyword.Set:
 							methods ~= parseClassSetter(staticAttr,attributes.mask!(Attribute.Yield));
 							if (methods[$-1].type == NodeType.ErrorNode)
 								return methods[$-1];
 							break;
-						case "get":
+						case Keyword.Get:
 							methods ~= parseClassGetter(staticAttr,attributes.mask!(Attribute.Yield));
 							if (methods[$-1].type == NodeType.ErrorNode)
 								return methods[$-1];
@@ -2485,7 +2488,7 @@ unittest
 	parseObjectLiteral("{c=6}");
 	parseObjectLiteral("{c=6").shouldThrowSaying("Error: Expected closing curly brace before EndOfFile");
 	parseObjectLiteral(`{"abc"}`).shouldThrowSaying("Error: Expected colon as part of PropertyDefinition");
-	parseObjectLiteral(`{function}`).shouldThrowSaying("Error: Unexpected keyword function");
+	//parseObjectLiteral(`{function}`).shouldThrowSaying("Error: Unexpected keyword function");
 	parseObjectLiteral(`{,}`).shouldThrowSaying("Error: Expected a PropertyDefinition");
 
 }

@@ -33,79 +33,128 @@ enum State
 	LexingTemplateLiteral
 }
 
-static string[] keywords = [
-	"await",
-	"break",
-	"case",
-	"catch",
-	"class",
-	"const",
-	"continue",
-	"debugger",
-	"default",
-	"delete",
-	"do",
-	"else",
-	"enum",
-	"export",
-	"extends",
-	"false",
-	"finally",
-	"for",
-	"function",
-	"if",
-	"import",
-	"in",
-	"instanceof",
-	"new",
-	"null",
-	"return",
-	"super",
-	"switch",
-	"this",
-	"throw",
-	"true",
-	"try",
-	"typeof",
-	"var",
-	"void",
-	"while",
-	"with",
-	"yield"
-];
+enum Keyword {
+	Unknown = 0, 
+	Static = 1, 
+	True = 2, 
+	Await = 3, 
+	Enum = 4, 
+	Instanceof = 5, 
+	Import = 6, 
+	Null = 7, 
+	New = 8, 
+	Throw = 9, 
+	Export = 10, 
+	False = 11, 
+	This = 12, 
+	Continue = 13, 
+	For = 14, 
+	With = 15, 
+	Extends = 16, 
+	If = 17, 
+	Return = 18, 
+	Function = 19, 
+	Catch = 20, 
+	Var = 21, 
+	While = 22, 
+	Switch = 23, 
+	Void = 24, 
+	Const = 25, 
+	Finally = 26, 
+	Try = 27, 
+	Set = 28, 
+	Typeof = 29, 
+	Let = 30, 
+	Get = 31, 
+	Case = 32, 
+	Delete = 33, 
+	In = 34, 
+	Super = 35, 
+	Else = 36, 
+	Break = 37, 
+	Yield = 38, 
+	Default = 39, 
+	Class = 40, 
+	Debugger = 41, 
+	Do = 42
+};
+
+
+struct Keywords
+{
+
+private:
+
+    /*
+        rendered on 2017-Jan-10 18:04:32.066315 by IsItThere.
+         - PRNG seed: 0
+         - map length: 128
+    */
+
+    static const string[128] _words = ["", "static", "", "true", "", "", "", "await", "enum", "", "instanceof", "", "", "import", "", "", "null", "", "", "", "new", "", "", "", "throw", "", "export", "", "", "false", "this", "continue", "", "for", "with", "", "", "", "extends", "", "", "", "", "if", "", "return", "", "function", "", "catch", "var", "", "", "", "", "", "while", "", "", "", "", "", "", "switch", "void", "", "", "const", "", "", "", "finally", "", "", "", "", "", "", "", "", "try", "", "set", "typeof", "let", "", "", "", "", "", "get", "", "case", "delete", "in", "super", "", "", "", "", "", "", "", "", "else", "", "", "", "break", "", "", "yield", "", "", "", "", "", "default", "class", "", "", "", "", "", "debugger", "", "", "do"];
+
+    static const bool[128] _filled = [false, true, false, true, false, false, false, true, true, false, true, false, false, true, false, false, true, false, false, false, true, false, false, false, true, false, true, false, false, true, true, true, false, true, true, false, false, false, true, false, false, false, false, true, false, true, false, true, false, true, true, false, false, false, false, false, true, false, false, false, false, false, false, true, true, false, false, true, false, false, false, true, false, false, false, false, false, false, false, false, true, false, true, true, true, false, false, false, false, false, true, false, true, true, true, true, false, false, false, false, false, false, false, false, true, false, false, false, true, false, false, true, false, false, false, false, false, true, true, false, false, false, false, false, true, false, false, true];
+
+    static const ubyte[256] _coefficients = [132, 83, 10, 140, 38, 217, 84, 227, 160, 231, 126, 71, 63, 65, 208, 248, 35, 53, 231, 149, 28, 47, 221, 156, 181, 179, 242, 128, 220, 240, 200, 1, 7, 98, 188, 71, 101, 80, 212, 39, 255, 159, 40, 138, 80, 28, 128, 181, 67, 0, 6, 33, 202, 183, 205, 167, 49, 197, 132, 164, 23, 32, 126, 196, 135, 3, 8, 66, 61, 205, 138, 124, 250, 217, 135, 125, 115, 200, 112, 18, 167, 137, 94, 185, 78, 59, 26, 1, 239, 80, 152, 75, 64, 46, 102, 194, 62, 37, 231, 4, 213, 154, 42, 161, 229, 1, 141, 249, 27, 20, 221, 42, 226, 210, 205, 153, 159, 125, 192, 29, 8, 100, 149, 30, 201, 110, 176, 63, 110, 1, 147, 21, 201, 5, 128, 207, 169, 255, 135, 247, 137, 126, 204, 90, 128, 215, 176, 225, 172, 224, 82, 13, 61, 91, 74, 43, 102, 249, 165, 178, 238, 153, 209, 87, 46, 214, 5, 231, 27, 138, 124, 44, 62, 79, 239, 189, 5, 68, 227, 235, 190, 91, 222, 155, 123, 11, 161, 33, 250, 199, 246, 21, 151, 248, 44, 39, 20, 80, 131, 88, 200, 133, 109, 0, 2, 164, 3, 177, 25, 87, 220, 53, 190, 122, 102, 130, 110, 8, 92, 240, 135, 96, 34, 240, 60, 8, 59, 107, 230, 82, 131, 104, 206, 168, 155, 135, 98, 40, 82, 207, 100, 238, 20, 139, 169, 187, 39, 255, 193, 91, 51, 21, 174, 226, 230, 200];
+
+    static const Keyword[128] _map = [Keyword.Unknown, Keyword.Static, Keyword.Unknown, Keyword.True, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Await, Keyword.Enum, Keyword.Unknown, Keyword.Instanceof, Keyword.Unknown, Keyword.Unknown, Keyword.Import, Keyword.Unknown, Keyword.Unknown, Keyword.Null, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.New, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Throw, Keyword.Unknown, Keyword.Export, Keyword.Unknown, Keyword.Unknown, Keyword.False, Keyword.This, Keyword.Continue, Keyword.Unknown, Keyword.For, Keyword.With, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Extends, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.If, Keyword.Unknown, Keyword.Return, Keyword.Unknown, Keyword.Function, Keyword.Unknown, Keyword.Catch, Keyword.Var, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.While, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Switch, Keyword.Void, Keyword.Unknown, Keyword.Unknown, Keyword.Const, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Finally, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Try, Keyword.Unknown, Keyword.Set, Keyword.Typeof, Keyword.Let, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Get, Keyword.Unknown, Keyword.Case, Keyword.Delete, Keyword.In, Keyword.Super, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Else, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Break, Keyword.Unknown, Keyword.Unknown, Keyword.Yield, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Default, Keyword.Class, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Debugger, Keyword.Unknown, Keyword.Unknown, Keyword.Do];
+    
+    static ushort hash(const char[] word) nothrow pure @safe @nogc
+    {
+        ushort result;
+        foreach(i; 0..word.length)
+        {
+            result += _coefficients[word[i]];
+        }
+        return result % 128;
+    }
+
+public:
+
+    static string opBinaryRight(string op: "in")(const string word)
+    {
+        const ushort h = hash(word);
+        final switch(_filled[h])
+        {
+            case false: return word;
+            case true:  
+            	if (_words[h].length != word.length || _words[h] != word)
+            		return word;
+            	return _words[h];
+        }
+    }
+    static Keyword get()(const string word)
+    {
+        const ushort h = hash(word);
+        if (!_filled[h])
+        	return Keyword.Unknown;
+        auto type = _map[h];
+        if (type == Keyword.Unknown || _words[h].length != word.length || _words[h] != word)
+        	return Keyword.Unknown;
+        return type;
+    }
+}
+
 bool isReservedKeyword(string keyword)
 {
-	if (keyword.length == 0)
+	if (keyword.length < 2 || keyword.length > 10)
 		return false;
-	size_t start = 0, end = keywords.length;
-	foreach(size_t idx, dchar c; keyword)
-	{
-		foreach(word; keywords[start..end])
-		{
-			if (idx < word.length && word[idx] == c)
-				break;
-			start++;
-		}
-		if (start == end)
-			return false;
-		foreach(len, string word; keywords[start+1..end])
-		{
-			if (idx < word.length && word[idx] != c)
-			{
-				end = start + 1 + len;
-				break;
-			}
-		}
-		if (start == end)
-			return false;
-	}
-	if (keywords[start].length != keyword.length)
-		return false;
-	return true;
+	auto k = Keywords.get(keyword);
+	return k != Keyword.Unknown &&
+		k != Keyword.Static &&
+		k != Keyword.Set &&
+		k != Keyword.Let &&
+		k != Keyword.Get;
 }
 bool isWhitespace(Char)(Char c)
 {
-	return (c == '\u0009' || c == '\u000B' || c == '\u000C' || c == '\u0020' || c == '\u00A0' || c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
+	if (c < '\u0021')
+		return c == '\u0009' || c == '\u000B' || c == '\u000C' || c == '\u0020';
+	if (c == '\u00A0')
+		return true;
+	if (c < '\u02B0')
+		return false;
+	return (c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
 }
 @("isWhitespace")
 unittest
@@ -141,7 +190,7 @@ unittest
 }
 auto isLineTerminator(Char)(Char s)
 {
-	return (s == '\u000A' || s == '\u2028' || s == '\u2029' || s == '\u000D');
+	return (s == '\u000A' || s == '\u000D' || s == '\u2028' || s == '\u2029');
 }
 @("isLineTerminator")
 unittest
@@ -157,24 +206,44 @@ auto isStartIdentifier(Char)(Char chr)
 }
 auto isTailIdentifier(Char)(Char chr)
 {
-	return chr == '\u2118' || chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c') || (chr >= '\u0030' && chr <= '\u0039') || 
-		(chr >= '\u0041' && chr <= '\u005a') || chr == '\u005f' || (chr >= '\u0061' && chr <= '\u007a') || chr == '\u00aa' || 
-		chr == '\u00b5' || chr == '\u00b7' || chr == '\u00ba' || (chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') ||
-		chr == '\u00b7' || chr == '\u0387' || (chr >= '\u1369' && chr <= '\u1371') || chr == '\u19da' || chr == '$' || chr == '_' || chr == '\u200C' ||
-		chr == '\u200D';
+	return 
+		(chr >= '\u0061' && chr <= '\u007a') || (chr >= '\u0041' && chr <= '\u005a') ||  (chr >= '\u0030' && chr <= '\u0039') || 
+		(!isWhitespace(chr) && (
+			chr == '$' || chr == '_' || chr == '\u005f' ||
+			(chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') ||
+			chr == '\u2118' || chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c') || chr == '\u00aa' || 
+			chr == '\u00b5' || chr == '\u00b7' || chr == '\u00ba' ||
+			chr == '\u00b7' || chr == '\u0387' || (chr >= '\u1369' && chr <= '\u1371') || chr == '\u19da' || chr == '\u200C' ||
+			chr == '\u200D')
+		);
 }
 auto coerceToSingleQuotedString(string str)
 {
+	import std.algorithm : max,min;
 	if (str.length == 0)
 		return str;
-	import std.regex;
-	auto escapedDouble = ctRegex!(`\\"`);
-	auto unescapedSingle = ctRegex!(`(?<!\\)'`);
-	//unescape "
-	str = replaceAll(str,escapedDouble,"\"");
-	//escape '
-	str = replaceAll(str,unescapedSingle,"\\\'");
-	return str;
+	auto sink = appender!string;
+	sink.reserve(str.length+max(2,min(str.length / 4, 5)));
+
+	bool escape = false;
+	foreach(s; str)
+	{
+		if (escape)
+		{
+			if (s != '"')
+				sink.put('\\');
+			escape = s == '\\';
+		}
+		if (s == '\\')
+		{
+			escape = true;
+			continue;
+		}
+		if (s == '\'')
+			sink.put('\\');
+		sink.put(s);
+	}
+	return sink.data;
 }
 unittest
 {
@@ -224,7 +293,7 @@ class Lexer(Source)
 		s = source;
 		pushState(s.empty ? State.EndOfFile : State.TokensRemaining);
 	}
-	auto scanToken(in string file = __FILE__, in size_t l = __LINE__)
+	auto scanToken()
 	{
 		if (newLine)
 		{
@@ -281,46 +350,41 @@ class Lexer(Source)
 		}
 		return Token(Type.Error,format("Invalid character %s to start identifier",chr));
 	}
-	Token lexTailIdentifier(ref size_t idx)
-	{
-		import std.format : format;
-		dchar chr = s[idx];
-		idx++;
-		tokenLength++;
-		if (chr == '\\')
-		{
-			chr = s[idx];
-			idx++;
-			tokenLength++;
-			if (chr != 'u')
-			{
-				if (chr == '\u0000')
-					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
-				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
-			}
-			idx += 4;
-			tokenLength += 4;
-			return lexUnicodeEscapeSequence(idx-4);
-		} else if (chr.isTailIdentifier)
-		{
-			return Token(Type.TailIdentifier);
-		} else if (chr == '\u0000')
-			return Token(Type.EndIdentifier);
-		return Token(Type.EndIdentifier);
-	}
 	Token lexIdentifier()
 	{
+		import std.format : format;
 		size_t idx = 0;
 		auto t = lexStartIdentifier(idx);
+		if (t.type == Type.Error)
+		{
+			s = s[idx..$];
+			return t;
+		}
 		for(;;)
 		{
-			if (t.type == Type.Error)
+			dchar chr = s[idx++];
+			tokenLength++;
+			if (chr == '\\')
 			{
-				s = s[idx..$];
-				return t;
-			}
-			t = lexTailIdentifier(idx);
-			if (t.type == Type.EndIdentifier)
+				chr = s[idx++];
+				tokenLength++;
+				if (chr != 'u')
+				{
+					s = s[idx..$];
+					if (chr == '\u0000')
+						return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
+					return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+				}
+				// TODO: when lexUnicodeEscapeSequence fails midway, we have already advanced idx and tokenLength by 4...
+				idx += 4;
+				tokenLength += 4;
+				auto token = lexUnicodeEscapeSequence(idx-4);
+				if (token.type == Type.Error)
+				{
+					s = s[idx..$];
+					return token;
+				}
+			} else if (!chr.isTailIdentifier)
 			{
 				auto tok = Token(Type.Identifier,s[0..idx-1]);
 				s = s[idx-1..$];
@@ -1177,6 +1241,7 @@ unittest
 @("keywords")
 unittest
 {
+	assert("await" in Keywords);
 	isReservedKeyword("await").shouldBeTrue;
 	isReservedKeyword("default").shouldBeTrue;
 	isReservedKeyword("default2").shouldBeFalse;

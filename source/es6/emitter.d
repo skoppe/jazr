@@ -170,10 +170,10 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			if (guide & Guide.NotStartWithIdentifierStart)
 				sink.put(" ");
 			auto n = node.as!KeywordNode;
-			final switch(n.keyword)
+			switch(n.keyword)
 			{
 				case Keyword.This: sink.put("this"); break;
-				case Keyword.Null: sink.put("null"); break;
+				case Keyword.Null: sink.put("null"); break; default: assert(0);
 			}
 			return Guide.RequiresDelimiter;
 		case NodeType.IdentifierNode:

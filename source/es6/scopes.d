@@ -21,6 +21,7 @@ import es6.nodes;
 import es6.utils;
 import std.format : formattedWrite;
 import std.algorithm : each, countUntil;
+import option;
 
 version (unittest)
 {
@@ -47,6 +48,7 @@ struct Variable
 {
 	IdentifierType type;
 	IdentifierNode node;
+	Node[] references;
 	this(IdentifierNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.format;
@@ -58,9 +60,23 @@ struct Variable
 struct Identifier
 {
 	IdentifierNode node;
+	Node definition;
 	this(IdentifierNode n)
 	{
 		node = n;
+	}
+}
+private void linkToDefinition(Scope s, ref Identifier i)
+{
+	auto idx = s.variables.countUntil!(v => v.node.identifier == i.node.identifier);
+	if (idx == -1)
+	{
+		if (s.parent)
+			s.parent.linkToDefinition(i);
+	} else
+	{
+		s.variables[idx].references ~= i.node;
+		i.definition = s.variables[idx].node;
 	}
 }
 class Scope
@@ -97,6 +113,7 @@ class Scope
 	}
 	void addIdentifier(Identifier i)
 	{
+		this.linkToDefinition(i);
 		identifiers ~= i;
 	}
 	Variable[] getVariables()
@@ -107,6 +124,35 @@ class Scope
 	{
 		return globals;
 	}
+	void removeVariable(Node node)
+	{
+		import std.algorithm : remove;
+		variables = variables.remove!(v => v.node is node);
+		node.detach();
+	}
+	// only works after analyses
+	bool isGlobal(string identifier)
+	{
+		import std.algorithm : canFind, filter;
+		if (variables
+				.canFind!((a,b) => a.node.identifier == b)(identifier))
+			return false;
+		if (identifiers
+				.filter!(i => i.definition is null || i.definition.branch.scp !is this)
+				.canFind!((a,b) => a.node.identifier == b)(identifier))
+			return true;
+		foreach(c; children)
+			if (c.isGlobal(identifier))
+				return true;
+		return false;
+	}
+}
+import std.range : ElementType;
+auto onlyParameters(Range)(Range vs)
+	if (is (ElementType!Range : Variable))
+{
+	import std.algorithm : filter;
+	return vs.filter!(v => v.type == IdentifierType.Parameter);
 }
 class Branch
 {
@@ -224,6 +270,59 @@ unittest
 	s.children[0].assertGlobals(["b"]);
 	s.children[0].children[0].assertGlobals(["a","d","b"]);
 }
+@("isGlobal")
+unittest
+{
+	void assertGlobals(Scope scp, string[] expected, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		foreach(e; expected)
+			scp.isGlobal(e).shouldBeTrue(file,line);
+	}
+	void assertNonGlobals(Scope scp, string[] expected, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		foreach(e; expected)
+			scp.isGlobal(e).shouldBeFalse(file,line);
+	}
+	assertNonGlobals(getScope(`var a,b,c;`),["a","b","c"]);
+	assertGlobals(getScope(`a,b,c;`),["a","b","c"]);
+	auto s = getScope(`var a,b; function e(c){ var d; return a*b*c*d; }`);
+	assertNonGlobals(s,["a","b"]);
+	assertGlobals(s.children[0],["a","b"]);
+	s = getScope(`function e(c){ var d; return a*b*c*d; }`);
+	assertGlobals(s,["a","b"]);
+	assertGlobals(s.children[0],["a","b"]);
+	s = getScope(`function bla(a){function c(c){return a*c*d*b}var d,e}`);
+	assertGlobals(s,["b"]);
+	assertNonGlobals(s,["a","d"]);
+	assertGlobals(s.children[0],["b"]);
+	assertNonGlobals(s.children[0],["a","d"]);
+	assertGlobals(s.children[0].children[0],["a","d","b"]);
+}
+
+@("linkToDefinition")
+unittest
+{
+	auto s = getScope(`var a,b,c; a = 6`);
+	s.identifiers.length.shouldEqual(1);
+	s.variables.length.shouldEqual(3);
+	assert(s.variables[0].node is s.identifiers[0].definition);
+	s.variables[0].references.length.shouldEqual(1);
+	assert(s.variables[0].references[0] is s.identifiers[0].node);
+
+	s = getScope(`var a,b; function c() { return a; }`);
+	s.children[0].identifiers.length.shouldEqual(1);
+	assert(s.variables[0].node is s.children[0].identifiers[0].definition);
+	s.variables[0].references.length.shouldEqual(1);
+	assert(s.variables[0].references[0] is s.children[0].identifiers[0].node);	
+
+	s = getScope(`function c(a) { return a; }`);
+	s.children[0].identifiers.length.shouldEqual(1);
+	auto ss = s.children[0];
+	assert(ss.variables[0].node is ss.identifiers[0].definition);
+	ss.variables[0].references.length.shouldEqual(1);
+	assert(ss.variables[0].references[0] is ss.identifiers[0].node);	
+}
+
 // TODO: we can use the other generateIdentifier from one of es5-min's branches
 string generateIdentifier(int idx)
 {
