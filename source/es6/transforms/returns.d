@@ -31,12 +31,6 @@ version(unittest)
 	import unit_threaded;
 	import es6.transformer;
 	import std.stdio;
-	Node parseModule(string input)
-	{
-		auto parser = parser(input);
-		parser.scanToken();
-		return parser.parseModule();
-	}
 }
 
 bool negateReturningIf(Scope s)
@@ -222,3 +216,28 @@ unittest
 		`function b() { if (a) { for(;;)return }; op() }`
 	);
 }
+// this transformer needs to be run late in the chain
+// because we first need other to reduce everything as much as
+// possible to an expression
+void combineReturnStatements(Scope scp)
+{
+	// every branch has to return except the master
+	// there has to be more than one return
+	// the returns and the ifs are the only non-expressions
+	// 
+	// the last constraint suggests we need to walk and check each node
+	// idea =>
+	// for each branch we check all siblings, if there is any non-expression besides ifs and returns then return false
+	// 
+		
+}
+@("combineReturnStatements")
+unittest
+{
+	auto node = parseModule(`function a() { if (a) { d = 5; return b } }`);
+	node.analyseNode();
+	writeln(node);
+}
+
+
+

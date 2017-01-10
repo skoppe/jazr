@@ -30,12 +30,6 @@ version(unittest)
 	import unit_threaded;
 	import es6.transformer;
 	import std.stdio;
-	Node parseModule(string input)
-	{
-		auto parser = parser(input);
-		parser.scanToken();
-		return parser.parseModule();
-	}
 }
 
 // TODO: we can detect ifs faster by walking branches

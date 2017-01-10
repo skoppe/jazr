@@ -19,13 +19,14 @@ module es6.transforms.variables;
 
 import es6.nodes;
 import es6.scopes;
+import es6.analyse;
 
 version(unittest)
 {
 	import es6.parser;
 	import es6.emitter;
-	import es6.analyse;
 	import unit_threaded;
+	import es6.transformer;
 	import std.stdio;
 }
 class BookKeepingList
@@ -132,7 +133,7 @@ private string generateFreeIdentifier(Scope s, ref int idCounter, BookKeepingLis
 	do
 	{
 		id = generateValidIdentifier(idCounter++);
-	} while(s.isGlobal(id,list));
+	} while(isGlobal(s,id,list));
 	return id;
 }
 @("shortenVariables")
@@ -188,4 +189,39 @@ unittest
 		`function s(a,b){var d=c;t(function(b){var c=t[a][b]})}`
 	);
 }
-
+void removeUnusedParameters(Scope scp)
+{
+	import std.range : retro;
+	auto params = scp.variables.retro.onlyParameters;
+	foreach(param; params)
+	{
+		if (param.references.length !=0 )
+			return;
+		scp.removeVariable(param.node);
+	}
+}
+@("removeUnusedParameters")
+unittest
+{
+	alias assertRemoveUnused = assertTransformations!(removeUnusedParameters);
+	assertRemoveUnused(
+		`function bla(a, b, c) { return a * b }`,
+		"function bla(a, b) { return a * b }"
+	);
+	assertRemoveUnused(
+		`function bla(a, b, c) { return a * c }`,
+		"function bla(a, b, c) { return a * c }"
+	);
+	assertRemoveUnused(
+		`function bla(a, b, c) { function n() { return 7 * c } return a * b * n() }`,
+		"function bla(a, b, c) { function n() { return 7 * c } return a * b * n() }"
+	);
+	assertRemoveUnused(
+		`function bla(a, b, c) { var d = function () { return 7 * c } return a * b * d() }`,
+		"function bla(a, b, c) { var d = function () { return 7 * c } return a * b * d() }"
+	);
+	assertRemoveUnused(
+		`function bla(a, b, c) { return 7 }`,
+		"function bla() { return 7 }"
+	);
+}

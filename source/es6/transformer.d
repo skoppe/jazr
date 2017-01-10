@@ -21,7 +21,26 @@ import es6.nodes;
 import es6.scopes;
 
 version (unittest) {
+	import std.stdio;
+	import std.traits : fullyQualifiedName;
 	import es6.parser;
+	import es6.analyse;
+	import es6.emitter;
+	import unit_threaded;
+
+	void assertTransformations(fun...)(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		Node got = parseModule(input);
+		Node expected = parseModule(output);
+		got.analyseNode();
+		expected.analyseNode();
+		got.runTransform!(fun);
+		got.assertTreeInternals(file,line);
+		auto diff = diffTree(got,expected);
+		if (diff.type == Diff.No)
+			return;
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+	}
 }
 // NOTE: Can be replaced with `import std.traits : Parameters;` when gdc/ldc support it
 import std.traits : isCallable, FunctionTypeOf;
@@ -43,7 +62,7 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 
 	auto root = node;
 	Node[] todo = [node];
-	bool runNodes(Node node, bool entry = true)
+	bool runNodes(Node node, bool entry = true, bool first = true)
 	{
 		bool r = false;
 		foreach(c; node.children.dup)
@@ -57,39 +76,47 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 		{
 			static if (is(Parameters!_fun[0] : Node))
 			{
-				if (_fun(node))
+				static if (is(ReturnType!_fun : void))
 				{
-					version (unittest) {
-						import std.stdio;
-						import es6.emitter;
-						import es6.analyse;
-						import unit_threaded;
-						auto str = emit(root);
-						auto expected = parseModule(str);
-						expected.analyseNode();
-						auto diff = diffTree(root,expected);
-						if (diff.type != Diff.No)
-							throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
+					if (first)
+						_fun(node);
+				} else {
+					if (_fun(node))
+					{
+						version (unittest) {
+							import es6.emitter;
+							import es6.analyse;
+							import unit_threaded;
+							auto str = emit(root);
+							auto expected = parseModule(str);
+							expected.analyseNode();
+							auto diff = diffTree(root,expected);
+							if (diff.type != Diff.No)
+								throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
+						}
+						r |= true;
 					}
-					r |= true;
 				}
 			} else static if (is(Parameters!_fun[0] : Scope))
 			{
-				if (entry && _fun(node.branch.scp))
+				static if (is(ReturnType!_fun : void))
 				{
-					version (unittest) {
-						import std.stdio;
-						import es6.emitter;
-						writeln(emit(root));
+					if (entry && first)
+						_fun(node.branch.scp);
+				} else {
+					if (entry && _fun(node.branch.scp))
+					{
+						r |= true;
 					}
-					r |= true;
 				}
 			}
 		}
 		return r;
 	}
 	for (auto i = 0; i < todo.length; i++)
-		while(runNodes(todo[i]))
-		{
-		}
+	{
+		bool entry = true, first = true;
+		while(runNodes(todo[i], entry, first))
+			first = false;
+	}
 }

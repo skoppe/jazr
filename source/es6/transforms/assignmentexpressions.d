@@ -29,12 +29,6 @@ version (unittest)
 	import es6.transformer;
 	import es6.analyse;
 	import std.stdio;
-	Node parseModule(string input)
-	{
-		auto parser = parser(input);
-		parser.scanToken();
-		return parser.parseModule();
-	}
 }
 
 bool simplifyRedundantAssignmentExpressions(Node node)
