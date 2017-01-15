@@ -283,7 +283,7 @@ unittest
 			"a && (bla(),poi ? kol() : apc()) && doThing()"
 		);*/
 		/// combineExpressionStatementsWithNonEmptyReturnStatements
-		assertMinifier(
+/*		assertMinifier(
 			"function d(a) { if (a) { if (b) { b = 3; return p; } } }",
 			"function d(a) { if (a && b) { return b = 3,p } }"
 		);
@@ -321,7 +321,7 @@ unittest
 		assertMinifier(
 			`if (g) { if (a=5, e) d = 5; b = 5;}`,
 			"g && (a = 5,e && (d = 5),b = 5)"
-		);
+		);*/
 		/*/// moveNonValueGeneratingStatementsIntoForIfAndSwitches
 		assertMinifier(
 			"a = 5; if (d) g = 5;",
