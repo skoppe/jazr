@@ -236,6 +236,10 @@ unittest
 		`if (a) { b = 7; }`,
 		`a && (b = 7)`
 	);
+	assertConvertIfsToExpressionStatements(
+		`if ("use strict", b.can() && top === bottom) doThing();`,
+		`("use strict",b.can() && top === bottom) && doThing()`
+	);
 }
 
 /* combo

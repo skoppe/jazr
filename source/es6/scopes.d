@@ -183,6 +183,24 @@ class Branch
 		children.insertInPlace(idx+1, b);
 		return b;
 	}
+	void prepend(Branch b)
+	{
+		insertAt(0,b);
+	}
+	void insertAt(ptrdiff_t idx, Branch b)
+	{
+		import std.array : insertInPlace;
+		children.insertInPlace(idx, b);
+		if (b.parent)
+			b.remove();
+		b.parent = this;
+	}
+	void insertAfter(Branch sibling, Branch b)
+	{
+		import std.array : insertInPlace;
+		auto idx = children.countUntil!(c=>c is sibling);
+		insertAt(idx + 1, b);
+	}
 	Branch newSiblingAfter(Node entry)
 	{
 		assert(this.parent);
@@ -205,6 +223,7 @@ class Branch
 		if (parent is null)
 			return;
 		parent.removeChild(this);
+		parent = null;
 	}
 	void removeChild(Branch child)
 	{
@@ -224,6 +243,15 @@ class Branch
 			return this.parent.removeChildrenAfter(this);
 		assert(false);
 	}
+	void swapWithNext()
+	{
+		assert(parent !is null);
+		auto idx = parent.children.countUntil!(c=>c is this);
+		assert(parent.children.length > idx + 1);
+		assert(idx != -1);
+		parent.children[idx] = parent.children[idx+1];
+		parent.children[idx+1] = this;
+	}
 	void addChildren(Branch[] bs)
 	{
 		this.children ~= bs;
@@ -239,6 +267,19 @@ class Branch
 		entry.prettyPrint(sink,level);
 		sink.formattedWrite("------\n");
 		sink.print(children,level+1);
+	}
+	Node getParentBranchEntry()
+	{
+		switch(entry.parent.type)
+		{
+			case NodeType.SwitchStatementNode:
+				return entry.parent.parent;
+			case NodeType.IfStatementNode:
+			case NodeType.ForStatementNode:
+			case NodeType.DoWhileStatementNode:
+			case NodeType.WhileStatementNode:
+				return entry.parent; default: assert(0);
+		}
 	}
 }
 void findGlobals(Scope scp)

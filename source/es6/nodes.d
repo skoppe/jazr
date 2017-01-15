@@ -381,6 +381,19 @@ class Node
 		if (other.branch != child.branch)
 			other.assignBranch(child.branch);
 	}
+	auto getIndexOfChild(Node child)
+	{
+		import std.algorithm : countUntil;
+		auto idx = children.countUntil!(c=>c is child);
+		assert(idx != -1);
+		return idx;
+	}
+	bool isLastSibling()
+	{
+		if (parent is null)
+			return true;
+		return parent.children.length == parent.getIndexOfChild(this)+1;
+	}
 	void addChildren(Node[] children)
 	{
 		children.each!((c){c.branch = branch; c.parent = this;});
@@ -408,6 +421,30 @@ class Node
 		auto removed = this.removeChildrenAfter(node);
 		removed.each!(c => c.branch = null);
 		return removed;
+	}
+	void insertAfter(Node node)
+	{
+		// TODO: Test this
+		if (this.parent.type == NodeType.FunctionBodyNode)
+		{
+			if (node.type == NodeType.BlockStatementNode)
+				this.parent.as!(FunctionBodyNode).insertAfter(this, node.children);
+			else
+				this.parent.as!(FunctionBodyNode).insertAfter(this, [node]);
+		} else
+		{
+			if (this.parent.type != NodeType.BlockStatementNode)
+			{
+				auto block = new BlockStatementNode([]);
+				this.replaceWith(block);
+				block.addChild(this);
+			}
+			if (node.type == NodeType.BlockStatementNode)
+				this.parent.as!(BlockStatementNode).insertAfter(this, node.children);
+			else
+				this.parent.as!(BlockStatementNode).insertAfter(this, [node]);
+		}
+		this.parent.reanalyseHints();
 	}
 	Node findFirst(NodeType t)
 	{
@@ -1031,6 +1068,16 @@ class BlockStatementNode : Node
 			return;
 		children = children[0..idx];
 	}
+	void insertAfter(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		import std.array : insertInPlace;
+		this.children.insertInPlace(idx+1, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
+		// ALSO move branches in children 
+	}
 }
 struct IfPath
 {
@@ -1159,6 +1206,16 @@ class IfStatementNode : Node
 	IfPath elsePath() { assert(hasElsePath); return IfPath(children[2]); }
 	Node condition() { return children[0]; }
 	void removeElsePath() { children[2].branch.remove(); children[2].parent = null; children = children[0..2]; }
+	void swapPaths()
+	{
+		// TODO: need to test
+		assert(hasElsePath());
+		auto firstBranch = truthPath.branch;
+		auto elsePath = children[2];
+		children[2] = children[1];
+		children[1] = elsePath;
+		firstBranch.swapWithNext();
+	}
 	bool bothPathsReturn()
 	{
 		// TODO: need to test
@@ -1520,6 +1577,15 @@ class FunctionBodyNode : Node
 	this(Node[] children)
 	{
 		super(NodeType.FunctionBodyNode,children);
+	}
+	void insertAfter(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		import std.array : insertInPlace;
+		this.children.insertInPlace(idx+1, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
 class LexicalDeclarationNode : Node

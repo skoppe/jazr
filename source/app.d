@@ -19,6 +19,8 @@ import es6.parser;
 import es6.emitter;
 import es6.nodes;
 import es6.reporter;
+import es6.minifier;
+import es6.analyse;
 
 import std.getopt;
 import std.stdio;
@@ -35,6 +37,7 @@ int main(string[] args)
 	import std.format : format;
 	bool time;
 	bool forceStdin;
+	bool doMinify;
 	string fileIn;
 	string fileOut;
 
@@ -42,7 +45,8 @@ int main(string[] args)
 		args,
 		"time", "Show timing information", &time,
 		"i|input", "Input file (defaults to stdin)", &fileIn,
-		"o|output", "Output file (defaults to stdout)", &fileOut
+		"o|output", "Output file (defaults to stdout)", &fileOut,
+		"minify", "Minify js before outputting (default to false)", &doMinify
 	);
 
 	if (helpInformation.helpWanted)
@@ -89,6 +93,23 @@ int main(string[] args)
 		if (time)
 			writeln(timing);
 		return 1;
+	}
+
+	if (doMinify)
+	{
+		sw.start();
+		node.analyseNode();
+		sw.stop();
+		if (time)
+			timing ~= format("Analysing: "~sw.peek().msecs.to!string~"ms");
+		sw.reset();
+
+		sw.start();
+		node.minify();
+		sw.stop();
+		if (time)
+			timing ~= format("Minifying: "~sw.peek().msecs.to!string~"ms");
+		sw.reset();
 	}
 
 	sw.start();

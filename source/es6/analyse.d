@@ -577,6 +577,34 @@ void reanalyseHints(Node node)
 		node = node.parent;
 	}
 }
+void moveSubBranchesToNewBranch(Node n, Branch b)
+{
+	import std.range : retro;
+	import std.algorithm : find;
+	auto idx = n.parent.getIndexOfChild(n);
+	auto r = b.children.retro.find!((c){
+		auto entry = c.getParentBranchEntry();
+		auto bIdx = n.parent.getIndexOfChild(entry);
+		return bIdx < idx;
+	});
+	switch(n.type)
+	{
+		case NodeType.IfStatementNode:
+			auto ifStmt = n.as!(IfStatementNode);
+			if (ifStmt.hasElsePath)
+			{
+				if (r.empty)
+					b.prepend(ifStmt.elsePath.branch);
+				else
+					b.insertAfter(r.front,ifStmt.elsePath.branch);
+			}
+			if (r.empty)
+				b.prepend(ifStmt.truthPath.branch);
+			else
+				b.insertAfter(r.front,ifStmt.truthPath.branch);
+			return; default: assert(0);
+	}
+}
 void assignBranch(Node n, Branch b)
 {
 	n.branch = b;
@@ -599,9 +627,14 @@ void assignBranch(Node n, Branch b)
 			n.children[0].assignBranch(b);
 			n.children[1].assignBranch(b);
 			return;
-		case NodeType.IfStatementNode:
 		case NodeType.SwitchStatementNode:
+			n.children[0].assignBranch(b);
+			return;
 		case NodeType.WhileStatementNode:
+			n.children[0].assignBranch(b);
+			return;
+		case NodeType.IfStatementNode:
+			n.moveSubBranchesToNewBranch(b);
 			n.children[0].assignBranch(b);
 			return;
 		case NodeType.ForStatementNode:

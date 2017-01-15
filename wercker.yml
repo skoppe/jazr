@@ -13,7 +13,7 @@ build:
     - script:
         name: minify RxJS
         code: |
-          dub -- -i ./tests/RxJS/dist/rx.all.js -o ./tests/RxJS/dist/rx.all.min.js
+          dub -- -i ./tests/RxJS/dist/rx.all.js -o ./tests/RxJS/dist/rx.all.min.js --minify
     - script:
         name: unittest RxJS
         code: |
