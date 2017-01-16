@@ -714,19 +714,19 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 @("Import Declaration")
 unittest
 {
-	assertEmitted(`import* as i from"file.js";`);
-	assertEmitted(`import{m as i,k}from"file.js";`);
-	assertEmitted(`import i,* as r from"file.js";`);
-	assertEmitted(`import i,{m as p,k} from"file.js";`);
-	assertEmitted(`import i from"file.js";`);
-	assertEmitted(`import"file.js";`);
+	assertEmitted(`import* as i from'file.js';`);
+	assertEmitted(`import{m as i,k}from'file.js';`);
+	assertEmitted(`import i,* as r from'file.js';`);
+	assertEmitted(`import i,{m as p,k} from'file.js';`);
+	assertEmitted(`import i from'file.js';`);
+	assertEmitted(`import'file.js';`);
 }
 @("Export Declaration")
 unittest
 {
-	assertEmitted(`export*from"file.js";`);
-	assertEmitted(`export{m,k}from"file.js";`);
-	assertEmitted(`export{m as i,k}from"file.js";`);
+	assertEmitted(`export*from'file.js';`);
+	assertEmitted(`export{m,k}from'file.js';`);
+	assertEmitted(`export{m as i,k}from'file.js';`);
 	assertEmitted(`export{m,k};`);
 	assertEmitted(`export{m as i,k};`);
 	assertEmitted(`export default function bla(){};`);
@@ -776,14 +776,14 @@ unittest
 	assertEmitted(`a={a};`);
 	assertEmitted(`a={b:a};`);
 	assertEmitted(`a={[b]:a};`);
-	assertEmitted(`a={"123":a};`);
-	assertEmitted(`a={"abc":a};`);
+	assertEmitted(`a={'123':a};`);
+	assertEmitted(`a={'abc':a};`);
 	assertEmitted(`a={class:a};`);
 	assertEmitted(`a={a=44};`); // this is not valid syntax if not followed by an destructering assignment. still we need to be able to parse it.
 	assertEmitted(`a={*bla(){}};`);
 	assertEmitted(`a={get b(){}};`);
 	assertEmitted(`a={set c(d){}};`);
-	assertEmitted(`a={a,[b]:a,"123":a,"abc":a,class:a,a=44,*bla(){},get b(){},set c(d){}};`);
+	assertEmitted(`a={a,[b]:a,'123':a,'abc':a,class:a,a=44,*bla(){},get b(){},set c(d){}};`);
 }
 @("Parenthesis Expression")
 unittest
@@ -802,7 +802,7 @@ unittest
 	assertEmitted(`false;`);
 	assertEmitted(`class bla{}`);
 	assertEmitted(`identifier;`);
-	assertEmitted(`"string"`);
+	assertEmitted(`'string'`);
 	assertEmitted(`0o345;`);
 	assertEmitted(`0b010;`);
 	assertEmitted(`0xa91;`);
@@ -860,8 +860,8 @@ unittest
 {
 	assertEmitted(`a instanceof b;`);
 	assertEmitted(`a in b;`);
-	assertEmitted(`"using"in options;`);
-	assertEmitted(`"using"in{b,c,d}`);
+	assertEmitted(`'using'in options;`);
+	assertEmitted(`'using'in{b,c,d}`);
 	assertEmitted(`a&b|c&&d||e^f===g==h!==i!=j<=k<l>=m>n<<o>>>p>>q+r-s*t/u%v;`);
 }
 @("Variable Statement")
@@ -899,7 +899,7 @@ unittest
 {
 	assertEmitted(`switch(a){}`);
 	assertEmitted(`switch(a){case 4:}`);
-	assertEmitted(`switch(a){case 4:case"abd":}`);
+	assertEmitted(`switch(a){case 4:case'abd':}`);
 	assertEmitted(`switch(a){case 4:break;case 0x5a:default:}`);
 }
 @("DoWhile Statement")
@@ -945,10 +945,10 @@ unittest
 	assertEmitted(`for(a of b){}`);
 	assertEmitted(`for(a in b,d in f){}`);
 	assertEmitted(`for(a of b?d:e){}`);
-	assertEmitted(`for([a,c]in"b"){}`);
-	assertEmitted(`for([a,c]of"b"){}`);
-	assertEmitted(`for({a,c}in"b"){}`);
-	assertEmitted(`for({a,c}of"b"){}`);
+	assertEmitted(`for([a,c]in'b'){}`);
+	assertEmitted(`for([a,c]of'b'){}`);
+	assertEmitted(`for({a,c}in'b'){}`);
+	assertEmitted(`for({a,c}of'b'){}`);
 }
 @("With Statement")
 unittest
@@ -960,7 +960,7 @@ unittest
 unittest
 {
 	assertEmitted(`throw new error;`);
-	assertEmitted(`throw"string";`);
+	assertEmitted(`throw'string';`);
 }
 @("Try Statement")
 unittest
@@ -1004,7 +1004,7 @@ unittest
 	assertEmitted(`function*a(a,{b,c}){}`);
 	assertEmitted(`function a(a,{b,c}){return}`);
 	assertEmitted(`function a(a,{b,c}){return a,b,c}`);
-	assertEmitted(`function a(a,{b,c}){return"string"}`);
+	assertEmitted(`function a(a,{b,c}){return'string'}`);
 	assertEmitted(`function a(a,{b,c}){return{a,b,c}}`);
 	assertEmitted(`function a(a,{b,c}){return this}`);
 	assertEmitted(`function a(a,{b,c}){return null}`);
@@ -1013,7 +1013,7 @@ unittest
 @("Prefix Expression")
 unittest
 {
-	assertEmitted(`if("using"in options)bla();`);
+	assertEmitted(`if('using'in options)bla();`);
 	assertEmitted(`!bla;`);
 	assertEmitted(`bla<=ops;`);
 	assertEmitted(`bla>-1;`);
