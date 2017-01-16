@@ -245,12 +245,14 @@ auto coerceToSingleQuotedString(string str)
 	}
 	return sink.data;
 }
+@("coerceToSingleQuotedString")
 unittest
 {
 	assert("".coerceToSingleQuotedString == "");
 	assert(`isn't it nice`.coerceToSingleQuotedString == `isn\'t it nice`);
 	assert(`a 'good' way to go`.coerceToSingleQuotedString == `a \'good\' way to go`);
 	"a \\\"good\\\" way to go".coerceToSingleQuotedString.shouldEqual(`a "good" way to go`);
+	assert(`*(?:'((?:\\\\.|[^\\\\'])*)'|\"((?:\\\\.|[^\\\\\"])*)\"|(`.coerceToSingleQuotedString == `*(?:\'((?:\\\\.|[^\\\\\'])*)\'|"((?:\\\\.|[^\\\\"])*)"|(`);
 }
 class Lexer(Source)
 {

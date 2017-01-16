@@ -114,9 +114,9 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.RequiresDelimiter;
 		case NodeType.StringLiteralNode:
 			auto n = node.as!StringLiteralNode;
-			sink.put("\"");
+			sink.put("\'");
 			sink.put(n.value);
-			sink.put("\"");
+			sink.put("\'");
 			return Guide.None;
 		case NodeType.BinaryLiteralNode:
 			auto n = node.as!BinaryLiteralNode;
