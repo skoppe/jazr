@@ -23,7 +23,7 @@ build:
     - script:
         name: minify jQuery
         code: |
-          dub -- -i ./tests/jquery/dist/jquery.js -o ./tests/jquery/dist/jquery.min.js -minify
+          dub -- -i ./tests/jquery/dist/jquery.js -o ./tests/jquery/dist/jquery.min.js --minify
     - script:
         name: unittest jQuery
         code: |
