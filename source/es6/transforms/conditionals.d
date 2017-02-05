@@ -20,6 +20,7 @@ module es6.transforms.conditionals;
 import es6.nodes;
 import es6.scopes;
 import es6.analyse;
+import es6.transforms.expressions;
 
 version(unittest)
 {
@@ -35,7 +36,7 @@ version(unittest)
 		Node expected = parseModule(output);
 		auto trunkA = got.analyseNode().trunk;
 		auto trunkB = expected.analyseNode().trunk;
-		got.runTransform!(convertIfElseAssignmentToConditionalExpression);
+		got.runTransform!(convertIfElseAssignmentToConditionalExpression)(file,line);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
@@ -58,20 +59,18 @@ version(unittest)
 	}
 }
 
-// TODO: we can detect ifs faster by walking branches
-bool convertIfElseAssignmentToConditionalExpression(Node node)
+bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt)
 {
-	if (node.type != NodeType.IfStatementNode)
-		return false;
-
-	IfStatementNode ifStmt = node.as!IfStatementNode;
-
 	if (!ifStmt.hasElsePath)
 		return false;
 
 	if (ifStmt.truthPath.hints.has(Hint.NonExpression | Hint.Return | Hint.ReturnValue))
 		return false;
 	if (ifStmt.elsePath.hints.has(Hint.NonExpression | Hint.Return | Hint.ReturnValue))
+		return false;
+
+	if (!ifStmt.truthPath.hasStatements ||
+		!ifStmt.elsePath.hasStatements)
 		return false;
 
 	auto truthAssignExpr = ifStmt.truthPath.getLastStatement();
@@ -101,14 +100,19 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 	truthAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
 	falseAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
 
-	Node r = new AssignmentExpressionNode([truthAssign,
-		new AssignmentOperatorNode(Assignment.Assignment),
-		new ConditionalExpressionNode(
+	Node oper = new AssignmentOperatorNode(Assignment.Assignment);
+	auto cond = new ConditionalExpressionNode(
 			condition,
 			ifStmt.truthPath.convertToAssignmentExpression,
 			ifStmt.elsePath.convertToAssignmentExpression
-		)
+		);
+	Node r = new AssignmentExpressionNode([truthAssign,
+		oper,
+		cond
 	]);
+	cond.reanalyseHints();
+	oper.reanalyseHints();
+	r.reanalyseHints();
 
 	if (condition.type == NodeType.ExpressionNode)
 	{
@@ -116,6 +120,7 @@ bool convertIfElseAssignmentToConditionalExpression(Node node)
 		condition.replaceWith(condition.children[$-1]);
 		preExprs ~= r;
 		r = new ExpressionNode(preExprs);
+		r.reanalyseHints();
 	}
 
 	r.assignBranch(ifStmt.branch);
@@ -189,6 +194,14 @@ unittest
 		`if(y) b=2; else if(k) b=5; else b=7;`,
 		`b = y ? 2 : k ? 5 : 7`
 	);
+	assertIfElseAssignmentToConditional(
+		`if(y) { } else if(k) b=5; else b=7;`,
+		`if(y) { } else b = k ? 5 : 7;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if(y) ; else if(k) b=5; else b=7;`,
+		`if(y) ; else b = k ? 5 : 7;`
+	);
 }
 void negateBinaryExpression(BinaryExpressionNode node)
 {
@@ -251,4 +264,125 @@ unittest
 	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);
 }
 
+bool convertIfElseToConditionalExpression(IfStatementNode ifStmt)
+{
+	if (!ifStmt.hasElsePath)
+		return false;
 
+	if (ifStmt.truthPath.hints.has(Hint.NonExpression) ||
+		ifStmt.elsePath.hints.has(Hint.NonExpression))
+		return false;
+
+	if (!ifStmt.truthPath.hasStatements ||
+		!ifStmt.elsePath.hasStatements)
+		return false;
+
+	auto condition = ifStmt.condition;
+	if (condition.hints.has(Hint.HasAssignment))
+		condition = condition.parenthesizeExpression();
+
+	auto left = new ExpressionNode([]);
+	auto right = new ExpressionNode([]);
+
+	ifStmt.truthPath.branch.remove();
+	ifStmt.elsePath.branch.remove();
+
+	void copyChildrenToExpression(Node node, ExpressionNode expr)
+	{
+		if (node.type == NodeType.BlockStatementNode)
+			node.children.each!(c => expr.addExpression(c));
+		else
+			expr.addExpression(node);
+	}
+
+	copyChildrenToExpression(ifStmt.truthPath.node, left);
+	copyChildrenToExpression(ifStmt.elsePath.node, right);
+
+	left.reanalyseHints();
+	right.reanalyseHints();
+
+	Node l = left.children.length == 1 ? left.children[0] : left.parenthesizeExpression();
+	Node r = right.children.length == 1 ? right.children[0] : right.parenthesizeExpression();
+
+
+	auto cond = new ConditionalExpressionNode(condition, l, r);
+	ifStmt.replaceWith(cond);
+
+	cond.reanalyseHints();
+
+	return true;
+}
+
+@("convertIfElseToConditionalExpression")
+unittest
+{
+	alias assertConvertIfElseToConditional = assertTransformations!(convertIfElseToConditionalExpression);
+
+	/// Issue #86
+	assertConvertIfElseToConditional(
+		`if (a) b = 6; else { for(;;)break; b = 7 }`,
+		`if (a) b = 6; else { for(;;)break; b = 7 }`
+	);
+	/// ditto
+	assertConvertIfElseToConditional(
+		`function doo() { if (a) b = 6; else { if (d) return 7; b = 7; } }`,
+		`function doo() { if (a) b = 6; else { if (d) return 7; b = 7 } }`
+	);
+
+	assertConvertIfElseToConditional(
+		`if (bla) doB(); else { goP() }`,
+		`bla ? doB() : goP()`
+	);
+	assertConvertIfElseToConditional(
+		`if (bla) { } else { goP() }`,
+		`if (bla) { } else { goP() }`
+	);
+	assertConvertIfElseToConditional(
+		`if (bla) ; else { goP() }`,
+		`if (bla) ; else { goP() }`
+	);
+	assertConvertIfElseToConditional(
+		`if (bla) { goP() } else { }`,
+		`if (bla) { goP() } else { }`
+	);
+	assertConvertIfElseToConditional(
+		`if (bla) { goP() } else ;`,
+		`if (bla) { goP() } else ;`
+	);
+	assertConvertIfElseToConditional(
+		`if (a) { g = 6; } else k = 7;`,
+		"a ? g = 6 : k = 7"
+	);
+	assertConvertIfElseToConditional(
+		`if (a || b) { g = 6; } else { k = 7; }`,
+		"a || b ? g = 6 : k = 7"
+	);
+	assertConvertIfElseToConditional(
+		`if (a) g = 6; else k = 7;`,
+		"a ? g = 6 : k = 7"
+	);
+	assertConvertIfElseToConditional(
+		`if (a) g = 6; else if (b) k = 7; else i = 9;`,
+		"a ? g = 6 : b ? k = 7 : i = 9;"
+	);
+	assertConvertIfElseToConditional(
+		`if (a = 6) doB(); else { goP() }`,
+		`(a = 6) ? doB() : goP()`
+	);
+	/// ditto
+	assertConvertIfElseToConditional(
+		`if (a) { e(); g = 6; } else { f(); k = 7; }`,
+		"a ? (e(),g = 6) : (f(),k = 7)"
+	);
+	/// ditto
+	assertConvertIfElseToConditional(
+		`if (a) e(), g = 6; else f(), k = 7;`,
+		"a ? (e(),g = 6) : (f(),k = 7)"
+	);
+	/// ditto
+	assertConvertIfElseToConditional(
+		`if (a) { g = 6; } else { k = 7; }`,
+		"a ? g = 6 : k = 7"
+	);
+	// TODO: there is also precedence situation with yield operator
+}

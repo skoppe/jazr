@@ -19,10 +19,15 @@ module es6.transformer;
 
 import es6.nodes;
 import es6.scopes;
+	import std.traits : fullyQualifiedName;
+
+version (chatty) {
+	import std.traits : fullyQualifiedName;
+	import std.stdio;
+}
 
 version (unittest) {
 	import std.stdio;
-	import std.traits : fullyQualifiedName;
 	import es6.parser;
 	import es6.analyse;
 	import es6.emitter;
@@ -34,12 +39,12 @@ version (unittest) {
 		Node expected = parseModule(output);
 		got.analyseNode();
 		expected.analyseNode();
-		got.runTransform!(fun);
+		got.runTransform!(fun)(file,line);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 }
 // NOTE: Can be replaced with `import std.traits : Parameters;` when gdc/ldc support it
@@ -52,17 +57,87 @@ template Parameters(func...)
 	else
 		static assert(0, "argument has no parameters");
 }
+template firstArg(alias fun)
+{
+	alias firstArg = Parameters!fun[0];
+}
+template isAstNode(alias N)
+{
+	enum isAstNode = is(N : Node);
+}
+template getNodeTypeTuple(AstNode : Node)
+{
+	import std.typecons : AliasSeq;
+	alias getNodeTypeTuple = AliasSeq!(AstNode, getNodeType!AstNode);
+}
+template isSameType(T, H)
+{
+	enum isSameType = is(T == H);
+}
+version (unittest)
+{
+	private void checkInternals(Node node, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		import es6.emitter;
+		import es6.analyse;
+		import unit_threaded;
+		node.assertTreeInternals(file,line);
+		auto str = emit(node);
+		writeln(str);
+		auto expected = parseModule(str,file,line);
+		expected.analyseNode();
+		auto diff = diffTree(node,expected);
+		if (diff.type != Diff.No)
+			throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
+	}
+}
 void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
 {
-	import std.typetuple : staticMap;
+	import std.typetuple : staticMap, Filter, templateAnd, templateNot, NoDuplicates;
 	import std.functional : unaryFun;
-	import std.traits : ReturnType, isBoolean, hasUDA;
+	import std.traits : ReturnType, isBoolean, hasUDA, allSameType;
+	import std.meta : ApplyLeft;
 
 	alias _funs = staticMap!(unaryFun, fun);
+	alias _inputTypes = staticMap!(firstArg, _funs);
+	alias isTypeofNode = ApplyLeft!(allSameType,Node);
+	alias _generalNodeTransforms = NoDuplicates!(Filter!(isTypeofNode,_inputTypes));
+	alias _typedNodeTransforms = NoDuplicates!(Filter!(templateAnd!(isAstNode,templateNot!isTypeofNode), _inputTypes));
+	alias _otherTransforms = NoDuplicates!(Filter!(templateNot!isAstNode, _inputTypes));
 
 	auto root = node;
 	Node[] todo = [node];
-	bool runNodes(Node node, bool entry = true, bool first = true)
+	bool runScopes(Scope scp, bool first = true)
+	{
+		bool r = false;
+		foreach(_fun; _funs)
+		{
+			static if (is(Parameters!_fun[0] : Scope))
+			{
+				static if (is(ReturnType!_fun : void))
+				{
+					if (first) {
+						version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+						_fun(scp);
+						version(unittest) {
+							root.checkInternals(file,line);
+						}
+					}
+				} else {
+					version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+					if (_fun(scp))
+					{
+						r |= true;
+						version(unittest) {
+							root.checkInternals(file,line);
+						}
+					}
+				}
+			}
+		}
+		return r;
+	}
+	bool runNodes(Node node, bool first = true)
 	{
 		bool r = false;
 		foreach(c; node.children.dup)
@@ -70,53 +145,99 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 			if (c.type == NodeType.FunctionBodyNode)
 				todo ~= c;
 			else
-				r |= runNodes(c,false);
+				r |= runNodes(c,first);
 		}
-		foreach(_fun; _funs)
+		//if (r)
+		//	return true;
+		switch(node.type)
 		{
-			static if (is(Parameters!_fun[0] : Node))
+			foreach(_nodeAstType; _typedNodeTransforms)
 			{
-				static if (is(ReturnType!_fun : void))
-				{
-					if (first)
-						_fun(node);
-				} else {
-					if (_fun(node))
+				alias _nodeType = getNodeType!(_nodeAstType);
+				case _nodeType:
+					auto typedNode = node.as!_nodeAstType;
+					foreach(_fun; _funs)
 					{
-						version (unittest) {
-							import es6.emitter;
-							import es6.analyse;
-							import unit_threaded;
-							auto str = emit(root);
-							auto expected = parseModule(str);
-							expected.analyseNode();
-							auto diff = diffTree(root,expected);
-							if (diff.type != Diff.No)
-								throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
+						static if (is(firstArg!_fun == _nodeAstType))
+						{
+							static if (is(ReturnType!_fun : void))
+							{
+								if (first) {
+									version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
+									version(unittest) {	writeln(fullyQualifiedName!_fun); }
+									_fun(typedNode);
+									version(unittest) {
+										writeln(fullyQualifiedName!_fun);
+										root.checkInternals(file,line);
+									}
+								}
+							} else {
+								version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
+								version(unittest) {	writeln(fullyQualifiedName!_fun); }
+								if (_fun(typedNode))
+								{
+									version (unittest) {
+										writeln(fullyQualifiedName!_fun);
+										root.checkInternals(file,line);
+									}
+									if (typedNode.parent is null)
+										return true;
+									r |= true;
+								}
+							}
 						}
-						r |= true;
 					}
-				}
-			} else static if (is(Parameters!_fun[0] : Scope))
-			{
-				static if (is(ReturnType!_fun : void))
-				{
-					if (entry && first)
-						_fun(node.branch.scp);
-				} else {
-					if (entry && _fun(node.branch.scp))
-					{
-						r |= true;
-					}
-				}
+					break;
 			}
+			default:
+				foreach(_fun; _funs)
+				{
+					static if (is(firstArg!_fun == Node))
+					{
+						static if (is(ReturnType!_fun : void))
+						{
+							if (first) {
+								version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+								version(unittest) {	writeln(fullyQualifiedName!_fun); }
+
+								_fun(node);
+								version(unittest) {
+									writeln(fullyQualifiedName!_fun);
+									root.checkInternals(file,line);
+								}
+							}
+						} else {
+							version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+							version(unittest) {	writeln(fullyQualifiedName!_fun); }
+							if (_fun(node))
+							{
+								version (unittest) {
+									writeln(fullyQualifiedName!_fun);
+									root.checkInternals(file,line);
+								}
+								if (node.parent is null)
+									return true;
+								r |= true;
+							}
+						}
+					}
+				}
 		}
 		return r;
 	}
 	for (auto i = 0; i < todo.length; i++)
 	{
-		bool entry = true, first = true;
-		while(runNodes(todo[i], entry, first))
-			first = false;
+		bool first = true;
+		do {
+			while(runNodes(todo[i], first))
+				first = false;
+			first = true;
+			if (todo[i].children.length)
+			{
+				Scope scp = todo[i].children[0].branch.scp;
+				while(runScopes(scp, first))
+					first = false;
+			}
+		} while (!first);
 	}
 }

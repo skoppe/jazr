@@ -536,6 +536,8 @@ private int calcHints(Node node)
 					return Hint.Or;
 				default: return Hint.None;
 			}
+		case NodeType.AssignmentOperatorNode:
+			return Hint.HasAssignment;
 		default:
 			return Hint.None;
 	}
@@ -544,12 +546,18 @@ private int getHintMask(Node n)
 {
 	switch (n.type)
 	{
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.FunctionDeclarationNode:
+			return Hint.NonExpression;
+		case NodeType.FunctionExpressionNode:
+		case NodeType.GeneratorExpressionNode:
+			return Hint.None;
 		case NodeType.ParenthesisNode:
-			return ~(Hint.Or);
+			return ~(Hint.Or | Hint.HasAssignment);
 		case NodeType.IfStatementNode:
 			if (n.as!(IfStatementNode).bothPathsReturn)
-				return ~(Hint.None);
-			return ~(Hint.Return | Hint.ReturnValue);
+				return ~(Hint.HasAssignment);
+			return ~(Hint.Return | Hint.ReturnValue | Hint.HasAssignment);
 		default:
 			return ~(Hint.None);
 	}
@@ -577,6 +585,9 @@ void reanalyseHints(Node node)
 		node = node.parent;
 	}
 }
+// moves all branches that start under n, into b's children.
+// the position where they end up depends on the branches
+// started before node n
 void moveSubBranchesToNewBranch(Node n, Branch b)
 {
 	import std.range : retro;
@@ -660,7 +671,7 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 	if (b is null)
 		b = s.branch;
 	node.branch = b;
-	int hints = calcHints(node);
+	int hints;
 	int analyseChildren(Node[] ns, Scope s, Branch b = null)
 	{
 		int hints = Hint.None;
@@ -670,126 +681,127 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 		}
 		return hints;
 	}
-	if (node.type == NodeType.FunctionDeclarationNode || node.type == NodeType.FunctionExpressionNode || node.type == NodeType.GeneratorDeclarationNode || node.type == NodeType.GeneratorExpressionNode)
+	switch (node.type)
 	{
-		bool hasName = node.children.length == 3;
-		if (hasName)
-		{
-			s.addVariable(Variable(node.children[0].as!IdentifierNode,IdentifierType.Function));
-			node.children[0].branch = b;
-		}
-		auto funcBody = node.children[hasName ? 2 : 1];
-		auto newScope = s.newScope(funcBody);
-
-		analyseFormalParameterList(node.children[hasName ? 1 : 0],newScope);
-		analyse(funcBody,newScope);
-	} else if (node.type == NodeType.ArrowFunctionNode)
-	{
-		auto funcBodyStmt = node.children[1];
-		auto newScope = s.newScope(funcBodyStmt);
-
-		analyseArrowFunctionParams(node.children[0],newScope);
-		analyse(funcBodyStmt,newScope);
-	} 
-	else if (node.type == NodeType.ClassGetterNode)
-	{
-		node.children[0].branch = b;
-		auto funcBody = node.children[1];
-		auto newScope = s.newScope(funcBody);
-		analyse(funcBody,newScope);
-	}
-	else if (node.type == NodeType.ClassMethodNode || node.type == NodeType.ClassGeneratorMethodNode)
-	{
-		node.children[1].branch = b;
-		auto funcBody = node.children[2];
-		auto newScope = s.newScope(funcBody);
-		analyseFormalParameterList(node.children[0],newScope);
-		analyse(funcBody,newScope);
-	}
-	else if (node.type == NodeType.ClassSetterNode)
-	{
-		node.children[0].branch = b;
-		node.children[1].branch = b;
-		auto funcBody = node.children[2];
-		auto newScope = s.newScope(funcBody);
-
-		analyseClassSetterParam(node.children[1],newScope);
-		analyse(funcBody,newScope);
-	}
-	else if (node.type == NodeType.VariableStatementNode)
-	{
-		foreach(decl; node.children)
-		{
-			decl.branch = b;
-			switch(decl.children[0].type)
+		case NodeType.FunctionDeclarationNode:
+		case NodeType.FunctionExpressionNode:
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.GeneratorExpressionNode:
+			bool hasName = node.children.length == 3;
+			if (hasName)
 			{
-				case NodeType.ArrayBindingPatternNode:
-					analyseArrayBindingPatternNode(decl.children[0],s,b,IdentifierType.Variable);
-					break;
-				case NodeType.ObjectBindingPatternNode:
-					analyseObjectBindingPatternNode(decl.children[0],s,b,IdentifierType.Variable);
-					break;
-				case NodeType.IdentifierNode:
-					s.addVariable(Variable(decl.children[0].as!IdentifierNode,IdentifierType.Variable));
-					decl.children[0].branch = b;
-					break;
-				default: break;
+				s.addVariable(Variable(node.children[0].as!IdentifierNode,IdentifierType.Function));
+				node.children[0].branch = b;
 			}
-			if (decl.children.length == 2)
-				analyse(decl.children[1],s,b);
-		}
-	}
-	else if (node.type == NodeType.IdentifierNode)
-	{
-		s.addIdentifier(Identifier(node.as!IdentifierNode));
-	}
-	else if (node.type == NodeType.IfStatementNode)
-	{
-		analyse(node.children[0],s,b);
-		analyse(node.children[1],s,b.newBranch(node.children[1]));
-		if (node.children.length == 3)
-			analyse(node.children[2],s,b.newBranch(node.children[2]));
-	} else if (node.type == NodeType.SwitchStatementNode)
-	{
-		analyse(node.children[0],s,b);
-		foreach(c; node.children[1..$])
-		{
-			c.branch = b;
-			if (c.type == NodeType.CaseNode)
+			auto funcBody = node.children[hasName ? 2 : 1];
+			auto newScope = s.newScope(funcBody);
+
+			analyseFormalParameterList(node.children[hasName ? 1 : 0],newScope);
+			analyse(funcBody,newScope);
+			break;
+		case NodeType.ArrowFunctionNode:
+			auto funcBodyStmt = node.children[1];
+			auto newScope = s.newScope(funcBodyStmt);
+
+			analyseArrowFunctionParams(node.children[0],newScope);
+			analyse(funcBodyStmt,newScope);
+			break;
+		case NodeType.ClassGetterNode:
+			node.children[0].branch = b;
+			auto funcBody = node.children[1];
+			auto newScope = s.newScope(funcBody);
+			analyse(funcBody,newScope);
+			break;
+		case NodeType.ClassMethodNode: 
+		case NodeType.ClassGeneratorMethodNode:
+			node.children[1].branch = b;
+			auto funcBody = node.children[2];
+			auto newScope = s.newScope(funcBody);
+			analyseFormalParameterList(node.children[0],newScope);
+			analyse(funcBody,newScope);
+			break;
+		case NodeType.ClassSetterNode:
+			node.children[0].branch = b;
+			node.children[1].branch = b;
+			auto funcBody = node.children[2];
+			auto newScope = s.newScope(funcBody);
+
+			analyseClassSetterParam(node.children[1],newScope);
+			analyse(funcBody,newScope);
+			break;
+		case NodeType.VariableStatementNode:
+			foreach(decl; node.children)
 			{
-				c.children[0].branch = b;
-				if (c.children.length > 1)
+				decl.branch = b;
+				switch(decl.children[0].type)
+				{
+					case NodeType.ArrayBindingPatternNode:
+						analyseArrayBindingPatternNode(decl.children[0],s,b,IdentifierType.Variable);
+						break;
+					case NodeType.ObjectBindingPatternNode:
+						analyseObjectBindingPatternNode(decl.children[0],s,b,IdentifierType.Variable);
+						break;
+					case NodeType.IdentifierNode:
+						s.addVariable(Variable(decl.children[0].as!IdentifierNode,IdentifierType.Variable));
+						decl.children[0].branch = b;
+						break;
+					default: break;
+				}
+				if (decl.children.length == 2)
+					analyse(decl.children[1],s,b);
+			}
+			break;
+		case NodeType.IdentifierNode:
+			s.addIdentifier(Identifier(node.as!IdentifierNode));
+			break;
+		case NodeType.IfStatementNode:
+			hints |= analyse(node.children[0],s,b);
+			hints |= analyse(node.children[1],s,b.newBranch(node.children[1]));
+			if (node.children.length == 3)
+				hints |= analyse(node.children[2],s,b.newBranch(node.children[2]));
+			break;
+		case NodeType.SwitchStatementNode:
+			analyse(node.children[0],s,b);
+			foreach(c; node.children[1..$])
+			{
+				c.branch = b;
+				if (c.type == NodeType.CaseNode)
+				{
+					analyse(c.children[0],s,b);
 					analyse(c.children[1],s,b.newBranch(c.children[1]));
-			} else if (c.children.length > 0)
-				analyse(c.children[0],s,b.newBranch(c.children[0]));
-		}
-	} else if (node.type == NodeType.ForStatementNode)
-	{
-		analyseChildren(node.children[0..$-1],s,b);
-		auto stmt = node.children[$-1];
-		analyse(node.children[$-1],s,b.newBranch(stmt));
-	} else if (node.type == NodeType.DoWhileStatementNode)
-	{
-		analyse(node.children[0],s,b.newBranch(node.children[0]));
-		analyse(node.children[1],s,b);
-	} else if (node.type == NodeType.WhileStatementNode)
-	{
-		analyse(node.children[1],s,b.newBranch(node.children[1]));
-		analyse(node.children[0],s,b);
-	} else if (node.type == NodeType.ArrayBindingPatternNode)
-		analyseArrayBindingPatternNode(node,s,b,IdentifierType.Identifier);
-	else if (node.type == NodeType.ObjectBindingPatternNode)
-		analyseObjectBindingPatternNode(node,s,b,IdentifierType.Identifier);
-	else if (node.type == NodeType.ReturnStatementNode)
-	{
-		b.addHint(node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
-		hints |= analyseChildren(node.children,s,b);
+				} else if (c.children.length > 0) {
+					analyseChildren(c.children,s,b.newBranch(c.children[0]));
+				}
+			}
+			break;
+		case NodeType.ForStatementNode:
+			analyseChildren(node.children[0..$-1],s,b);
+			auto stmt = node.children[$-1];
+			analyse(node.children[$-1],s,b.newBranch(stmt));
+			break;
+		case NodeType.DoWhileStatementNode:
+			analyse(node.children[0],s,b.newBranch(node.children[0]));
+			analyse(node.children[1],s,b);
+			break;
+		case NodeType.WhileStatementNode:
+			analyse(node.children[1],s,b.newBranch(node.children[1]));
+			analyse(node.children[0],s,b);
+			break;
+		case NodeType.ArrayBindingPatternNode:
+			analyseArrayBindingPatternNode(node,s,b,IdentifierType.Identifier);
+			break;
+		case NodeType.ObjectBindingPatternNode:
+			analyseObjectBindingPatternNode(node,s,b,IdentifierType.Identifier);
+			break;
+		case NodeType.ReturnStatementNode:
+			b.addHint(node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
+			hints |= analyseChildren(node.children,s,b);
+			break;
+		default:
+			hints |= analyseChildren(node.children,s,b);
+			break;
 	}
-	else
-	{
-		hints |= analyseChildren(node.children,s,b);
-	}
-	hints = node.getHintMask() & hints;
+	hints = node.getHintMask() & (hints | calcHints(node));
 	node.hints = hints;
 	return hints & node.getParentHintMask();
 }
@@ -880,11 +892,12 @@ unittest
 	b.children[0].entry.emit.shouldEqual(`{b}`);
 
 	b = getBranch(`switch(a){case 1:b;case 2:{c};case 3:case 4:break;default:d}`);
-	b.children.length.shouldEqual(4);
+	b.children.length.shouldEqual(5);
 	b.children[0].entry.emit.shouldEqual(`b`);
 	b.children[1].entry.emit.shouldEqual(`{c}`);
-	b.children[2].entry.emit.shouldEqual(`break`);
-	b.children[3].entry.emit.shouldEqual(`d`);
+	b.children[2].entry.emit.shouldEqual(``);
+	b.children[3].entry.emit.shouldEqual(`break`);
+	b.children[4].entry.emit.shouldEqual(`d`);
 
 	b = getBranch(`switch(a){case 1:b;default:}`);
 	b.children.length.shouldEqual(1);
@@ -1041,6 +1054,18 @@ unittest
 	getFirstChildScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.ReturnValue | Hint.NonExpression);
 	getFirstChildScope(`function a() { return }`).entry.hints.get.shouldEqual(Hint.Return | Hint.NonExpression);
 	getScope(`function a() { return b }`).entry.hints.get.shouldEqual(Hint.NonExpression);
+	getFirstChildScope(`function cd(){if(a){if(b)return 4;else return 5}else return 6}`).entry.hints.get.shouldEqual(Hint.ReturnValue | Hint.NonExpression);
+	getFirstChildScope(`function cd(){if(a){if(b)return 4;return 5}else return 6}`).entry.hints.get.shouldEqual(Hint.ReturnValue | Hint.NonExpression);
+}
+@("SwitchStatement")
+unittest
+{
+	getScope(`switch(e){case 5: break; default:ctx.beginPath(); break;}`);
+}
+@("ForStatement")
+unittest
+{
+	getScope(`for(;;){ if (a) break;}`);
 }
 /*
 

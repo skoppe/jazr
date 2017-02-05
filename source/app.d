@@ -35,11 +35,15 @@ int main(string[] args)
 	import std.algorithm : remove;
 	import std.path : baseName;
 	import std.format : format;
+	import std.datetime : StopWatch;
 	bool time;
 	bool forceStdin;
 	bool doMinify;
 	string fileIn;
 	string fileOut;
+
+	StopWatch swTotal;
+	swTotal.start();
 
 	auto helpInformation = getopt(
 		args,
@@ -55,7 +59,6 @@ int main(string[] args)
 		return 1;
 	}
 
-	import std.datetime : StopWatch;
 	StopWatch sw;
 	string[] timing;
 	Node node;
@@ -82,6 +85,8 @@ int main(string[] args)
 		node = parser.parseModule();
 	}
 	sw.stop();
+	size_t size = input.length;
+
 	if (time)
 		timing ~= format("Parsing: "~sw.peek().msecs.to!string~"ms");
 	sw.reset();
@@ -126,6 +131,16 @@ int main(string[] args)
 	}
 	else 
 		writeln(min);
+
+	if (time)
+	{
+		timing ~= format("Total: "~swTotal.peek().msecs.to!string~"ms");
+		timing ~= format("Size: %d", size);
+		auto mbPerSec = 0.9536 * (cast(double)size)/swTotal.peek().usecs;
+		import std.array : insertInPlace;
+		timing.insertInPlace(0,format("Mb/s: "~mbPerSec.to!string));
+	}
+
 
 	if (time)
 		writeln(timing);

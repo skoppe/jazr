@@ -58,6 +58,10 @@ class BookKeepingList
 	{
 		app.shrinkTo(p);
 	}
+	size_t length()
+	{
+		return app.data.length;
+	}
 }
 
 @("BookKeepingList")
@@ -103,13 +107,16 @@ void shortenVariables(Scope scp, BookKeepingList list = new BookKeepingList())
 	}
 	void walkScope(Scope s, BookKeepingList list)
 	{
+		import std.algorithm : map, canFind;
+		import std.array : array;
+		auto globals = s.getGlobals().map!(g => list.get(g.node.identifier)).array;
 		auto pin = list.enter();
 		scope(exit) list.leave(pin);
 		int idCounter = 0;
 		foreach(v; s.getVariables)
 		{
 			IdentifierNode node = v.node;
-			string id = s.generateFreeIdentifier(idCounter, list);
+			string id = s.generateFreeIdentifier(globals, idCounter, list);
 			list.add(node.identifier,id);
 			if (v.type == IdentifierType.Parameter || v.type == IdentifierType.Function)
 				node.identifier = id;
@@ -122,18 +129,14 @@ void shortenVariables(Scope scp, BookKeepingList list = new BookKeepingList())
 	foreach (s; scp.children)
 		walkScope(s, list);
 }
-private bool isGlobal(Scope s, string identifier, BookKeepingList list)
+private string generateFreeIdentifier(Scope s, string[] globals, ref int idCounter, BookKeepingList list)
 {
 	import std.algorithm : canFind;
-	return s.getGlobals().canFind!((a,b)=>list.get(a.node.identifier) == b)(identifier);
-}
-private string generateFreeIdentifier(Scope s, ref int idCounter, BookKeepingList list)
-{
 	string id;
 	do
 	{
 		id = generateValidIdentifier(idCounter++);
-	} while(isGlobal(s,id,list));
+	} while(globals.canFind(id));
 	return id;
 }
 @("shortenVariables")

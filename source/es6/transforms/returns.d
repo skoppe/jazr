@@ -42,6 +42,7 @@ bool negateReturningIf(Scope s)
 		if (branch.entry.parent.type != NodeType.IfStatementNode ||
 			!branch.hasHint!(Hint.Return))
 			continue;
+
 		auto ifStmt = branch.entry.parent.as!IfStatementNode;
 		branch.removeHint!(Hint.Return);
 
@@ -92,6 +93,7 @@ bool negateReturningIf(Scope s)
 		target.addStatements(transfers);
 		transfers.each!(t => t.assignBranch(target.branch));
 
+		ifStmt.parent.reanalyseHints();
 		return true;
 	}
 	return false;
@@ -106,7 +108,7 @@ unittest
 		Node expected = parseModule(output);
 		got.analyseNode();
 		expected.analyseNode();
-		got.runTransform!(negateReturningIf);
+		got.runTransform!(negateReturningIf)(file,line);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
@@ -213,39 +215,26 @@ unittest
 		`function b() { if (a) { for(;;)return }; op() }`
 	);
 }
-void removeRedundantElse(Scope scp)
+void removeRedundantElse(IfStatementNode ifStmt)
 {
-	void removeRedundantElse(Branch branch)
+	if (!ifStmt.hasElsePath)
+		return;
+
+	if (ifStmt.truthPath.hints.has(Hint.Return | Hint.ReturnValue))
 	{
-		foreach(b; branch.children)
-			removeRedundantElse(b);
-
-		if (branch.entry.parent !is null && branch.entry.parent.type == NodeType.IfStatementNode)
-		{
-			auto ifStmt = branch.entry.parent.as!IfStatementNode;
-
-			if (!ifStmt.hasElsePath)
-				return;
-
-			if (ifStmt.truthPath.hints.has(Hint.Return | Hint.ReturnValue))
-			{
-				auto transfer = ifStmt.elsePath;
-				ifStmt.removeElsePath();
-				ifStmt.insertAfter(transfer);
-				ifStmt.reanalyseHints();
-			} else if (ifStmt.elsePath.hints.has(Hint.Return | Hint.ReturnValue))
-			{
-				ifStmt.negateCondition();
-				ifStmt.swapPaths();
-				auto transfer = ifStmt.elsePath;
-				ifStmt.removeElsePath();
-				ifStmt.insertAfter(transfer);
-				ifStmt.reanalyseHints();
-			}
-		}
+		auto transfer = ifStmt.elsePath;
+		ifStmt.removeElsePath();
+		ifStmt.insertAfter(transfer);
+		ifStmt.reanalyseHints();
+	} else if (ifStmt.elsePath.hints.has(Hint.Return | Hint.ReturnValue))
+	{
+		ifStmt.negateCondition();
+		ifStmt.swapPaths();
+		auto transfer = ifStmt.elsePath;
+		ifStmt.removeElsePath();
+		ifStmt.insertAfter(transfer);
+		ifStmt.reanalyseHints();
 	}
-	foreach(b; scp.branch.children)
-		removeRedundantElse(b);
 }
 @("removeRedundantElse")
 unittest
@@ -343,7 +332,7 @@ void combineReturnStatements(Scope scp)
 			return;
 
 		// if any sub branch has children
-		if (validBranches.any!(c => c.children.length > 0))
+		if (validBranches.any!(c => c.children.length > 0 || c.entry.parent.type != NodeType.IfStatementNode))
 			return;
 
 		auto ifStmts = validBranches.map!(c => c.entry.parent.as!IfStatementNode);
@@ -490,6 +479,12 @@ unittest
 	//assertCombineReturn(
 	//	`function cd() { if (a) { return 7; } if (b) return 5; d(); }`,
 	//	`function cd() { return a ? 7 : b ? 5 : (d(),void 0) }`
+	//);
+	//
+	//	/// This is more a else return empty optimisation
+	//assertTransformation(
+	//	`function bla() { if (b) { if (a) { return a } else { return } } }`,
+	//	`function bla() { if (b) { if (a) return a } }`
 	//);
 }
 

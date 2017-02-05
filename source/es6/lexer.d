@@ -33,6 +33,16 @@ enum State
 	LexingTemplateLiteral
 }
 
+enum Goal
+{
+	//InputElementDiv, // this is the default goal
+	//InputElementRegExpOrTemplateTail, // is used in syntactic grammar contexts where a RegularExpressionLiteral, a TemplateMiddle, or a TemplateTail is permitted (only in yield)
+	//InputElementRegExp, // is used in all syntactic grammar contexts where a RegularExpressionLiteral is permitted but neither a TemplateMiddle, nor a TemplateTail is permitted (in primaryexpression)
+	//InputElementTemplateTail, // is used in all syntactic grammar contexts where a TemplateMiddle or a TemplateTail is permitted but a RegularExpressionLiteral is not permitted. (unused)
+	All,
+	ProhibitRegex
+}
+
 enum Keyword {
 	Unknown = 0, 
 	Static = 1, 
@@ -295,22 +305,42 @@ class Lexer(Source)
 		s = source;
 		pushState(s.empty ? State.EndOfFile : State.TokensRemaining);
 	}
-	auto scanToken()
+	version(unittest)
 	{
-		if (newLine)
+		auto scanToken(Goal goal = Goal.All, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
-			line+=1;
-			column=0;
-			newLine = false;
-		} else{
-			column += tokenLength;
+			if (newLine)
+			{
+				line+=1;
+				column=0;
+				newLine = false;
+			} else{
+				column += tokenLength;
+			}
+			tokenLength = 0;
+			token = lexToken(goal);
+			version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
+			return token;
 		}
-		tokenLength = 0;
-		token = lexToken();
-		//import std.stdio;
-		//writeln("Scan: ",token," ",file,"@",l);
-		return token;
+	} else
+	{
+		auto scanToken(Goal goal = Goal.All)
+		{
+			if (newLine)
+			{
+				line+=1;
+				column=0;
+				newLine = false;
+			} else{
+				column += tokenLength;
+			}
+			tokenLength = 0;
+			token = lexToken(goal);
+			version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
+			return token;
+		}
 	}
+		
 	Token lexUnicodeEscapeSequence(size_t idx)
 	{
 		import std.format : format;
@@ -365,9 +395,9 @@ class Lexer(Source)
 		for(;;)
 		{
 			dchar chr = s[idx++];
-			tokenLength++;
 			if (chr == '\\')
 			{
+				tokenLength++;
 				chr = s[idx++];
 				tokenLength++;
 				if (chr != 'u')
@@ -391,7 +421,8 @@ class Lexer(Source)
 				auto tok = Token(Type.Identifier,s[0..idx-1]);
 				s = s[idx-1..$];
 				return tok;
-			}
+			} else
+				tokenLength++;
 		}
 	}
 	void popWhitespace()
@@ -407,6 +438,7 @@ class Lexer(Source)
 		import std.array : appender;
 		auto str = appender!string;
 		auto cpy = s.save();
+		bool inOneOfExpr = false;
 		str.put('/');
 		cpy.popFront();
 		auto incr = 1;
@@ -420,6 +452,10 @@ class Lexer(Source)
 			if (chr == '\u0000')
 				return "";
 			incr++;
+			if (chr == '[')
+				inOneOfExpr = true;
+			else if (chr == ']')
+				inOneOfExpr = false;
 			if (chr == '\\')
 			{
 				str.put(chr);
@@ -430,7 +466,7 @@ class Lexer(Source)
 				if (chr == '\u0000')
 					return "";
 				str.put(chr);
-			} else if (chr == '/')
+			} else if (!inOneOfExpr && chr == '/')
 			{
 				str.put(chr);
 				while (true)
@@ -446,8 +482,8 @@ class Lexer(Source)
 					else
 						break;
 				}
-				column += incr;
-				s = s.drop(str.data.length);
+				tokenLength += incr;
+				s = s.drop(incr);
 				return str.data;
 			} else
 				str.put(chr);
@@ -462,20 +498,23 @@ class Lexer(Source)
 		auto str = appender!string;
 		while (true)
 		{
-			auto chr = s.next();
+			auto chr = s.front();
 			tokenLength++;
 			if (chr == type)
 			{
+				s.popFront();
 				if (type == '"')
 					return Token(Type.StringLiteral,str.data.coerceToSingleQuotedString);
 				return Token(Type.StringLiteral,str.data);
 			}
 			switch (chr)
 			{
-				case '\\': 
-					chr = s.next();
+				case '\\':
+					s.popFront();
+					chr = s.front();
 					if (chr == '\u0000')
 						goto eof;
+					s.popFront();
 					tokenLength++;
 					str.put(chr);
 					if (chr == '\x0D' && s.popNextIf('\x0A'))
@@ -487,6 +526,7 @@ class Lexer(Source)
 				case '\u0000':
 					goto eof;
 				default:
+					s.popFront();
 					str.put(chr);
 					break;
 			}
@@ -508,9 +548,9 @@ class Lexer(Source)
 			if (chr == '.' && isFloat)
 			{
 				if (fraction)
-					return Token(Type.Error,format("Already processed fractional part"));
+					return Token(TokenType,str.data);
 				if (exponent)
-					return Token(Type.Error,format("Currently processing exponential part"));
+					return Token(TokenType,str.data);
 				str.put(chr);
 				tokenLength++;
 				s.popFront();
@@ -705,6 +745,7 @@ class Lexer(Source)
 					s = s[idx+1..$];
 					return tok;
 				}
+				continue;
 			}
 			if (chr.isLineTerminator())
 			{
@@ -712,7 +753,7 @@ class Lexer(Source)
 				line++;
 				column=0;
 				tokenLength=0;
-				if (s[idx] == '\u000A')
+				if (chr == '\u000D' && s[idx] == '\u000A')
 					idx++;
 				continue;
 			} else if (chr == '\u0000')
@@ -748,7 +789,7 @@ class Lexer(Source)
 		s = s[idx..$];
 		return tok;
 	}
-	Token lexToken()
+	Token lexToken(Goal goal = Goal.All)
 	{
 		popWhitespace();
 		auto chr = s.front();
@@ -779,6 +820,8 @@ class Lexer(Source)
 			case '[': tokenLength++; s.popFront(); return Token(Type.OpenSquareBrackets);
 			case ']': tokenLength++; s.popFront(); return Token(Type.CloseSquareBrackets);
 			case '.': 
+				if (s[1] >= '0' && s[1] <= '9')
+					return lexDecimalLiteral();
 				tokenLength++;
 				s.popFront();
 				if (s.popNextIf('.'))
@@ -968,9 +1011,12 @@ class Lexer(Source)
 				s.popFront();
 				return Token(Type.Colon);
 			case '/':
-				auto regex = lookAheadRegex;
-				if (!regex.empty)
-					return Token(Type.Regex,regex.dup);
+				if (goal != Goal.ProhibitRegex)
+				{
+					auto regex = lookAheadRegex;
+					if (!regex.empty)
+						return Token(Type.Regex,regex.dup);					
+				}
 				tokenLength++;
 				s.popFront();
 				if (s.popNextIf('/'))
@@ -1069,6 +1115,10 @@ unittest
 	lexer = createLexer(`/regex with modifiers/gi;`);
 	lexer.lookAheadRegex.shouldEqual("/regex with modifiers/gi");
 	lexer.scanToken.shouldEqual(Token(Type.Semicolon));
+	lexer = createLexer("/ab[^/]cd/");
+	lexer.lookAheadRegex.shouldEqual("/ab[^/]cd/");
+	lexer = createLexer(`/ab[^/\\]cd/`);
+	lexer.lookAheadRegex.shouldEqual(`/ab[^/\\]cd/`);
 }
 @("lexString")
 unittest
@@ -1130,6 +1180,10 @@ unittest
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"60279.01234e-12"));
 	lexer = createLexer("0.1");
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"0.1"));
+	lexer = createLexer(".5");
+	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,".5"));
+	lexer = createLexer("1..toFixed");
+	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"1."));
 }
 @("lexHexLiteral")
 unittest
@@ -1198,6 +1252,13 @@ unittest
 	lexer.lexToken.shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
 	lexer.s.shouldEqual("\u0000");
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
+	lexer = createLexer("foobar(abc, /** bla **/, def) /** hup */;");
+	lexer.lexToken.shouldEqual(Token(Type.Identifier,"foobar"));
+	lexer.lexToken();
+	lexer.lexToken();
+	lexer.lexToken();
+	lexer.lexToken.shouldEqual(Token(Type.MultiLineComment,"* bla *"));
 }
 @("save")
 unittest
@@ -1250,4 +1311,10 @@ unittest
 	isReservedKeyword("yield").shouldBeTrue;
 	isReservedKeyword("").shouldBeFalse;
 	isReservedKeyword("a").shouldBeFalse;
+}
+@("scanToken")
+unittest
+{
+	auto lexer = createLexer(".5");
+	lexer.scanToken().shouldEqual(Token(Type.DecimalLiteral,".5"));
 }

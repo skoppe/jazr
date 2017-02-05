@@ -53,7 +53,7 @@ enum Guide
 	RequiresSemicolon = 1 << 2,
 	EndOfStatement = 1 << 3,
 	Void = 1 << 4,
-	NotStartWithIdentifierStart = 1 << 5,
+	RequiresWhitespaceBeforeIdentifier = 1 << 5,
 	EndOfList = 1 << 6
 }
 Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide = Guide.None)
@@ -67,10 +67,10 @@ Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide =
 			sink.put(";");
 		else if (!(r & Guide.EndOfStatement) || delimiter != ";")
 			sink.put(delimiter);
-		//if (r & Guide.NotStartWithIdentifierStart)
-			//guide |= Guide.NotStartWithIdentifierStart;
+		//if (r & Guide.RequiresWhitespaceBeforeIdentifier)
+			//guide |= Guide.RequiresWhitespaceBeforeIdentifier;
 		//else
-			guide &= ~Guide.NotStartWithIdentifierStart;
+			guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
 	}
 	auto r = nodes[$-1].emit(sink,guide | Guide.EndOfList);
 	if (r & Guide.RequiresSemicolon)
@@ -85,10 +85,10 @@ Guide emit(Sink)(Node[] nodes, Sink sink, int guide = Guide.None)
 	foreach(c; nodes)
 	{
 		r = c.emit(sink,guide);
-		if (r & Guide.NotStartWithIdentifierStart)
-			guide |= Guide.NotStartWithIdentifierStart;
+		if (r & Guide.RequiresWhitespaceBeforeIdentifier)
+			guide |= Guide.RequiresWhitespaceBeforeIdentifier;
 		else
-			guide &= ~Guide.NotStartWithIdentifierStart;
+			guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
 	}
 	return r;
 }
@@ -108,7 +108,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.None;
 		case NodeType.BooleanNode:
 			auto n = node.as!BooleanNode;
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put(n.value ? "true": "false");
 			return Guide.RequiresDelimiter;
@@ -120,27 +120,27 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.None;
 		case NodeType.BinaryLiteralNode:
 			auto n = node.as!BinaryLiteralNode;
-			if (guide == Guide.NotStartWithIdentifierStart)
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("0b");
 			sink.put(n.value);
 			return Guide.RequiresDelimiter;
 		case NodeType.OctalLiteralNode:
 			auto n = node.as!OctalLiteralNode;
-			if (guide == Guide.NotStartWithIdentifierStart)
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("0o");
 			sink.put(n.value);
 			return Guide.RequiresDelimiter;
 		case NodeType.DecimalLiteralNode:
 			auto n = node.as!DecimalLiteralNode;
-			if (guide == Guide.NotStartWithIdentifierStart)
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put(n.value);
 			return Guide.RequiresDelimiter;
 		case NodeType.HexLiteralNode:
 			auto n = node.as!HexLiteralNode;
-			if (guide == Guide.NotStartWithIdentifierStart)
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("0x");
 			sink.put(n.value);
@@ -167,7 +167,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put(n.value);
 			return Guide.RequiresDelimiter;
 		case NodeType.KeywordNode:
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			auto n = node.as!KeywordNode;
 			switch(n.keyword)
@@ -178,10 +178,10 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.RequiresDelimiter;
 		case NodeType.IdentifierNode:
 			auto n = node.as!IdentifierNode;
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put(n.identifier);
-			return Guide.RequiresDelimiter | Guide.NotStartWithIdentifierStart;
+			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
 		case NodeType.ExpressionNode:
 			node.children.emitDelimited(sink,",",guide);
 			return Guide.None;
@@ -195,9 +195,9 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			auto n = node.as!PrefixExpressionNode;
 			final switch(n.prefix)
 			{
-				case Prefix.Delete: sink.put("delete"); return Guide.NotStartWithIdentifierStart;
-				case Prefix.Void: sink.put("void"); return Guide.NotStartWithIdentifierStart;
-				case Prefix.Typeof: sink.put("typeof"); return Guide.NotStartWithIdentifierStart;
+				case Prefix.Delete: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("delete"); return Guide.RequiresWhitespaceBeforeIdentifier;
+				case Prefix.Void: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("void"); return Guide.RequiresWhitespaceBeforeIdentifier;
+				case Prefix.Typeof: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("typeof"); return Guide.RequiresWhitespaceBeforeIdentifier;
 				case Prefix.Increment: sink.put("++"); break;
 				case Prefix.Decrement: sink.put("--"); break;
 				case Prefix.Positive: sink.put("+"); break;
@@ -237,14 +237,14 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.None;
 		case NodeType.NewExpressionNode:
 			auto n = node.as!NewExpressionNode;
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			"new ".repeat(n.news).copy(sink);
 			n.children.emit(sink);
 			return Guide.RequiresDelimiter;
 		case NodeType.CallExpressionNode:
 			auto n = node.as!CallExpressionNode;
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			"new ".repeat(n.news).copy(sink);
 			n.children.emit(sink);
@@ -264,8 +264,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			auto n = node.as!ExpressionOperatorNode;
 			final switch(n.operator)
 			{
-				case ExpressionOperator.InstanceOf: sink.put(" instanceof"); return Guide.NotStartWithIdentifierStart;
-				case ExpressionOperator.In: if (guide & Guide.NotStartWithIdentifierStart) sink.put(" "); sink.put("in"); return Guide.NotStartWithIdentifierStart;
+				case ExpressionOperator.InstanceOf: sink.put(" instanceof"); return Guide.RequiresWhitespaceBeforeIdentifier;
+				case ExpressionOperator.In: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("in"); return Guide.RequiresWhitespaceBeforeIdentifier;
 				case ExpressionOperator.LogicalAnd: sink.put("&&"); break;
 				case ExpressionOperator.LogicalOr: sink.put("||"); break;
 				case ExpressionOperator.BitwiseAnd: sink.put("&"); break;
@@ -338,10 +338,10 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put(":");
 			return Guide.RequiresSemicolon;
 		case NodeType.VariableStatementNode:
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("var");
-			node.children.emitDelimited(sink,",",Guide.NotStartWithIdentifierStart);
+			node.children.emitDelimited(sink,",",Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
 		case NodeType.VariableDeclarationNode:
 			node.children[0].emit(sink,guide);
@@ -352,9 +352,11 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			}
 			return Guide.None;
 		case NodeType.ReturnStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("return");
 			if (node.children.length == 1)
-				return node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+				return node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
 		case NodeType.BlockStatementNode:
 			sink.put("{");
@@ -362,7 +364,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put("}");
 			return Guide.EndOfStatement;
 		case NodeType.IfStatementNode:
-			if (guide == Guide.NotStartWithIdentifierStart)
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("if(");
 			node.children[0].emit(sink);
@@ -373,7 +375,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 				if (r != Guide.EndOfStatement)
 					sink.put(";");
 				sink.put("else");
-				return node.children[2].emit(sink,Guide.NotStartWithIdentifierStart);
+				return node.children[2].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			}
 			return r;
 		case NodeType.SwitchStatementNode:
@@ -385,7 +387,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.EndOfStatement;
 		case NodeType.DoWhileStatementNode:
 			sink.put("do");
-			auto r = node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+			auto r = node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (r & (Guide.RequiresSemicolon | Guide.RequiresDelimiter))
 				sink.put(";");
 			sink.put("while(");
@@ -399,7 +401,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return node.children[1].emit(sink);
 		case NodeType.CaseNode:
 			sink.put("case");
-			node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			sink.put(":");
 			if (node.children.length == 2)
 			{
@@ -408,6 +410,9 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 					sink.put(";");
 			}
 			return Guide.None;
+		case NodeType.CaseBodyNode:
+			node.children.emitDelimited(sink,";");
+			return node.children.length > 0 ? Guide.RequiresSemicolon : Guide.None;
 		case NodeType.DefaultNode:
 			sink.put("default:");
 			node.children.emit(sink);
@@ -427,17 +432,17 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 				case ForLoop.VarIn:
 				case ForLoop.VarOf:
 					sink.put("var");
-					guide = Guide.NotStartWithIdentifierStart;
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
 					goto default;
 				case ForLoop.ConstIn:
 				case ForLoop.ConstOf:
 					sink.put("const");
-					guide = Guide.NotStartWithIdentifierStart;
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
 					goto default;
 				case ForLoop.LetIn:
 				case ForLoop.LetOf:
 					sink.put("let");
-					guide = Guide.NotStartWithIdentifierStart;
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
 					goto default;
 				default:
 					auto g = n.children[0].emit(sink,guide);
@@ -447,7 +452,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 						case ForLoop.VarIn:
 						case ForLoop.ConstIn:
 						case ForLoop.LetIn:
-							if (g & Guide.NotStartWithIdentifierStart)
+							if (g & Guide.RequiresWhitespaceBeforeIdentifier)
 								sink.put(" ");
 							sink.put("in");
 							break;
@@ -455,14 +460,14 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 						case ForLoop.VarOf:
 						case ForLoop.ConstOf:
 						case ForLoop.LetOf:
-							if (g & Guide.NotStartWithIdentifierStart)
+							if (g & Guide.RequiresWhitespaceBeforeIdentifier)
 								sink.put(" ");
 							sink.put("of");
 							break;
 						default:
 							assert(0);
 					}
-					n.children[1].emit(sink,Guide.NotStartWithIdentifierStart);
+					n.children[1].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 					break;
 			}
 			sink.put(")");
@@ -486,22 +491,22 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.EndOfStatement;
 		case NodeType.ThrowStatementNode:
 			sink.put("throw");
-			node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
 		case NodeType.DebuggerStatementNode:
 			sink.put("debugger");
 			return Guide.RequiresSemicolon;
 		case NodeType.ClassDeclarationNode:
 			auto n = node.as!ClassDeclarationNode;
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("class");
 			if (n.name !is null)
-				n.name.emit(sink,Guide.NotStartWithIdentifierStart);
+				n.name.emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (n.base !is null)
 			{
 				sink.put(" extends");
-				n.base.emit(sink,Guide.NotStartWithIdentifierStart);
+				n.base.emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			}
 			sink.put("{");
 			n.methods.emit(sink);
@@ -556,16 +561,16 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.None;
 		case NodeType.FunctionExpressionNode:
 		case NodeType.FunctionDeclarationNode:
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("function");
 			if (node.children.length == 3)
-				node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+				node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			node.children[$-2..$].emit(sink);
 			return Guide.EndOfStatement;
 		case NodeType.GeneratorExpressionNode:
 		case NodeType.GeneratorDeclarationNode:
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("function*");
 			if (node.children.length == 3)
@@ -619,14 +624,14 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			}
 			return Guide.RequiresDelimiter;
 		case NodeType.LexicalDeclarationNode:
-			if (guide & Guide.NotStartWithIdentifierStart)
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			auto n = node.as!LexicalDeclarationNode;
 			if (n.declaration == LexicalDeclaration.Let)
 				sink.put("let");
 			else
 				sink.put("const");
-			node.children.emitDelimited(sink,",",Guide.NotStartWithIdentifierStart);
+			node.children.emitDelimited(sink,",",Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
 		case NodeType.ArrayBindingPatternNode:
 			sink.put("[");
@@ -650,18 +655,18 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.EndOfStatement;
 		case NodeType.ExportDeclarationNode:
 			sink.put("export");
-			auto r = node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+			auto r = node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (node.children.length == 2)
 			{
-				if (r & Guide.NotStartWithIdentifierStart)
+				if (r & Guide.RequiresWhitespaceBeforeIdentifier)
 					sink.put(" ");
 				sink.put("from");
-				node.children[1].emit(sink,Guide.NotStartWithIdentifierStart);
+				node.children[1].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			}
 			return Guide.RequiresSemicolon;
 		case NodeType.ExportDefaultDeclarationNode:
 			sink.put("export default");
-			node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
 		case NodeType.ExportSpecifierNode:
 			node.children[0].emit(sink);
@@ -673,13 +678,13 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.None;
 		case NodeType.ImportDeclarationNode:
 			sink.put("import");
-			auto r = node.children[0].emit(sink,Guide.NotStartWithIdentifierStart);
+			auto r = node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (node.children.length == 2)
 			{
 				if (r != Guide.EndOfStatement)
 					sink.put(" ");
 				sink.put("from");
-				node.children[1].emit(sink,Guide.NotStartWithIdentifierStart);
+				node.children[1].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			}
 			return Guide.RequiresSemicolon;
 		case NodeType.ImportSpecifierNode:
@@ -746,6 +751,15 @@ unittest
 	assertEmitted(`export class{};`);
 	assertEmitted(`export let x=6,{b,c}=d;`);
 	assertEmitted(`export const x=6,{b,c}=d;`);
+}
+@("Return Statement")
+unittest
+{
+	assertEmitted(`function a(){return void 0}`);
+	assertEmitted(`function a(){return delete a}`);
+	assertEmitted(`function a(){return typeof a}`);
+	assertEmitted(`function a(){return+a}`);
+	assertEmitted(`function cd(){if(a)if(b)return 4;else return 5;else return 6}`);
 }
 @("Function Expression")
 unittest

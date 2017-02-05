@@ -118,3 +118,86 @@ unittest {
 	assertCombineExpressions(`a`,`b = 6`,`a && (b = 6)`);
 
 }
+
+bool combineBlockStatementIntoExpression(BlockStatementNode node)
+{
+	return combineStatementsIntoExpression(node);
+}
+bool combineFunctionBodyIntoExpression(FunctionBodyNode node)
+{
+	return combineStatementsIntoExpression(node);
+}
+bool combineModuleIntoExpression(ModuleNode node)
+{
+	return combineStatementsIntoExpression(node);
+}
+
+private bool combineStatementsIntoExpression(Node node)
+{
+	assert(node.type == NodeType.BlockStatementNode || node.type == NodeType.FunctionBodyNode || node.type == NodeType.ModuleNode);
+
+	auto length = node.children.length;
+	if (length < 2)
+		return false;
+
+	bool didWork = false;
+	for (size_t idx = 0; idx < length-1;)
+	{
+		auto a = node.children[idx];
+		auto b = node.children[idx+1];
+
+		if (a.hints.has(Hint.NonExpression))
+		{
+			idx += 1;
+			continue;
+		}
+		if (b.hints.has(Hint.NonExpression))
+		{	
+			idx += 2;
+			continue;
+		}
+
+		didWork = true;
+		length--;
+		b.detach();
+		auto parent = a.parent;
+		if (a.type == NodeType.ExpressionNode)
+		{
+			if (b.type == NodeType.ExpressionNode)
+				a.addChildren(b.children);
+			else
+				a.addChild(b);
+			a.reanalyseHints();
+		} else if (b.type == NodeType.ExpressionNode)
+		{
+			parent.replaceChild(a, b);
+			b.prependChildren([a]);
+			b.reanalyseHints();
+		} else
+		{
+			auto expr = new ExpressionNode([a,b]);
+			parent.replaceChild(a, expr);
+			expr.reanalyseHints();
+		}
+	}
+
+	return didWork;
+}
+
+@("combineStatementsIntoExpression")
+unittest
+{
+	alias assertCombineStatements = assertTransformations!(combineBlockStatementIntoExpression,combineFunctionBodyIntoExpression,combineModuleIntoExpression);
+	assertCombineStatements(
+		`a();b();`,
+		`a(),b()`
+	);
+	assertCombineStatements(
+		`a = 6; b = 7, c = 8;`,
+		`a = 6, b = 7, c = 8`
+	);
+	assertCombineStatements(
+		`a ? b() : c(); e && f && (d = 6); g = {a: 4}; h = [0,1]; (i || j) && g(); a = /^(?:webkit|moz|o)[A-Z]/.test("");`,
+		`a ? b() : c(), e && f && (d = 6), g = {a: 4}, h = [0,1], (i || j) && g(), a = /^(?:webkit|moz|o)[A-Z]/.test("");`
+	);
+}

@@ -20,6 +20,7 @@ module es6.transforms.ifstatements;
 import es6.nodes;
 import es6.scopes;
 import es6.transforms.expressions;
+import es6.transforms.conditionals;
 import option;
 import es6.analyse;
 
@@ -32,14 +33,8 @@ version(unittest)
 	import std.stdio;
 }
 
-// TODO: we can detect ifs faster by walking branches
-bool combineNestedIfs(Node node)
+bool combineNestedIfs(IfStatementNode parent)
 {
-	if (node.type != NodeType.IfStatementNode)
-		return false;
-
-	auto parent = node.as!IfStatementNode;
-
 	if (parent.hasElsePath)
 		return false;
 
@@ -140,17 +135,15 @@ unittest
 	);
 }
 
-// TODO: we can detect ifs faster by walking branches
-bool convertIfsToExpressionStatements(Node node)
+bool convertIfsToExpressionStatements(IfStatementNode ifStmt)
 {
-	if (node.type != NodeType.IfStatementNode)
-		return false;
-	auto ifStmt = node.as!IfStatementNode;
-
 	if (ifStmt.hasElsePath)
 		return false;
 
 	if (ifStmt.truthPath.hints.has(Hint.NonExpression))
+		return false; 
+
+	if (!ifStmt.truthPath.hasStatements)
 		return false;
 
 	ifStmt.truthPath.branch.remove();
@@ -162,7 +155,13 @@ bool convertIfsToExpressionStatements(Node node)
 			expr = ifStmt.truthPath.children[0];
 		else {
 			expr = new ExpressionNode([]);
-			expr.addChildren(ifStmt.truthPath.node.children);
+			ifStmt.truthPath.node.children.each!((c){
+				if (c.type == NodeType.ExpressionNode)
+					expr.addChildren(c.children);
+				else
+					expr.addChild(c);
+			});
+			expr.reanalyseHints();
 		}
 		expr.parent = null;
 		result = combineExpressions(ifStmt.condition,expr);
@@ -189,7 +188,7 @@ unittest
 		got.analyseNode();
 		expected.analyseNode();
 		got.assertTreeInternals(file,line);
-		got.runTransform!(convertIfsToExpressionStatements);
+		got.runTransform!(convertIfsToExpressionStatements)(file,line);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
@@ -205,11 +204,19 @@ unittest
 		"b && (d = 5)"
 	).shouldThrow();
 	assertConvertIfsToExpressionStatements(
+		"function handly() { if (!a) { b = 4; d = 6;}}",
+		"function handly() { !a && (b=4, d=6) }"
+	);
+	assertConvertIfsToExpressionStatements(
 		"if (a) d = 5; if (b) g = 5;",
 		"a && (d = 5); b && (g = 5)"
 	);
 	assertConvertIfsToExpressionStatements(
 		"if (a) {d = 5; e = 5; if (b) g = 5;}",
+		"a && (d = 5,e = 5,b && (g = 5))"
+	);
+	assertConvertIfsToExpressionStatements(
+		"if (a) {d = 5, e = 5; if (b) g = 5;}",
 		"a && (d = 5,e = 5,b && (g = 5))"
 	);
 	assertConvertIfsToExpressionStatements(
@@ -239,6 +246,10 @@ unittest
 	assertConvertIfsToExpressionStatements(
 		`if ("use strict", b.can() && top === bottom) doThing();`,
 		`("use strict",b.can() && top === bottom) && doThing()`
+	);
+	assertConvertIfsToExpressionStatements(
+		`function handly(){if(!a){b=4,d=6}}`,
+		`function handly() { !a && (b=4, d=6) }`
 	);
 }
 
@@ -284,3 +295,84 @@ unittest
 		"(a = 5) && b && (d = 5)"
 	);
 */
+
+bool removeEmptyIfPaths(IfStatementNode ifStmt)
+{
+	if (ifStmt.truthPath.hasStatements)
+	{
+		if (!ifStmt.hasElsePath)
+			return false;
+
+		if (ifStmt.elsePath.hasStatements)
+			return false;
+
+		// truth path has statements, else path doesn't
+		ifStmt.removeElsePath();
+		return true;
+	} else if (!ifStmt.hasElsePath)
+	{
+		// truth path has no statement, there is no else path
+		auto cond = ifStmt.condition;
+		ifStmt.truthPath.branch.remove();
+		ifStmt.replaceWith(cond);
+		cond.parent.reanalyseHints();
+		return true;
+	} else if (ifStmt.elsePath.hasStatements)
+	{
+		// truth path has no statement, but else path does
+		// negate condition, replace truth with else path, remove (new) else path
+		ifStmt.negateCondition();
+		ifStmt.swapPaths();
+		ifStmt.removeElsePath();
+		return true;
+	}
+	// neither truth not else path has any statements
+	// replace ifStmt with condition
+	auto cond = ifStmt.condition;
+	ifStmt.truthPath.branch.remove();
+	ifStmt.elsePath.branch.remove();
+	ifStmt.replaceWith(cond);
+	cond.parent.reanalyseHints();
+	return true;
+}
+@("removeEmptyIfPaths")
+unittest
+{
+	alias assertRemoveEmptyPaths = assertTransformations!(removeEmptyIfPaths);
+	assertRemoveEmptyPaths(
+		`if (a) b(); else c();`,
+		`if (a) b(); else c();`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) { } else { }`,
+		`a`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) ; else ;`,
+		`a`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) { } else b = 6;`,
+		`if (!a) b = 6;`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) ; else b = 6;`,
+		`if (!a) b = 6;`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) b = 6; else { }`,
+		`if (a) b = 6;`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) b = 6; else ;`,
+		`if (a) b = 6;`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) { }`,
+		`a`
+	);
+	assertRemoveEmptyPaths(
+		`if (a) ;`,
+		`a`
+	);
+}

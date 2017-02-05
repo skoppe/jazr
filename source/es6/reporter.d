@@ -38,10 +38,10 @@ string generateErrorMessage(ErrorNode error, string input, int around = 2)
 			return c.isWhite ? c : ' ';
 		}).text;
 	
-	return format("\n%s\n%s^ %s\n%s",lead.take(pre).joiner("\n"),s,error.value,tail.drop(1).joiner("\n"));
+	return format("\n%s\n%s^ %s\n%s at %s:%s",lead.take(pre).joiner("\n"),s,error.value,tail.drop(1).joiner("\n"),error.line,error.column);
 }
 void reportError(ErrorNode error, string input, int around = 2)
 {
 	import std.stdio : writeln;
-	writeln(generateErrorMessage(error,input,around));
+	writeln(generateErrorMessage(error,input,6));
 }

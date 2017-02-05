@@ -31,14 +31,14 @@ version (unittest)
 	import std.stdio;
 }
 
-bool simplifyRedundantAssignmentExpressions(Node node)
+bool simplifyRedundantAssignmentExpressions(ExpressionNode expr)
 {
-	if (node.type != NodeType.ExpressionNode)
-		return false;
-	auto expr = node.as!ExpressionNode;
-
+	if (expr.isSingleExpression) {
+		import std.stdio;
+		writeln(expr.parent);
+	}
 	assert(!expr.isSingleExpression);
-	
+
 	if (expr.children[$-2].type != NodeType.AssignmentExpressionNode)
 		return false;
 

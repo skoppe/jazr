@@ -37,17 +37,26 @@ version(unittest)
 	import std.stdio;
 }
 
-void minify(Node root)
+void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 {
+	debug {
+		root.assertTreeInternals();
+	}
 	root.runTransform!(
+		combineBlockStatementIntoExpression,
+		combineFunctionBodyIntoExpression,
+		combineModuleIntoExpression,
 		removeUnusedParameters,
 		simplifyRedundantAssignmentExpressions,
 		negateReturningIf,
 		convertIfElseAssignmentToConditionalExpression,
 		combineNestedIfs,
 		convertIfsToExpressionStatements,
+		convertIfElseToConditionalExpression,
 		negateReturningIf,
-	);
+		removeRedundantElse,
+		combineReturnStatements
+	)(file,line);
 
 	root.branch.scp.shortenVariables();
 }
@@ -60,9 +69,10 @@ unittest
 		Node got = parseModule(input);
 		Node expected = parseModule(output);
 		got.analyseNode();
+		got.assertTreeInternals(file,line);
 		expected.analyseNode();
 
-		got.minify();
+		got.minify(file,line);
 
 		auto diff = diffTree(got,expected);
 		got.assertTreeInternals(file,line);
@@ -73,25 +83,34 @@ unittest
 		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 
-	assertMinifier(
-		`if (46 == a && 5 > b) c = 56`,
-		`46==a&&5>b&&(c=56)`
-	);
+	//assertMinifier(
+	//	`function y(e) { switch (typeof e) { case "object": var t; if (a) 1; } }`,
+	//	`function y(b){switch(typeof b){case'object':var c;a&&1}}`
+	//);
+
+	//assertMinifier(
+	//	`if (46 == a && 5 > b) c = 56`,
+	//	`46==a&&5>b&&(c=56)`
+	//);
+	//assertMinifier(
+	//	"function handly(event) { if (!a) { b = 4, d = 6}}",
+	//	"function handly(){!a&&(b=4,d=6)}"
+	//);
 	assertMinifier(
 		"function handly(event) { if (a) return; b = 4; d = 6;}",
 		"function handly(){!a&&(b=4,d=6)}"
 	);
-		/*	assertMinifier(
+	assertMinifier(
 		"function a() { if (a) if (c) return bla; if (b) if (d) return alb; }",
 		"function a() { return a && c ? bla : b && d ? alb : void 0 }"
 	);
 
+/*	see unittest in returns
 	assertMinifier(
 		`function cd() { if (a) { return 7; } else if (b) return 5; d(); }`,
 		`function cd() { return a ? 7 : b ? 5 : (d(),void 0) }`
-	);
+	);*/
 
-		*/
 		/// ditto
 		assertMinifier(
 			"function z(d) { if (a) b ? d() : e(); }",
@@ -108,10 +127,14 @@ unittest
 			"function z(b) { a && (g && b && (k = 7),f()) }"
 		);
 		/// ditto
-		//assertMinifier( // fails parser
-		//	"function z(d) { if (a) if (b) d() else e() };",
-		//	"function z(c) { a && (b ? c() : e()) }"
-		//);
+		assertMinifier(
+			"function z(d) { if (a) if (b) d(); else e() };",
+			"function z(c) { a && (b ? c() : e()) }"
+		);
+		assertMinifier(
+			`if (doFun(), a) { b = 6; } else { b = 7; }`,
+			`doFun(),b = a ? 6 : 7`
+		);
 		/// shortenOftenUsedStringLiterals
 		/*assertMinifier(
 			`var abc; if ("prod" !== "dev") { var someLongName = function b() { return 5; }; }`,
@@ -123,10 +146,10 @@ unittest
 			`function a() { var c = "ThisWillBeReplaced", a = { "ThisStringNeedsToStay": c }, b = { "ThisStringNeedsToStay": c } }`
 		);
 		/// Issue #42
-	  	assertMinifier(
-	  		`var a = ("a " + propName + " b ") + ("c.")`,
-	        `var a = "a " + propName + " b " + "c.";`
-	  	);
+		assertMinifier(
+			`var a = ("a " + propName + " b ") + ("c.")`,
+			`var a = "a " + propName + " b " + "c.";`
+		);
 		/// shortCircuitIfStatements
 		assertMinifier(
 			"if (true) d = 5;",
@@ -649,10 +672,10 @@ unittest
 			`a = 0x4456;`,
 			`a = 17494`
 		);
-	  	assertMinifier(
-	  		`function a(b, c) { if(c) if (c===b) return "b" else return null; switch (b) { case 7: if (b) return null else return c.data } return 4; }`,
-	  		`function a(b, c) { if (c) return c === b ? "b" : null; else { switch (b) { case 7: return b ? null : c.data; }; return 4 } }`
-	  	);
+		assertMinifier(
+			`function a(b, c) { if(c) if (c===b) return "b" else return null; switch (b) { case 7: if (b) return null else return c.data } return 4; }`,
+			`function a(b, c) { if (c) return c === b ? "b" : null; else { switch (b) { case 7: return b ? null : c.data; }; return 4 } }`
+		);
 		/// Issue #58
 		assertMinifier(
 			`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } return ret + ' ' + markupForID + '>'; }`,

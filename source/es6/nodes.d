@@ -35,6 +35,10 @@ version(unittest)
 	import std.stdio;
 }
 
+version(chatty)
+{
+	import std.stdio;
+}
 enum Prefix {
 	Delete,
 	Void,
@@ -120,6 +124,7 @@ enum NodeType {
 	DoWhileStatementNode,
 	WhileStatementNode,
 	CaseNode,
+	CaseBodyNode,
 	DefaultNode,
 	ForStatementNode,
 	WithStatementNode,
@@ -205,7 +210,8 @@ enum Hint {
 	Return = 1 << 0,
 	ReturnValue = 1 << 1,
 	NonExpression = 1 << 2,
-	Or = 1 << 3
+	Or = 1 << 3,
+	HasAssignment = 1 << 4
 }
 struct Hints
 {
@@ -283,10 +289,12 @@ class Node
 	@property void hints(int hs) { _hints = Hints(hs); }
 	this(NodeType t)
 	{
+		version(chatty) { writeln(t); }
 		_type = t;
 	}
 	this(NodeType t, Node n)
 	{
+		version(chatty) { writeln(t); }
 		_type = t;
 		if (n !is null)
 		{
@@ -296,6 +304,7 @@ class Node
 	}
 	this(NodeType t, Node[] cs)
 	{
+		version(chatty) { writeln(t); }
 		_type = t;
 		import std.algorithm :each;
 		foreach(c;cs)
@@ -380,6 +389,8 @@ class Node
 		other.parent = this;
 		if (other.branch != child.branch)
 			other.assignBranch(child.branch);
+		if (child.parent is this)
+			child.parent = null;
 	}
 	auto getIndexOfChild(Node child)
 	{
@@ -475,8 +486,9 @@ class ErrorNode : Node
 	size_t line;
 	size_t column;
 	string debugMessage;
-	this(string v, size_t l, size_t c, string debugMsg = "")
+	this(string v, size_t l, size_t c, string debugMsg = "", in string file = __FILE__, in size_t line2 = __LINE__)
 	{
+		version (chatty) { writefln("Error At %s@%s: %s@%s:%s",file,line2,v,l,c); }
 		value = v;
 		column = c;
 		line = l;
@@ -732,6 +744,13 @@ class ExpressionNode : Node
 	{
 		return children.length < 2;
 	}
+	void addExpression(Node node)
+	{
+		if (node.type == NodeType.ExpressionNode)
+			this.addChildren(node.children);
+		else
+			this.addChild(node);
+	}
 }
 class ParenthesisNode : Node
 {
@@ -954,7 +973,7 @@ class AssignmentExpressionNode : Node
 void removeFirstAssignment(AssignmentExpressionNode node)
 {
 	if (node.children.length == 3)
-		node.replaceWith(node.children[2]);
+		node.replaceWith(node.children[2]).reanalyseHints();
 	else
 		node.children = node.children[2..$];
 }
@@ -1091,7 +1110,15 @@ struct IfPath
 	{
 		if (node.type != NodeType.BlockStatementNode)
 			return node;
+		if (node.children.length == 0)
+			assert(0);
 		return node.children[$-1];
+	}
+	bool hasStatements()
+	{
+		if (node.type == NodeType.BlockStatementNode)
+			return node.children.length > 0;
+		return node.type != NodeType.EmptyStatementNode;
 	}
 	Node convertToAssignmentExpression()
 	{
@@ -1145,6 +1172,10 @@ Node convertToAssignmentExpression(BlockStatementNode node)
 	import std.algorithm : each;
 	import std.array : appender;
 	version (unittest) if (node.hints.has(Hint.NonExpression)) throw new UnitTestException(["Cannot convert non-expressions"]);
+	if (node.hints.has(Hint.NonExpression)) {
+		import std.stdio;
+		writeln(node);
+	}
 	assert(!node.hints.has(Hint.NonExpression));
 	if (node.children.length == 1)
 		return convertToAssignmentExpression(node.children[0]);
@@ -1156,7 +1187,9 @@ Node convertToAssignmentExpression(BlockStatementNode node)
 		} else
 			app.put(child);
 	});
-	return new ParenthesisNode(new ExpressionNode(app.data));
+	auto expr = new ExpressionNode(app.data);
+	expr.reanalyseHints();
+	return new ParenthesisNode(expr);
 }
 Node convertToAssignmentExpression(Node node)
 {
@@ -1257,9 +1290,16 @@ class WhileStatementNode : Node
 }
 class CaseNode : Node
 {
+	this(Node condition, Node caseBody)
+	{
+		super(NodeType.CaseNode,[condition,caseBody]);
+	}
+}
+class CaseBodyNode : Node
+{
 	this(Node[] children)
 	{
-		super(NodeType.CaseNode,children);
+		super(NodeType.CaseBodyNode,children);
 	}
 }
 class DefaultNode : Node
@@ -1795,6 +1835,9 @@ void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __L
 		version(unittest)
 			if (a.branch is null)
 				throw new UnitTestException([format("Node has no branch.\n%s",a)],file,line);
+		import std.stdio;
+		if (a.branch is null)
+			writeln(a.parent);
 		assert(a.branch !is null);
 		foreach(c; a.children)
 		{
@@ -1898,7 +1941,7 @@ unittest
 	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
 	n.analyseNode();
 	diffTree(n,n).type.shouldEqual(Diff.No);
-	format("%s",n).shouldEqual("ModuleNode NonExpression
+	format("%s",n).shouldEqual("ModuleNode NonExpression, HasAssignment
   BooleanNode
   StringLiteralNode \"s\"
   BinaryLiteralNode
@@ -1925,9 +1968,9 @@ unittest
     IdentifierNode a
     ExpressionOperatorNode
     IdentifierNode b
-  AssignmentExpressionNode
+  AssignmentExpressionNode HasAssignment
     IdentifierNode c
-    AssignmentOperatorNode
+    AssignmentOperatorNode HasAssignment
     IdentifierNode d
   LabelledStatementNode NonExpression
   ForStatement ExprCStyle
@@ -1951,11 +1994,11 @@ unittest
       IdentifierNode gen
       FormalParameterListNode
       FunctionBodyNode
-  AssignmentExpressionNode
+  AssignmentExpressionNode HasAssignment
     ArrayLiteralNode
       ElisionNode 2
       IdentifierNode a
-    AssignmentOperatorNode
+    AssignmentOperatorNode HasAssignment
     IdentifierNode b
   LexicalDeclarationNode NonExpression
     LexicalDeclarationItemNode
@@ -1981,3 +2024,26 @@ bool startsNewScope(Node node)
 			return false;
 	}
 }
+
+template getNodeType(AstNode : Node)
+{
+	mixin("alias getNodeType = NodeType."~AstNode.stringof~";");
+}
+
+template getAstNodeType(alias NodeType type)
+{
+	mixin("alias getAstNodeType = "~type.stringof~";");
+}
+
+@("getNodeType")
+unittest
+{
+	assert(getNodeType!IfStatementNode == NodeType.IfStatementNode);
+}
+@("getAstNodeType")
+unittest
+{
+	assert(is(getAstNodeType!(NodeType.IfStatementNode) : IfStatementNode));
+}
+
+

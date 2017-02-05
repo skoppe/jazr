@@ -278,7 +278,11 @@ class Branch
 			case NodeType.ForStatementNode:
 			case NodeType.DoWhileStatementNode:
 			case NodeType.WhileStatementNode:
-				return entry.parent; default: assert(0);
+				return entry.parent;
+			case NodeType.DefaultNode:
+				return entry.parent.parent;
+			case NodeType.CaseNode:
+				return entry.parent.parent; default: assert(0);
 		}
 	}
 }
@@ -374,11 +378,10 @@ string generateIdentifier(int idx)
 		return (cast(char)('A'+(idx-26))).to!string;
 	return generateIdentifier(cast(int)((idx / 52)-1))~generateIdentifier(idx % 52);
 }
-import std.regex;
-auto reservedKeyword = ctRegex!`^(break|do|in|typeof|case|else|instanceof|var|catch|export|new|void|class|extends|return|while|const|finally|super|with|continue|for|switch|yield|debugger|function|this|default|if|throw|delete|import|try|enum|await|null|true|false)$`;
 bool isValidIdentifier(string id)
 {
-	return id.matchFirst(reservedKeyword).empty();
+	import es6.lexer;
+	return !isReservedKeyword(id);
 }
 string generateValidIdentifier(int start)
 {
