@@ -263,6 +263,7 @@ unittest
 	assert(`a 'good' way to go`.coerceToSingleQuotedString == `a \'good\' way to go`);
 	"a \\\"good\\\" way to go".coerceToSingleQuotedString.shouldEqual(`a "good" way to go`);
 	assert(`*(?:'((?:\\\\.|[^\\\\'])*)'|\"((?:\\\\.|[^\\\\\"])*)\"|(`.coerceToSingleQuotedString == `*(?:\'((?:\\\\.|[^\\\\\'])*)\'|"((?:\\\\.|[^\\\\"])*)"|(`);
+	assert(`a \xaa\xbb`.coerceToSingleQuotedString == `a \xaa\xbb`);
 }
 class Lexer(Source)
 {
@@ -514,6 +515,8 @@ class Lexer(Source)
 					chr = s.front();
 					if (chr == '\u0000')
 						goto eof;
+					if (chr != type)
+						str.put('\\');
 					s.popFront();
 					tokenLength++;
 					str.put(chr);
@@ -1137,6 +1140,9 @@ unittest
 	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`'escaped \'string\''`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"escaped \'string\'"));
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
+	lexer = createLexer(`"\xaa\xb5"`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`\xaa\xb5`));
 	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 }
 @("lexBinaryLiteral")
