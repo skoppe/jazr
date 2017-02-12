@@ -120,20 +120,20 @@ unittest {
 
 }
 
-bool combineBlockStatementIntoExpression(BlockStatementNode node)
+bool combineBlockStatementIntoExpression(BlockStatementNode node, out Node replacedWith)
 {
-	return combineStatementsIntoExpression(node);
+	return combineStatementsIntoExpression(node,replacedWith);
 }
-bool combineFunctionBodyIntoExpression(FunctionBodyNode node)
+bool combineFunctionBodyIntoExpression(FunctionBodyNode node, out Node replacedWith)
 {
-	return combineStatementsIntoExpression(node);
+	return combineStatementsIntoExpression(node,replacedWith);
 }
-bool combineModuleIntoExpression(ModuleNode node)
+bool combineModuleIntoExpression(ModuleNode node, out Node replacedWith)
 {
-	return combineStatementsIntoExpression(node);
+	return combineStatementsIntoExpression(node,replacedWith);
 }
 
-private bool combineStatementsIntoExpression(Node node)
+private bool combineStatementsIntoExpression(Node node, out Node replacedWith)
 {
 	assert(node.type == NodeType.BlockStatementNode || node.type == NodeType.FunctionBodyNode || node.type == NodeType.ModuleNode);
 
@@ -202,7 +202,7 @@ unittest
 		`a ? b() : c(), e && f && (d = 6), g = {a: 4}, h = [0,1], (i || j) && g(), a = /^(?:webkit|moz|o)[A-Z]/.test("");`
 	);
 }
-bool simplifyUnaryExpressions(UnaryExpressionNode node)
+bool simplifyUnaryExpressions(UnaryExpressionNode node, out Node replacedWith)
 {
 	auto raw = node.getRawValue();
 	switch (raw.type)
@@ -214,7 +214,7 @@ bool simplifyUnaryExpressions(UnaryExpressionNode node)
 		case ValueType.NaN:
 		case ValueType.Bool:
 		case ValueType.String:
-			node.replaceWith(raw.toUnaryExpression());
+			replacedWith = node.replaceWith(raw.toUnaryExpression());
 			return true;
 		default: return false;
 	}
@@ -240,12 +240,13 @@ unittest
 		`+Infinity`
 	);
 }
-bool simplifyBinaryExpressions(BinaryExpressionNode node)
+bool simplifyBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 {
 	auto raw = node.resolveBinaryExpression();
 	if (raw.type == ValueType.NotKnownAtCompileTime)
 		return false;
-	node.replaceWith(raw.toUnaryExpression()).reanalyseHints();
+	replacedWith = node.replaceWith(raw.toUnaryExpression());
+	replacedWith.reanalyseHints();
 	return true;
 }
 
@@ -271,15 +272,15 @@ unittest
 		`if (false) a();`
 	);
 }
-bool shortenBooleanNodes(BooleanNode node)
+bool shortenBooleanNodes(BooleanNode node, out Node replacedWith)
 {
 	if (node.parent.type == NodeType.UnaryExpressionNode)
 	{
 		node.parent.as!(UnaryExpressionNode).prefixs ~= new PrefixExpressionNode(Prefix.Negation);
-		node.replaceWith(new DecimalLiteralNode(node.value ? "0" : "1"));
+		replacedWith = node.replaceWith(new DecimalLiteralNode(node.value ? "0" : "1"));
 	} else
 	{
-		node.replaceWith(
+		replacedWith = node.replaceWith(
 			new UnaryExpressionNode(
 				[new PrefixExpressionNode(Prefix.Negation)],
 				new DecimalLiteralNode(node.value ? "0" : "1")

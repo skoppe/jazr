@@ -91,13 +91,8 @@ version (unittest)
 			throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
 	}
 }
-struct Stats
-{
-	ulong nodesVisited;
-	ulong scopesVisited;
-	ulong transformsCalled;
-}
-Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
+
+auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
 {
 	import std.typetuple : staticMap, Filter, templateAnd, templateNot, NoDuplicates;
 	import std.functional : unaryFun;
@@ -111,12 +106,9 @@ Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line 
 	alias _typedNodeTransforms = NoDuplicates!(Filter!(templateAnd!(isAstNode,templateNot!isTypeofNode), _inputTypes));
 	alias _otherTransforms = NoDuplicates!(Filter!(templateNot!isAstNode, _inputTypes));
 
-	Stats stats;
 	auto root = node;
-	Node[] todo = [node];
 	bool runScopes(Scope scp, bool first = true)
 	{
-		stats.scopesVisited++;
 		bool r = false;
 		foreach(_fun; _funs)
 		{
@@ -127,7 +119,6 @@ Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line 
 					if (first) {
 						version(chatty) { writeln(fullyQualifiedName!_fun, node); }
 						version(unittest) {	writeln(fullyQualifiedName!_fun); }
-						stats.transformsCalled++;
 						_fun(scp);
 						version(unittest) {
 							root.checkInternals(file,line);
@@ -136,7 +127,6 @@ Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line 
 				} else {
 					version(chatty) { writeln(fullyQualifiedName!_fun, node); }
 					version(unittest) {	writeln(fullyQualifiedName!_fun); }
-					stats.transformsCalled++;
 					if (_fun(scp))
 					{
 						r = true;
@@ -149,17 +139,11 @@ Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line 
 		}
 		return r;
 	}
-	bool runNodes(Node node, bool first = true)
+	Node transformNode(Node node)
 	{
-		stats.nodesVisited++;
+		assert(node !is null);
 		bool r = false;
-		foreach(c; node.children)
-		{
-			if (c.type == NodeType.FunctionBodyNode)
-				todo ~= c;
-			else
-				r = runNodes(c,first) || r;
-		}
+		Node replacedWith;
 		switch(node.type)
 		{
 			foreach(_nodeAstType; _typedNodeTransforms)
@@ -173,27 +157,29 @@ Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line 
 						{
 							static if (is(ReturnType!_fun : void))
 							{
-								if (first) {
-									stats.transformsCalled++;
-									version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
-									version(unittest) {	writeln(fullyQualifiedName!_fun); }
-									_fun(typedNode);
-									version(unittest) {
-										root.checkInternals(file,line);
-									}
+								version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
+								version(unittest) {	writeln(fullyQualifiedName!_fun); }
+								_fun(typedNode, replacedWith);
+								version(unittest) {
+									root.checkInternals(file,line);
 								}
+								if (replacedWith !is null)
+									return replacedWith;
+								if (typedNode.parent is null)
+									return null;
 							} else {
 								version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
 								version(unittest) {	writeln(fullyQualifiedName!_fun); }
-								stats.transformsCalled++;
-								if (_fun(typedNode))
+								if (_fun(typedNode, replacedWith))
 								{
 									r = true;
 									version (unittest) {
 										root.checkInternals(file,line);
 									}
+									if (replacedWith !is null)
+										return replacedWith;
 									if (typedNode.parent is null)
-										return true;
+										return null;
 								}
 							}
 						}
@@ -207,50 +193,84 @@ Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line 
 					{
 						static if (is(ReturnType!_fun : void))
 						{
-							if (first) {
-								version(chatty) { writeln(fullyQualifiedName!_fun, node); }
-								version(unittest) {	writeln(fullyQualifiedName!_fun); }
+							version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+							version(unittest) {	writeln(fullyQualifiedName!_fun); }
 
-								stats.transformsCalled++;
-								_fun(node);
-								version(unittest) {
-									root.checkInternals(file,line);
-								}
+							_fun(node, replacedWith);
+							version(unittest) {
+								root.checkInternals(file,line);
 							}
+							if (replacedWith !is null)
+								return replacedWith;
+							if (node.parent is null)
+								return null;
 						} else {
 							version(chatty) { writeln(fullyQualifiedName!_fun, node); }
 							version(unittest) {	writeln(fullyQualifiedName!_fun); }
-							stats.transformsCalled++;
-							if (_fun(node))
+							if (_fun(node, replacedWith))
 							{
 								r = true;
 								version (unittest) {
 									root.checkInternals(file,line);
 								}
+								if (replacedWith !is null)
+									return replacedWith;
 								if (node.parent is null)
-									return true;
+									return null;
 							}
 						}
 					}
 				}
 		}
-		return r;
+		return replacedWith;
 	}
-	for (auto i = 0; i < todo.length; i++)
+	Node transformNodes(Node node)
 	{
-		bool first = true;
+		assert(node !is null);
+		Node replacedWith;
+		foreach(c; node.children)
+		{
+			if (!c.startsNewScope)
+			{
+				replacedWith = transformNodes(c);
+				if (replacedWith !is null && replacedWith.parent !is node)
+				{
+					return replacedWith.parent;
+				}
+			}
+		}
+		replacedWith = node;
+		replacedWith = transformNode(node);
+		while (replacedWith !is null)
+		{
+			node = replacedWith;
+			replacedWith = transformNode(node);
+		}
+		return node;
+	}
+	void transformScope(Scope scp)
+	{
+		assert(scp !is null);
+		foreach(s; scp.children)
+			transformScope(s);
+		bool first;
 		do {
 			first = true;
-			while(runNodes(todo[i], first))
+			assert(scp.entry !is null);
+			transformNodes(scp.entry);
+			while(runScopes(scp, first))
 				first = false;
-			if (todo[i].children.length)
-			{
-				first = true;
-				Scope scp = todo[i].children[0].branch.scp;
-				while(runScopes(scp, first))
-					first = false;
-			}
 		} while (!first);
 	}
-	return stats;
+	transformScope(node.branch.scp);
 }
+
+
+
+
+	// we start at each leaf
+	// we run all transforms on each node
+	// we collect the replacedWith, and if it has
+	// 	we run all transforms on that node
+	// only when we are the first/last child do we process the parent
+	// 

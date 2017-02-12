@@ -34,7 +34,7 @@ version(unittest)
 	import std.stdio;
 }
 
-bool combineNestedIfs(IfStatementNode parent)
+bool combineNestedIfs(IfStatementNode parent, out Node replacedWith)
 {
 	if (parent.hasElsePath)
 		return false;
@@ -138,7 +138,7 @@ unittest
 	);
 }
 
-bool convertIfsToExpressionStatements(IfStatementNode ifStmt)
+bool convertIfsToExpressionStatements(IfStatementNode ifStmt, out Node replacedWith)
 {
 	if (ifStmt.hasElsePath)
 		return false;
@@ -173,7 +173,7 @@ bool convertIfsToExpressionStatements(IfStatementNode ifStmt)
 		ifStmt.truthPath.node.parent = null;
 		result = combineExpressions(ifStmt.condition,ifStmt.truthPath.node);
 	}
-	ifStmt.replaceWith(result);
+	replacedWith = ifStmt.replaceWith(result);
 
 	result.assignBranch(ifStmt.branch);
 
@@ -299,7 +299,7 @@ unittest
 	);
 */
 
-bool removeEmptyIfPaths(IfStatementNode ifStmt)
+bool removeEmptyIfPaths(IfStatementNode ifStmt, out Node replacedWith)
 {
 	if (ifStmt.truthPath.hasStatements)
 	{
@@ -379,7 +379,7 @@ unittest
 		`a`
 	);
 }
-bool simplifyStaticIfStatement(IfStatementNode ifStmt)
+bool simplifyStaticIfStatement(IfStatementNode ifStmt, out Node replacedWith)
 {
 	auto value = ifStmt.condition.coerceToTernary;
 
@@ -397,22 +397,19 @@ bool simplifyStaticIfStatement(IfStatementNode ifStmt)
 	}
 
 	ifStmt.truthPath.branch.remove();
+	Node parent = ifStmt.parent;
 	if (value == Ternary.True)
 	{
 		if (ifStmt.hasElsePath)
 			ifStmt.removeElsePath();
-		ifStmt.insertBefore(ifStmt.truthPath.node);
-		Node parent = ifStmt.parent;
-		ifStmt.detach();
+		replacedWith = ifStmt.replaceWith(ifStmt.truthPath.node);
 		parent.reanalyseHints();
 		return true;
 	}
 	if (ifStmt.hasElsePath)
 	{
 		ifStmt.elsePath.branch.remove();
-		ifStmt.insertBefore(ifStmt.elsePath.node);
-		Node parent = ifStmt.parent;
-		ifStmt.detach();
+		replacedWith = ifStmt.replaceWith(ifStmt.elsePath.node);
 		parent.reanalyseHints();
 		return true;
 	}
@@ -457,11 +454,11 @@ unittest
 	);
 	assertSimplifyStaticIf(
 		`if (a) { if (true) { d=5,p=6 } else { g=5 } }`,
-		`if (a) { d=5,p=6 }`
+		`if (a) { { d=5,p=6 } }`
 	);
 	assertSimplifyStaticIf(
 		`if (a) { if (false) { d=5,p=6 } else { g=5 } }`,
-		`if (a) { g=5 }`
+		`if (a) { { g=5 } }`
 	);
 	assertSimplifyStaticIf(
 		`if (0) a();`,

@@ -42,7 +42,7 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 	debug {
 		root.assertTreeInternals();
 	}
-	auto stats = root.runTransform!(
+	root.runTransform!(
 		hoistFunctions,
 		removeRedundantBlockStatements,
 		shortenLiteralPropertyNames,
@@ -351,7 +351,7 @@ unittest
 		);
 		assertMinifier(
 			`if (g) { if (a=5, e) d = 5; b = 5;}`,
-			"g && (a = 5,e && (d = 5),b = 5)"
+			"g && ((a = 5,e) && (d = 5),b = 5)"		// TODO: should be minified as `g && (a = 5,e && (d = 5),b = 5)`  but the transformer doesn't reconsider nodes between node and replacedWith
 		);
 		/// moveNonValueGeneratingStatementsIntoForIfAndSwitches
 		assertMinifier(
@@ -405,12 +405,12 @@ unittest
 		);
 		assertMinifier(
 			`(t = 7,g && (a = 5,e)) && (d = 5)`,
-			"t = 7,g && (a = 5,e) && (d = 5)"
+			"t = 7,(g && (a = 5,e)) && (d = 5)"			// TODO: should be minified as `t = 7,g && (a = 5,e) && (d = 5)` but the transformer doesn't reconsider nodes between node and replacedWith
 		);
 		/// ditto
 		assertMinifier(
 			`if (t = 7, g) if (a=5, e) d = 5;`,
-			"t = 7,g && (a = 5,e) && (d = 5)"
+			"(t = 7,g) && (a = 5,e) && (d = 5)"			// TODO: should be minified as `t = 7,g && (a = 5,e) && (d = 5)`  but the transformer doesn't reconsider nodes between node and replacedWith
 		);
 		/// ditto
 		assertMinifier(

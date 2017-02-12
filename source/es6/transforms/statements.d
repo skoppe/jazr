@@ -32,7 +32,7 @@ version(unittest)
 	import std.stdio;
 }
 
-void removeRedundantBlockStatements(BlockStatementNode node)
+void removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWith)
 {
 	if (node.children.length == 1)
 	{
@@ -40,7 +40,10 @@ void removeRedundantBlockStatements(BlockStatementNode node)
 			node.parent.getIndexOfChild(node) == 1 &&
 			node.parent.as!(IfStatementNode).hasElsePath)
 			return;
-		node.replaceWith(node.children[0]);
+		if (node.parent.type == NodeType.TryStatementNode ||
+			node.parent.type == NodeType.CatchStatementNode)
+			return;
+		replacedWith = node.replaceWith(node.children[0]);
 	}
 }
 
@@ -68,6 +71,21 @@ unittest
 	assertRemoveRedundantBlockStatements(
 		`if (a) { if (b) { if (c) for(;;); } } else { d = 6; }`,
 		`if (a) { if (b) if (c) for(;;); } else d = 6;`
+	);
+	assertRemoveRedundantBlockStatements(
+		`if(a) { d=5, p=6 }`,
+		`if(a) d=5, p=6;`
+	);
+	assertRemoveRedundantBlockStatements(
+		`try { bla(); } catch (e) { }`,
+		`try { bla(); } catch (e) { }`
+	);
+	assertRemoveRedundantBlockStatements(
+		`for (c in a) {
+		    b = a[c], S(b) ? this[c] = b : this['_' + c] = b
+		}`,
+		`for (c in a)
+		    b = a[c], S(b) ? this[c] = b : this['_' + c] = b`
 	);
 	// TODO: these dont work yet due to low ROI
 	/*assertRemoveRedundantBlockStatements(

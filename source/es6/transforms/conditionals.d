@@ -60,7 +60,7 @@ version(unittest)
 	}
 }
 
-bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt)
+bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out Node replacedWith)
 {
 	if (!ifStmt.hasElsePath)
 		return false;
@@ -125,7 +125,7 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt)
 	}
 
 	r.assignBranch(ifStmt.branch);
-	ifStmt.replaceWith(r);
+	replacedWith = ifStmt.replaceWith(r);
 	return true;
 }
 @("convertIfElseAssignmentToConditionalExpression")
@@ -265,7 +265,7 @@ unittest
 	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);
 }
 
-bool convertIfElseToConditionalExpression(IfStatementNode ifStmt)
+bool convertIfElseToConditionalExpression(IfStatementNode ifStmt, out Node replacedWith)
 {
 	if (!ifStmt.hasElsePath)
 		return false;
@@ -307,7 +307,7 @@ bool convertIfElseToConditionalExpression(IfStatementNode ifStmt)
 
 
 	auto cond = new ConditionalExpressionNode(condition, l, r);
-	ifStmt.replaceWith(cond);
+	replacedWith = ifStmt.replaceWith(cond);
 
 	cond.reanalyseHints();
 
@@ -388,7 +388,7 @@ unittest
 	// TODO: there is also precedence situation with yield operator
 }
 
-bool simplifyStaticConditional(ConditionalExpressionNode cond)
+bool simplifyStaticConditional(ConditionalExpressionNode cond, out Node replacedWith)
 {
 	auto value = cond.condition.coerceToTernary;
 
@@ -412,7 +412,7 @@ bool simplifyStaticConditional(ConditionalExpressionNode cond)
 	else
 		node = cond.elsePath;
 
-	cond.replaceWith(node);
+	replacedWith = cond.replaceWith(node);
 	return true;
 }
 

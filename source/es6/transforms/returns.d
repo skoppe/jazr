@@ -216,11 +216,12 @@ unittest
 		`function b() { if (a) { for(;;)return }; op() }`
 	);
 }
-void removeRedundantElse(IfStatementNode ifStmt)
+void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)
 {
 	if (!ifStmt.hasElsePath)
 		return;
 
+	auto currentParent = ifStmt.parent;
 	if (ifStmt.truthPath.hints.has(Hint.Return | Hint.ReturnValue))
 	{
 		auto transfer = ifStmt.elsePath;
@@ -237,6 +238,8 @@ void removeRedundantElse(IfStatementNode ifStmt)
 		ifStmt.insertAfter(transfer);
 		ifStmt.reanalyseHints();
 	}
+	if (currentParent != ifStmt.parent)
+		replacedWith = ifStmt.parent;
 }
 @("removeRedundantElse")
 unittest

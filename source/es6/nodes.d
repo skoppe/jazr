@@ -1975,7 +1975,7 @@ void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __L
 				if (c.parent !is a)
 				{
 					import std.stdio;
-					writeln(a);
+					writeln(c.parent,a);
 					throw new UnitTestException([format("Node's child doesn't have right parent.")],file,line);
 				}
 			assert(c.parent is a);

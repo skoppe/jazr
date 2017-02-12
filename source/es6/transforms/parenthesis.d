@@ -42,7 +42,7 @@ version(unittest)
 	);
  */
 
-bool removeUnnecessaryParenthesis(ParenthesisNode node)
+bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 {
 	if (node.children.length == 0)
 	{
@@ -103,6 +103,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 			if (innerLowestPrecedence < outerHighestPrecedence)
 				return false;
 			outerBinaryExpr.replaceChildWith(node, innerBinaryExpr);
+			replacedWith = innerBinaryExpr.children[0];
 		}
 		else if (parent.parent.type == NodeType.ConditionalExpressionNode)
 			return false;
@@ -119,17 +120,21 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 			{
 				node.children = [last];
 				last.parent = node;
-			} else
+			} else {
 				node.replaceWith(last);
+				replacedWith = last;
+			}
 			if (transfers.length > 0)
 			{
 				if (binExpr.parent.type == NodeType.ExpressionNode)
 				{
-					binExpr.insertBefore(transfers);					
+					binExpr.insertBefore(transfers);
+					replacedWith = transfers[0];
 				} else
 				{
 					auto exprNode = binExpr.replaceWith(new ExpressionNode(transfers));
 					exprNode.addChild(binExpr);
+					replacedWith = binExpr;
 				}
 			}
 		} else if (hasAssignment)
@@ -138,7 +143,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 			return false;
 		else
 		{
-			node.replaceWith(node.children[0]);
+			replacedWith = node.replaceWith(node.children[0]);
 		}
 	} else if (isPartOfUnaryExpr)
 	{
@@ -150,7 +155,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 		if (parent.parent.type == NodeType.BinaryExpressionNode)
 		{
 			auto binExpr = parent.parent;
-			node.replaceWith(last);
+			replacedWith = node.replaceWith(last);
 			if (binExpr.parent.type == NodeType.ExpressionNode)
 			{
 				binExpr.insertBefore(transfers);
@@ -159,6 +164,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 				auto expr = new ExpressionNode(transfers);
 				binExpr.replaceWith(expr);
 				expr.addChild(binExpr);
+				replacedWith = expr;
 			}
 		} else
 		{
@@ -171,6 +177,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 				auto exprNode = new ExpressionNode(transfers);
 				unary.replaceWith(exprNode);
 				exprNode.addChild(unary);
+				replacedWith = exprNode;
 			}
 		}
 	} else if (isExpression && isPartOfConditionalExpr)
@@ -203,7 +210,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node)
 		return false;
 	} else if (node.children.length == 1)
 	{
-		node.replaceWith(node.children[0]);
+		replacedWith = node.replaceWith(node.children[0]);
 	} else
 	{
 		node.insertBefore(node.children);
@@ -433,6 +440,10 @@ unittest
 	assertRemoveParens(
 		`g&&((a=5,e)&&(d=5),b=5);`,
 		`g&&(a=5,e&&(d=5),b=5);`
+	);
+	assertRemoveParens(
+		`(f ? (c ? '+' : '') : '-')`,
+		`f ? c ? '+' : '' : '-'`
 	);
 	//assertRemoveParens(
 	//	`(1)&&(true)?d=5:g=5;`,

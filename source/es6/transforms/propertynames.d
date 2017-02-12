@@ -33,7 +33,7 @@ version(unittest)
 	import std.stdio;
 }
 
-bool shortenLiteralPropertyNames(PropertyDefinitionNode node)
+bool shortenLiteralPropertyNames(PropertyDefinitionNode node, out Node replacedWith)
 {
 	if (node.name.type != NodeType.StringLiteralNode)
 		return false;

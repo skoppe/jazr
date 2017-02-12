@@ -1,9 +1,8 @@
 #!/bin/bash
 #
 
-# dub build --config=pgo-profile --build=release --compiler=ldc2
-# dub build --config=pgo-build --build=release --compiler=ldc2
-dub build --build=release --compiler=ldc2
+dub build --config=pgo-profile --build=release --compiler=ldc2
+dub build --config=pgo-build --build=release --compiler=ldc2
 
 if [ -f "compare.csv" ]; then
 	rm compare.csv

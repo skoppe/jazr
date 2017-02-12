@@ -31,7 +31,7 @@ version (unittest)
 	import std.stdio;
 }
 
-bool simplifyRedundantAssignmentExpressions(ExpressionNode expr)
+bool simplifyRedundantAssignmentExpressions(ExpressionNode expr, out Node replacedWith)
 {
 	if (expr.isSingleExpression) {
 		import std.stdio;
@@ -65,7 +65,7 @@ bool simplifyRedundantAssignmentExpressions(ExpressionNode expr)
 	expr.children = expr.children[0..$-1];
 
 	if (expr.children.length == 1)
-		expr.replaceWith(expr.children[0]);
+		replacedWith = expr.replaceWith(expr.children[0]);
 	return true;
 }
 

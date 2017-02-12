@@ -191,7 +191,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
 		case NodeType.ExpressionNode:
 			node.children.emitDelimited(sink,",",guide);
-			return Guide.None;
+			return Guide.RequiresDelimiter;
 		case NodeType.ParenthesisNode:
 			auto n = node.as!ParenthesisNode;
 			sink.put('(');
@@ -750,6 +750,12 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 		default: break;
 	}
 	return node.children.emit(sink,guide);
+}
+@("Expression")
+unittest
+{
+	assertEmitted(`if(a)d=5,p=6;`);
+	assertEmitted(`d=5,p=6;`);
 }
 @("Import Declaration")
 unittest
