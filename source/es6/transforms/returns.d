@@ -216,6 +216,7 @@ unittest
 		`function b() { if (a) { for(;;)return }; op() }`
 	);
 }
+
 void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)
 {
 	if (!ifStmt.hasElsePath)
@@ -241,6 +242,7 @@ void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)
 	if (currentParent != ifStmt.parent)
 		replacedWith = ifStmt.parent;
 }
+
 @("removeRedundantElse")
 unittest
 {
@@ -281,13 +283,12 @@ unittest
 		`function bla(s) { switch (s) { case 5: if (c) return a; return b}}`
 	);
 }
+
 Node createVoid0Node()
 {
 	return new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Void)],new DecimalLiteralNode("0"));
 }
-// this transformer needs to be run late in the chain
-// because we first need others to reduce everything as much as
-// possible to an expression
+
 void combineReturnStatements(Scope scp)
 {
 	Node parenthesizeIfNecessary(Node n)
@@ -430,6 +431,7 @@ void combineReturnStatements(Scope scp)
 	}
 	combineReturnStatements(scp.branch);
 }
+
 @("combineReturnStatements")
 unittest
 {
