@@ -552,6 +552,9 @@ private int getHintMask(Node n)
 		case NodeType.FunctionExpressionNode:
 		case NodeType.GeneratorExpressionNode:
 			return Hint.None;
+		case NodeType.DefaultNode:
+		case NodeType.CaseNode:
+			return Hint.None;
 		case NodeType.ParenthesisNode:
 			return ~(Hint.Or | Hint.HasAssignment);
 		case NodeType.IfStatementNode:
@@ -586,7 +589,7 @@ void reanalyseHints(Node node)
 	}
 }
 // moves all branches that start under n, into b's children.
-// the position where they end up depends on the branches
+// the position where they end up depends on the branches that
 // started before node n
 void moveSubBranchesToNewBranch(Node n, Branch b)
 {
@@ -618,6 +621,8 @@ void moveSubBranchesToNewBranch(Node n, Branch b)
 }
 void assignBranch(Node n, Branch b)
 {
+	if (n.branch is b)
+		return;
 	n.branch = b;
 	switch(n.type)
 	{
@@ -775,9 +780,9 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			}
 			break;
 		case NodeType.ForStatementNode:
-			analyseChildren(node.children[0..$-1],s,b);
+			hints |= analyseChildren(node.children[0..$-1],s,b);
 			auto stmt = node.children[$-1];
-			analyse(node.children[$-1],s,b.newBranch(stmt));
+			hints |= analyse(node.children[$-1],s,b.newBranch(stmt));
 			break;
 		case NodeType.DoWhileStatementNode:
 			analyse(node.children[0],s,b.newBranch(node.children[0]));
@@ -900,7 +905,7 @@ unittest
 	b.children[4].entry.emit.shouldEqual(`d`);
 
 	b = getBranch(`switch(a){case 1:b;default:}`);
-	b.children.length.shouldEqual(1);
+	b.children.length.shouldEqual(2);
 	b.children[0].entry.emit.shouldEqual(`b`);
 
 	b = getBranch(`for(;;){a}`);

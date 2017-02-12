@@ -86,7 +86,7 @@ auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 		final switch (prefix.prefix)
 		{
 			case Prefix.Increment:
-			case Prefix.Decrement: assert(0,"Don't think this is possible");
+			case Prefix.Decrement: raw.type = ValueType.NotKnownAtCompileTime; break;
 			case Prefix.Void: raw.type = ValueType.Undefined; raw.value = "undefined"; break;
 			case Prefix.Positive:
 				return raw.toNumber();
@@ -398,8 +398,8 @@ unittest
 	assertProcessPrefixExpressions(`delete true`,ValueType.Bool,`true`);
 	assertProcessPrefixExpressions(`delete false`,ValueType.Bool,`true`);
 	assertProcessPrefixExpressions(`delete 0`,ValueType.Bool,`true`);
-	assertProcessPrefixExpressions(`delete -1`,ValueType.Bool,`true`);
 	assertProcessPrefixExpressions(`delete 1`,ValueType.Bool,`true`);
+	assertProcessPrefixExpressions(`delete -1`,ValueType.Bool,`true`);
 	assertProcessPrefixExpressions(`delete ""`,ValueType.Bool,`true`);
 	assertProcessPrefixExpressions(`delete "0"`,ValueType.Bool,`true`);
 	assertProcessPrefixExpressions(`delete "1"`,ValueType.Bool,`true`);
@@ -412,7 +412,6 @@ unittest
 	assertProcessPrefixExpressions(`delete a`,ValueType.NotKnownAtCompileTime,"");
 	assertProcessPrefixExpressions(`delete {}`,ValueType.Bool,`true`);
 }
-
 
 bool coerceAsBoolean(RawValue raw)
 {
@@ -434,6 +433,27 @@ unittest
 {
 	import unit_threaded;
 	RawValue("",ValueType.Object).coerceAsBoolean.shouldThrow();
+}
+Ternary coerceToTernary(Node node)
+{
+	switch (node.type)
+	{
+		case NodeType.BooleanNode:
+		case NodeType.StringLiteralNode:
+		case NodeType.DecimalLiteralNode:
+		case NodeType.ObjectLiteralNode:
+		case NodeType.UnaryExpressionNode:
+		case NodeType.BinaryExpressionNode:
+			auto raw = node.getRawValue();
+			if (raw.type == ValueType.NotKnownAtCompileTime || raw.type == ValueType.Object)
+				return Ternary.None;
+			return raw.coerceAsBoolean ? Ternary.True : Ternary.False;
+		case NodeType.ExpressionNode:
+			return node.children[$-1].coerceToTernary();
+		case NodeType.ParenthesisNode:
+			return node.children[$-1].coerceToTernary();
+		default: return Ternary.None;
+	}
 }
 @("toPrimitive identity feature")
 unittest
@@ -812,6 +832,10 @@ ptrdiff_t compareExprOperatorPrecedence(ExpressionOperator opA, ExpressionOperat
 {
 	return getExprOperatorPrecedence(opA) - getExprOperatorPrecedence(opB);
 }
+auto resolveUnaryExpression(UnaryExpressionNode expr)
+{
+	return getRawValue(expr);
+}
 auto resolveBinaryExpression(BinaryExpressionNode expr)
 {
 	import std.algorithm : remove, map;
@@ -1076,6 +1100,7 @@ auto toUnaryExpression(RawValue value)
 		case ValueType.Undefined:
 		case ValueType.NaN:
 		case ValueType.Infinity:
+			return cast(Node)new IdentifierNode(value.value);
 		case ValueType.Null:
 			return cast(Node)new KeywordNode(Keyword.Null);
 		case ValueType.Bool:
@@ -1084,17 +1109,16 @@ auto toUnaryExpression(RawValue value)
 			return cast(Node)new StringLiteralNode(value.value);
 		case ValueType.Numeric:
 			return cast(Node)new DecimalLiteralNode(value.value);
-
 		case ValueType.Object: case ValueType.NotKnownAtCompileTime: version (unittest) { throw new UnitTestException(["Not supported"]); } assert(0);
 	}
 }
 @("toUnaryExpression")
 unittest
 {
-	toUnaryExpression(RawValue("",ValueType.Undefined)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
-	toUnaryExpression(RawValue("",ValueType.NaN)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
-	toUnaryExpression(RawValue("",ValueType.Infinity)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
-	toUnaryExpression(RawValue("",ValueType.Null)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
+	toUnaryExpression(RawValue("undefined",ValueType.Undefined)).as!(IdentifierNode).identifier.shouldEqual("undefined");
+	toUnaryExpression(RawValue("NaN",ValueType.NaN)).as!(IdentifierNode).identifier.shouldEqual("NaN");
+	toUnaryExpression(RawValue("Infinity",ValueType.Infinity)).as!(IdentifierNode).identifier.shouldEqual("Infinity");
+	toUnaryExpression(RawValue("Null",ValueType.Null)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
 	toUnaryExpression(RawValue("true",ValueType.Bool)).as!(BooleanNode).value.shouldEqual(true);
 	toUnaryExpression(RawValue("str",ValueType.String)).as!(StringLiteralNode).value.shouldEqual("str");
 	toUnaryExpression(RawValue("42",ValueType.Numeric)).as!(DecimalLiteralNode).value.shouldEqual("42");

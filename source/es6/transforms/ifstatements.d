@@ -23,6 +23,7 @@ import es6.transforms.expressions;
 import es6.transforms.conditionals;
 import option;
 import es6.analyse;
+import es6.eval;
 
 version(unittest)
 {
@@ -53,6 +54,8 @@ bool combineNestedIfs(IfStatementNode parent)
 
 	if (child.hasElsePath)
 		return false;
+	
+	parent.truthPath.node.branch.hints |= child.truthPath.node.branch.hints;
 
 	child.truthPath.node.branch.remove();
 
@@ -208,6 +211,10 @@ unittest
 		"function handly() { !a && (b=4, d=6) }"
 	);
 	assertConvertIfsToExpressionStatements(
+		`function handly() { if (!a) { b=4, d=6 } }`,
+		`function handly() { !a && (b=4, d=6) }`
+	);
+	assertConvertIfsToExpressionStatements(
 		"if (a) d = 5; if (b) g = 5;",
 		"a && (d = 5); b && (g = 5)"
 	);
@@ -246,10 +253,6 @@ unittest
 	assertConvertIfsToExpressionStatements(
 		`if ("use strict", b.can() && top === bottom) doThing();`,
 		`("use strict",b.can() && top === bottom) && doThing()`
-	);
-	assertConvertIfsToExpressionStatements(
-		`function handly(){if(!a){b=4,d=6}}`,
-		`function handly() { !a && (b=4, d=6) }`
 	);
 }
 
@@ -374,5 +377,110 @@ unittest
 	assertRemoveEmptyPaths(
 		`if (a) ;`,
 		`a`
+	);
+}
+bool simplifyStaticIfStatement(IfStatementNode ifStmt)
+{
+	auto value = ifStmt.condition.coerceToTernary;
+
+	if (value == Ternary.None)
+		return false;
+
+	if (ifStmt.condition.type == NodeType.ExpressionNode)
+	{
+		auto walk = ifStmt.condition.children[$-1];
+		while ((walk.type == NodeType.ExpressionNode ||
+				walk.type == NodeType.ParenthesisNode))
+			walk = walk.children[$-1];
+		walk.detach();
+		ifStmt.insertBefore(ifStmt.condition);
+	}
+
+	ifStmt.truthPath.branch.remove();
+	if (value == Ternary.True)
+	{
+		if (ifStmt.hasElsePath)
+			ifStmt.removeElsePath();
+		ifStmt.insertBefore(ifStmt.truthPath.node);
+		Node parent = ifStmt.parent;
+		ifStmt.detach();
+		parent.reanalyseHints();
+		return true;
+	}
+	if (ifStmt.hasElsePath)
+	{
+		ifStmt.elsePath.branch.remove();
+		ifStmt.insertBefore(ifStmt.elsePath.node);
+		Node parent = ifStmt.parent;
+		ifStmt.detach();
+		parent.reanalyseHints();
+		return true;
+	}
+	ifStmt.detach();
+	return true;
+}
+@("simplifyStaticIfStatement")
+unittest
+{
+	alias assertSimplifyStaticIf = assertTransformations!(simplifyStaticIfStatement);
+	assertSimplifyStaticIf(
+		`if (true) a`,
+		`a`
+	);
+	assertSimplifyStaticIf(
+		`if (true) a; else b`,
+		`a`
+	);
+	assertSimplifyStaticIf(
+		`if (!true) a; else b`,
+		`b`
+	);
+	assertSimplifyStaticIf(
+		`if (0 < 66) a; else b`,
+		`a`
+	);
+	assertSimplifyStaticIf(
+		`if (false) a`,
+		``
+	);
+	assertSimplifyStaticIf(
+		`if (false) a; else b`,
+		`b`
+	);
+	assertSimplifyStaticIf(
+		`if (a, true) b; else c`,
+		`a; b`
+	);
+	assertSimplifyStaticIf(
+		`if (a, false) b; else c`,
+		`a; c`
+	);
+	assertSimplifyStaticIf(
+		`if (a) { if (true) { d=5,p=6 } else { g=5 } }`,
+		`if (a) { d=5,p=6 }`
+	);
+	assertSimplifyStaticIf(
+		`if (a) { if (false) { d=5,p=6 } else { g=5 } }`,
+		`if (a) { g=5 }`
+	);
+	assertSimplifyStaticIf(
+		`if (0) a();`,
+		``
+	);
+	assertSimplifyStaticIf(
+		`if (bla(),0) a();`,
+		`bla()`
+	);
+	assertSimplifyStaticIf(
+		`if ("0") a();`,
+		`a();`
+	);
+	assertSimplifyStaticIf(
+		`if (bla(),"0") a();`,
+		`bla();a();`
+	);
+	assertSimplifyStaticIf(
+		`if (bla(),(hup(),"0")) a();`,
+		`bla(),(hup());a();`
 	);
 }

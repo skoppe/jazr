@@ -20,6 +20,7 @@ module es6.transforms.conditionals;
 import es6.nodes;
 import es6.scopes;
 import es6.analyse;
+import es6.eval;
 import es6.transforms.expressions;
 
 version(unittest)
@@ -385,4 +386,83 @@ unittest
 		"a ? g = 6 : k = 7"
 	);
 	// TODO: there is also precedence situation with yield operator
+}
+
+bool simplifyStaticConditional(ConditionalExpressionNode cond)
+{
+	auto value = cond.condition.coerceToTernary;
+
+	if (value == Ternary.None)
+		return false;
+
+	if (cond.condition.type == NodeType.ExpressionNode || cond.condition.type == NodeType.ParenthesisNode)
+	{
+		auto walk = cond.condition.children[$-1];
+		while ((walk.type == NodeType.ExpressionNode ||
+				walk.type == NodeType.ParenthesisNode))
+			walk = walk.children[$-1];
+		walk.detach();
+		cond.insertBefore(cond.condition);
+	}
+
+	auto parent = cond.parent;
+	Node node;
+	if (value == Ternary.True)
+		node = cond.truthPath;
+	else
+		node = cond.elsePath;
+
+	cond.replaceWith(node);
+	return true;
+}
+
+@("simplifyStaticConditional")
+unittest
+{
+	alias assertSimplifyStaticConditional = assertTransformations!(simplifyStaticConditional);
+
+	assertSimplifyStaticConditional(
+		`a ? b : c`,
+		`a ? b : c`
+	);
+	assertSimplifyStaticConditional(
+		`true ? b : c`,
+		`b`
+	);
+	assertSimplifyStaticConditional(
+		`false ? b : c`,
+		`c`
+	);
+	assertSimplifyStaticConditional(
+		`!false ? b : c`,
+		`b`
+	);
+	assertSimplifyStaticConditional(
+		`66 > 9 ? b : c`,
+		`b`
+	);
+	assertSimplifyStaticConditional(
+		`true ? (b,c) : (d,e)`,
+		`(b,c)`
+	);
+	assertSimplifyStaticConditional(
+		`false ? (b,c) : (d,e)`,
+		`(d,e)`
+	);
+	assertSimplifyStaticConditional(
+		`0 ? (b,c) : (d,e)`,
+		`(d,e)`
+	);
+	assertSimplifyStaticConditional(
+		`"0" ? (b,c) : (d,e)`,
+		`(b,c)`
+	);
+	assertSimplifyStaticConditional(
+		`bla(),false ? (b,c) : (d,e)`,
+		`bla(),(d,e)`
+	);
+	assertSimplifyStaticConditional(
+		`(bla(),false) ? (b,c) : (d,e)`,
+		`(bla());(d,e)`
+	);
 }

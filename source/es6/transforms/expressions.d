@@ -22,6 +22,7 @@ import es6.scopes;
 import es6.transforms.conditionals;
 import option;
 import es6.analyse;
+import es6.eval;
 
 version(unittest)
 {
@@ -201,3 +202,117 @@ unittest
 		`a ? b() : c(), e && f && (d = 6), g = {a: 4}, h = [0,1], (i || j) && g(), a = /^(?:webkit|moz|o)[A-Z]/.test("");`
 	);
 }
+bool simplifyUnaryExpressions(UnaryExpressionNode node)
+{
+	auto raw = node.getRawValue();
+	switch (raw.type)
+	{
+		case ValueType.Undefined:
+			if (node.prefixs.length > 0 && node.prefixs[0].type == NodeType.PrefixExpressionNode && node.prefixs[0].as!(PrefixExpressionNode).prefix == Prefix.Void)
+				return false;
+			goto case ValueType.String;
+		case ValueType.NaN:
+		case ValueType.Bool:
+		case ValueType.String:
+			node.replaceWith(raw.toUnaryExpression());
+			return true;
+		default: return false;
+	}
+}
+@("simplifyUnaryExpressions")
+unittest
+{
+	alias assertSimplifyUnaryExpr = assertTransformations!(simplifyUnaryExpressions);
+	assertSimplifyUnaryExpr(
+		`!false`,
+		`true`
+	);
+	assertSimplifyUnaryExpr(
+		`-Infinity`,
+		`-Infinity`
+	);
+	assertSimplifyUnaryExpr(
+		`void 0`,
+		`void 0`
+	);
+	assertSimplifyUnaryExpr(
+		`+Infinity`,
+		`+Infinity`
+	);
+}
+bool simplifyBinaryExpressions(BinaryExpressionNode node)
+{
+	auto raw = node.resolveBinaryExpression();
+	if (raw.type == ValueType.NotKnownAtCompileTime)
+		return false;
+	node.replaceWith(raw.toUnaryExpression()).reanalyseHints();
+	return true;
+}
+
+@("simplifyBinaryExpressions")
+unittest
+{
+	alias assertSimplifyBinaryExpr = assertTransformations!(simplifyBinaryExpressions);
+	assertSimplifyBinaryExpr(
+		`var a = 123 + 123`,
+		`var a = 246`
+	);
+	assertSimplifyBinaryExpr(
+		`var a = "some" + "stuff" + "concatenated" +
+		"together";`,
+		`var a = "somestuffconcatenatedtogether"`
+	);
+	assertSimplifyBinaryExpr(
+		`if (123 < 456) a();`,
+		`if (true) a();`
+	);
+	assertSimplifyBinaryExpr(
+		`if (123 > 456) a();`,
+		`if (false) a();`
+	);
+}
+bool shortenBooleanNodes(BooleanNode node)
+{
+	if (node.parent.type == NodeType.UnaryExpressionNode)
+	{
+		node.parent.as!(UnaryExpressionNode).prefixs ~= new PrefixExpressionNode(Prefix.Negation);
+		node.replaceWith(new DecimalLiteralNode(node.value ? "0" : "1"));
+	} else
+	{
+		node.replaceWith(
+			new UnaryExpressionNode(
+				[new PrefixExpressionNode(Prefix.Negation)],
+				new DecimalLiteralNode(node.value ? "0" : "1")
+			)
+		);
+	}
+	return true;
+}
+
+@("shortenBooleanNodes")
+unittest
+{
+	alias assertShortenBooleanNodes = assertTransformations!(shortenBooleanNodes);
+	assertShortenBooleanNodes(
+		`true`,
+		`!0`
+	);
+	assertShortenBooleanNodes(
+		`false`,
+		`!1`
+	);
+	assertShortenBooleanNodes(
+		`var b = false`,
+		`var b = !1`
+	);
+	assertShortenBooleanNodes(
+		`var b = true`,
+		`var b = !0`
+	);
+	assertShortenBooleanNodes(
+		`var b = !true`,
+		`var b = !!0`
+	);
+}
+
+

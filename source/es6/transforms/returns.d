@@ -36,13 +36,14 @@ version(unittest)
 
 bool negateReturningIf(Scope s)
 {
-	auto r = false;
+	bool modified = false;
 	foreach_reverse(branch; s.branch.children)
 	{
 		if (branch.entry.parent.type != NodeType.IfStatementNode ||
 			!branch.hasHint!(Hint.Return))
 			continue;
 
+		modified = true;
 		auto ifStmt = branch.entry.parent.as!IfStatementNode;
 		branch.removeHint!(Hint.Return);
 
@@ -56,7 +57,7 @@ bool negateReturningIf(Scope s)
 				auto elsePath = ifStmt.elsePath.node;
 				ifStmt.removeElsePath();
 				ifStmt.truthPath.node.replaceWith(elsePath);
-				return true;
+				continue;
 			}
 			if (ifStmt.truthPath.isSingleStatement())
 			{
@@ -67,7 +68,7 @@ bool negateReturningIf(Scope s)
 				ifStmt.truthPath.as!(BlockStatementNode).dropAllFrom(NodeType.ReturnStatementNode);
 				ifStmt.truthPath.reanalyseHints();
 			}
-			return true;
+			continue;
 		}
 		IfPath target;
 		if (ifStmt.truthPath.isSingleStatement())
@@ -91,12 +92,12 @@ bool negateReturningIf(Scope s)
 			target = ifStmt.elsePath();
 		}
 		target.addStatements(transfers);
-		transfers.each!(t => t.assignBranch(target.branch));
+		//transfers.each!(t => t.assignBranch(target.branch));
 
 		ifStmt.parent.reanalyseHints();
-		return true;
+		continue;
 	}
-	return false;
+	return modified;
 }
 
 @("negateReturningIf")
@@ -113,7 +114,7 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	// Note: Need to test that we don't apply this optimisation if the `if (c) return;` is nested in a if-statement
 	assertReturnIfNegation(
@@ -121,8 +122,8 @@ unittest
 		`function a() { if (!a) { b = 5; } }`
 	).shouldThrow();
 	assertReturnIfNegation(
-		`function a() { if (a) return; a = 5; }`,
-		`function a() { if (!a) { a = 5; } }`
+		`function a() { if (b) return; c = 5; }`,
+		`function a() { if (!b) { c = 5; } }`
 	);
 	/// ditto
 	assertReturnIfNegation(
@@ -223,6 +224,7 @@ void removeRedundantElse(IfStatementNode ifStmt)
 	if (ifStmt.truthPath.hints.has(Hint.Return | Hint.ReturnValue))
 	{
 		auto transfer = ifStmt.elsePath;
+		ifStmt.branch.hints |= transfer.branch.hints;
 		ifStmt.removeElsePath();
 		ifStmt.insertAfter(transfer);
 		ifStmt.reanalyseHints();
@@ -267,6 +269,14 @@ unittest
 		`function cd() { if (a) { d() } else return 7; }`,
 		`function cd() { if (!a) return 7; d(); }`
 	);
+	assertRedundantElse(
+		`function bla(s) { switch (s) { default: if (c) return a; else return b } }`,
+		`function bla(s) { switch (s) { default: if (c) return a; return b}}`
+	);
+	assertRedundantElse(
+		`function bla(s) { switch (s) { case 5: if (c) return a; else return b } }`,
+		`function bla(s) { switch (s) { case 5: if (c) return a; return b}}`
+	);
 }
 Node createVoid0Node()
 {
@@ -309,6 +319,7 @@ void combineReturnStatements(Scope scp)
 		Node[] validNodes;
 		Branch[] validBranches;
 		ptrdiff_t startingBranchIdx = 0;
+
 		if (idx == -1)
 		{
 			// when all nodes in the branch are either ifs or returns its simple
@@ -412,6 +423,7 @@ void combineReturnStatements(Scope scp)
 		returnNode.assignBranch(branch);
 		branch.children = branch.children[0..startingBranchIdx];
 		returnNode.reanalyseHints();
+		branch.hints |= Hint.ReturnValue;
 	}
 	combineReturnStatements(scp.branch);
 }
@@ -473,6 +485,14 @@ unittest
 	assertCombineReturn(
 		"function a() { if (a) { for(;a < 5;a++)e(); if (d) return 4; if (c) { return bla; } } }",
 		"function a() { if (a) { for(;a < 5;a++)e(); return d ? 4 : c ? bla : void 0 } }"
+	);
+	assertCombineReturn(
+		`function bla(s) { switch (s) { default: if (c) return a; return b}}`,
+		`function bla(s) { switch (s) { default: return c ? a : b } }`,
+	);
+	assertCombineReturn(
+		`function bla(s) { switch (s) { case 5: if (c) return a; return b; case 6: if (d) return 5; return 7; }}`,
+		`function bla(s) { switch (s) { case 5: return c ? a : b; case 6: return d ? 5 : 7 } }`,
 	);
 	// TODO: this doesn't work since we start at the end looking for the maximum length of ifs/returns statements of at least size 2, and d() fails that
 	// to fix it we need to skip any expressions at the end, which we will combine with the void 0 later on

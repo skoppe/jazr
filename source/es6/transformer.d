@@ -91,7 +91,13 @@ version (unittest)
 			throw new UnitTestException(["Error in transformation",diff.getDiffMessage()], file, line);
 	}
 }
-void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
+struct Stats
+{
+	ulong nodesVisited;
+	ulong scopesVisited;
+	ulong transformsCalled;
+}
+Stats runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
 {
 	import std.typetuple : staticMap, Filter, templateAnd, templateNot, NoDuplicates;
 	import std.functional : unaryFun;
@@ -105,10 +111,12 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 	alias _typedNodeTransforms = NoDuplicates!(Filter!(templateAnd!(isAstNode,templateNot!isTypeofNode), _inputTypes));
 	alias _otherTransforms = NoDuplicates!(Filter!(templateNot!isAstNode, _inputTypes));
 
+	Stats stats;
 	auto root = node;
 	Node[] todo = [node];
 	bool runScopes(Scope scp, bool first = true)
 	{
+		stats.scopesVisited++;
 		bool r = false;
 		foreach(_fun; _funs)
 		{
@@ -118,6 +126,8 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 				{
 					if (first) {
 						version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+						version(unittest) {	writeln(fullyQualifiedName!_fun); }
+						stats.transformsCalled++;
 						_fun(scp);
 						version(unittest) {
 							root.checkInternals(file,line);
@@ -125,9 +135,11 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 					}
 				} else {
 					version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+					version(unittest) {	writeln(fullyQualifiedName!_fun); }
+					stats.transformsCalled++;
 					if (_fun(scp))
 					{
-						r |= true;
+						r = true;
 						version(unittest) {
 							root.checkInternals(file,line);
 						}
@@ -139,16 +151,15 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 	}
 	bool runNodes(Node node, bool first = true)
 	{
+		stats.nodesVisited++;
 		bool r = false;
-		foreach(c; node.children.dup)
+		foreach(c; node.children)
 		{
 			if (c.type == NodeType.FunctionBodyNode)
 				todo ~= c;
 			else
-				r |= runNodes(c,first);
+				r = runNodes(c,first) || r;
 		}
-		//if (r)
-		//	return true;
 		switch(node.type)
 		{
 			foreach(_nodeAstType; _typedNodeTransforms)
@@ -163,26 +174,26 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 							static if (is(ReturnType!_fun : void))
 							{
 								if (first) {
+									stats.transformsCalled++;
 									version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
 									version(unittest) {	writeln(fullyQualifiedName!_fun); }
 									_fun(typedNode);
 									version(unittest) {
-										writeln(fullyQualifiedName!_fun);
 										root.checkInternals(file,line);
 									}
 								}
 							} else {
 								version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
 								version(unittest) {	writeln(fullyQualifiedName!_fun); }
+								stats.transformsCalled++;
 								if (_fun(typedNode))
 								{
+									r = true;
 									version (unittest) {
-										writeln(fullyQualifiedName!_fun);
 										root.checkInternals(file,line);
 									}
 									if (typedNode.parent is null)
 										return true;
-									r |= true;
 								}
 							}
 						}
@@ -200,24 +211,24 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 								version(chatty) { writeln(fullyQualifiedName!_fun, node); }
 								version(unittest) {	writeln(fullyQualifiedName!_fun); }
 
+								stats.transformsCalled++;
 								_fun(node);
 								version(unittest) {
-									writeln(fullyQualifiedName!_fun);
 									root.checkInternals(file,line);
 								}
 							}
 						} else {
 							version(chatty) { writeln(fullyQualifiedName!_fun, node); }
 							version(unittest) {	writeln(fullyQualifiedName!_fun); }
+							stats.transformsCalled++;
 							if (_fun(node))
 							{
+								r = true;
 								version (unittest) {
-									writeln(fullyQualifiedName!_fun);
 									root.checkInternals(file,line);
 								}
 								if (node.parent is null)
 									return true;
-								r |= true;
 							}
 						}
 					}
@@ -229,15 +240,17 @@ void runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 	{
 		bool first = true;
 		do {
+			first = true;
 			while(runNodes(todo[i], first))
 				first = false;
-			first = true;
 			if (todo[i].children.length)
 			{
+				first = true;
 				Scope scp = todo[i].children[0].branch.scp;
 				while(runScopes(scp, first))
 					first = false;
 			}
 		} while (!first);
 	}
+	return stats;
 }

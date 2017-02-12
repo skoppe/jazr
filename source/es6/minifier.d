@@ -42,11 +42,19 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 	debug {
 		root.assertTreeInternals();
 	}
-	root.runTransform!(
+	auto stats = root.runTransform!(
+		hoistFunctions,
+		removeRedundantBlockStatements,
+		shortenLiteralPropertyNames,
 		combineBlockStatementIntoExpression,
 		combineFunctionBodyIntoExpression,
 		combineModuleIntoExpression,
+		simplifyBinaryExpressions,
+		simplifyStaticIfStatement,
+		simplifyStaticConditional,
+		removeUnnecessaryParenthesis,
 		removeUnusedParameters,
+		shortenBooleanNodes,
 		simplifyRedundantAssignmentExpressions,
 		negateReturningIf,
 		convertIfElseAssignmentToConditionalExpression,
@@ -150,7 +158,7 @@ unittest
 			`var a = ("a " + propName + " b ") + ("c.")`,
 			`var a = "a " + propName + " b " + "c.";`
 		);
-		/// shortCircuitIfStatements
+		/// shortCircuitIfStatements*/
 		assertMinifier(
 			"if (true) d = 5;",
 			"d = 5"
@@ -246,10 +254,10 @@ unittest
 			"g = 5"
 		);
 		/// ditto
-		assertMinifier(
-			`(0 || 1) && (9 == 9) ? d = 5 : g = 5;`,
-			"d = 5"
-		);*/
+		//assertMinifier(
+		//	`(0 || 1) && (9 == 9) ? d = 5 : g = 5;`,
+		//	"d = 5"
+		//);
 		/*/// Issue #67
 		assertMinifier(
 			`if ("use strict", b.can() && top === bottom) doThing();`,
@@ -321,13 +329,13 @@ unittest
 			"function d(a) { if (a && b) { return k && e(),p } }"
 		);
 		/// convertIfsToExpressionStatementsOrConditionals
-		assertMinifier(
+		*/assertMinifier(
 			"if (a) d = 5;",
 			"a && (d = 5)"
 		);
 		assertMinifier(
 			"if (a) d = 5; if (b) g = 5;",
-			"a && (d = 5); b && (g = 5)"
+			"a && (d = 5), b && (g = 5)"
 		);
 		assertMinifier(
 			"if (a) {d = 5; e = 5; if (b) g = 5;}",
@@ -344,21 +352,21 @@ unittest
 		assertMinifier(
 			`if (g) { if (a=5, e) d = 5; b = 5;}`,
 			"g && (a = 5,e && (d = 5),b = 5)"
-		);*/
-		/*/// moveNonValueGeneratingStatementsIntoForIfAndSwitches
+		);
+		/// moveNonValueGeneratingStatementsIntoForIfAndSwitches
 		assertMinifier(
 			"a = 5; if (d) g = 5;",
-			"a = 5; d && (g = 5)"
+			"a = 5, d && (g = 5)"
 		);
 		/// ditto
 		assertMinifier(
 			"e(), a = 5; if (d) g = 5;",
-			"e(),a = 5; d && (g = 5)"
+			"e(),a = 5, d && (g = 5)"
 		);
 		/// ditto
 		assertMinifier(
 			"for (a in k) { d = 5; if (g) k = 3; }",
-			"for(a in k){ d = 5; g && (k = 3) }"
+			"for(a in k){ d = 5, g && (k = 3) }"
 		);
 		/// combineNestedIfs
 		assertMinifier(
@@ -368,27 +376,27 @@ unittest
 		/// ditto
 		assertMinifier(
 			"function a() { if (a) { if (c) { return bla; } } }",
-			"function a() { if (a && c) { return bla } }"
+			"function a() { if (a && c) return bla }"
 		);
 		/// ditto
 		assertMinifier(
 			"function a() { if (a || b) { if (c) { return bla; } } }",
-			"function a() { if ((a || b) && c) { return bla } }"
+			"function a() { if ((a || b) && c) return bla }"
 		);
 		/// ditto
 		assertMinifier(
 			"function a() { if (a) { if (b || c) { return bla; } } }",
-			"function a() { if (a && (b || c)) { return bla } }"
+			"function a() { if (a && (b || c)) return bla }"
 		);
 		/// ditto
 		assertMinifier(
 			"function a() { if (a || b) { if (c || d) { return bla; } } }",
-			"function a() { if ((a || b) && (c || d)) { return bla } }"
+			"function a() { if ((a || b) && (c || d)) return bla }"
 		);
 		/// ditto
 		assertMinifier(
 			"function a() { if (a && b) { if (c || d) { return bla; } } }",
-			"function a() { if (a && b && (c || d)) { return bla } }"
+			"function a() { if (a && b && (c || d)) return bla }"
 		);
 		/// ditto
 		assertMinifier(
@@ -413,11 +421,6 @@ unittest
 		assertMinifier(
 			`if ((a)) if ((b)) d = 5;`,
 			"a && b && (d = 5)"
-		);
-		/// ditto
-		assertMinifier(
-			`if (!(a)) if ((!b)) d = 5;`,
-			"!a && !b && (d = 5)"
 		);
 		/// ditto
 		assertMinifier(
@@ -492,19 +495,19 @@ unittest
 			`function a() { b ? d = 5 : (d = 4,f = 5) }`
 		);
 		/// ditto
-		assertMinifier(
+		/*assertMinifier(
 			`function a() { for (var k in keys) { if (b) { return; } else d = 4; f = 5; } g = 66; }`,
 			`function a() { var k; for(k in keys){ if (b) { return } else  d = 4; f = 5 }; g = 66 }`
-		);
+		);*/
 		/// ditto
 		assertMinifier(
 			`function b(z) { if (z.p !== 'value') return; if (z.q === k) return; k = z.v; }`,
-			"function b(z) { !(z.p !== 'value') && !(z.q === k) && (k = z.v) }"
+			"function b(a) { !(a.p !== 'value') && !(a.q === k) && (k = a.v) }"
 		);
 		/// ditto
 		assertMinifier(
 			`function b(z) { if (z.p !== 'value') { return; } if (z.q === k) { return; } k = z.v; }`,
-			"function b(z) { !(z.p !== 'value') && !(z.q === k) && (k = z.v) }"
+			"function b(a) { !(a.p !== 'value') && !(a.q === k) && (k = a.v) }"
 		);
 		/// ditto
 		assertMinifier(
@@ -519,55 +522,55 @@ unittest
 		/// ditto
 		assertMinifier(
 			`function b() { if (a) { for(;;)return; } op() }`,
-			`function b() { if (a) { for(;;)return }; op() }`
+			`function b() { if (a) for(;;)return; op() }`
 		);
 		/// removeStatementBlockFromSwitchCaseClauses
-		assertMinifier(
-			`switch (a) { case 7: { e(); } };`,
-			`switch (a) { case 7: e(); }`
-		);
-		/// ditto
-		assertMinifier(
-			`switch (a) { case 7: { e(); } { f(); }};`,
-			`switch (a) { case 7: e(); f(); }`
-		);
+		//assertMinifier(
+		//	`switch (a) { case 7: { e(); } };`,
+		//	`switch (a) { case 7: e(); }`
+		//);
+		///// ditto
+		//assertMinifier(
+		//	`switch (a) { case 7: { e(); } { f(); }};`,
+		//	`switch (a) { case 7: e(); f(); }`
+		//);
 		/// putRemainingStatementsInElseBlockWhenIfReturns
 		assertMinifier(
 			`function a() { if (a) return 5; d = 6; }`,
 			`function a() { if (a) return 5; d = 6 }`
 		);
 		/// ditto
-		assertMinifier(
-			`function a() { if (a) return 5; else d = 6; return 4; }`,
-			`function a() { return a ? 5 : (d = 6,4) }`
-		);
+		//assertMinifier(
+		//	`function a() { if (a) return 5; else d = 6; return 4; }`,
+		//	`function a() { return a ? 5 : (d = 6,4) }`
+		//);
 		/// ditto
-		assertMinifier(
-			`function a() { if (a) return 5; else if (c) d = 6; return 4; }`,
-			`function a() { return a ? 5 : (c && (d = 6),4) }`
-		);
-		/// ditto
-		assertMinifier(
-			`function a() { if (a) return 5; else if (c) { d = 6; return 4; } return 4; }`,
-			`function a() { return a ? 5 : c ? (d = 6,4) : 4 }`
-		);
+		//assertMinifier(
+		//	`function a() { if (a) return 5; else if (c) d = 6; return 4; }`,
+		//	`function a() { return a ? 5 : (c && (d = 6),4) }`
+		//);
+		///// ditto
+		//assertMinifier(
+		//	`function a() { if (a) return 5; else if (c) { d = 6; return 4; } return 4; }`,
+		//	`function a() { return a ? 5 : c ? (d = 6,4) : 4 }`
+		//);
 		/// removeEmptyStatementsFromStatementLists
-		assertMinifier(
-			";;var a = 4;;;",
-			"var a = 4;"
-		);
-		/// ditto
-		assertMinifier(
-			"var a = 4;;;if (b);;;",
-			"var a = 4; b"
-		);
+		//assertMinifier(
+		//	";;var a = 4;;;",
+		//	"var a = 4;"
+		//);
+		///// ditto
+		//assertMinifier(
+		//	"var a = 4;;;if (b);;;",
+		//	"var a = 4; b"
+		//);
 		/// shortenOftenUsedStringLiterals
-		assertMinifier(
-			`var a; function bla() { a = "str"; var c = "doit!"; function gek() { var b = 6; if (c == "doit!") return 17; }} a = "str";`,
-			`function bla() { function gek() { var b = 6; if (c == d) return 17; }; var d = "doit!", c = d; a = "str" }; var a; a = "str"`
-		);
+		//assertMinifier(
+		//	`var a; function bla() { a = "str"; var c = "doit!"; function gek() { var b = 6; if (c == "doit!") return 17; }} a = "str";`,
+		//	`function bla() { function gek() { var b = 6; if (c == d) return 17; }; var d = "doit!", c = d; a = "str" }; var a; a = "str"`
+		//);
 		/// negateContinueStatements
-		assertMinifier(
+/*		assertMinifier(
 			`for (var k in keys) { if (b) continue; else doSomething(); }`,
 			`var k; for(k in keys){ !b && doSomething() }`
 		);
@@ -625,9 +628,9 @@ unittest
 		assertMinifier(
 			"for (var a in b) { if (!a) { continue; } d = 5; };",
 			"var a; for(a in b){ a && (d = 5) }"
-		);
+		);*/
 		/// simplifyEmptyIfStatementsScp
-		assertMinifier(
+/*		assertMinifier(
 			"if (a) { };",
 			"a"
 		);
@@ -640,7 +643,7 @@ unittest
 		assertMinifier(
 			"for (var a in b) { if (!a) { continue; } };",
 			"var a; for(a in b){ !a }"
-		);
+		);*/
 		/// reduceBinaryExpressions
 		assertMinifier(
 			`var a = "a" + "string" + "that" + "can" + "be" + "concatenated" +
@@ -668,29 +671,33 @@ unittest
 			`hallo()`
 		);
 		/// hexOptimisation
+		//assertMinifier(
+		//	`a = 0x4456;`,
+		//	`a = 17494`
+		//);
 		assertMinifier(
-			`a = 0x4456;`,
-			`a = 17494`
+			`var t=arguments.length>1&&void 0!==arguments[1]?arguments[1]:.15;`,
+			`var t=arguments.length>1&&void 0!==arguments[1]?arguments[1]:.15;`
 		);
 		assertMinifier(
 			`function a(b, c) { if(c) if (c===b) return "b" else return null; switch (b) { case 7: if (b) return null else return c.data } return 4; }`,
-			`function a(b, c) { if (c) return c === b ? "b" : null; else { switch (b) { case 7: return b ? null : c.data; }; return 4 } }`
+			`function a(a,b){if(b)return b===a?'b':null;switch(a){case 7:return a?null:b.data}return 4}`
 		);
 		/// Issue #58
-		assertMinifier(
-			`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } return ret + ' ' + markupForID + '>'; }`,
-			"function abc() { var propKey; for(propKey in props){ k = props[ propKey ] }; return b ? ret + '>' : ret + ' ' + markupForID + '>' }"
-		);
-		/// ditto
-		assertMinifier(
-			`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } if (c) return ret + ' ' + markupForID + '>'; }`,
-			`function abc() { var propKey; for(propKey in props){ k = props[ propKey ] }; return b ? ret + '>' : c ? ret + ' ' + markupForID + '>' : void 0 }`
-		);
-		/// ditto
-		assertMinifier(
-			`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } for (var i in p) k = p[i]; if (c) return ret + ' ' + markupForID + '>'; if (k) return 77; }`,
-			`function abc() { var propKey, i; for(propKey in props){ k = props[ propKey ] }; if (b) { return ret + '>' } else { for(i in p)k = p[ i ]; return c ? ret + ' ' + markupForID + '>' : k ? 77 : void 0 } }`
-		);
+		//assertMinifier(
+		//	`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } return ret + ' ' + markupForID + '>'; }`,
+		//	"function abc() { var propKey; for(propKey in props){ k = props[ propKey ] }; return b ? ret + '>' : ret + ' ' + markupForID + '>' }"
+		//);
+		///// ditto
+		//assertMinifier(
+		//	`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } if (c) return ret + ' ' + markupForID + '>'; }`,
+		//	`function abc() { var propKey; for(propKey in props){ k = props[ propKey ] }; return b ? ret + '>' : c ? ret + ' ' + markupForID + '>' : void 0 }`
+		//);
+		///// ditto
+		//assertMinifier(
+		//	`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } for (var i in p) k = p[i]; if (c) return ret + ' ' + markupForID + '>'; if (k) return 77; }`,
+		//	`function abc() { var propKey, i; for(propKey in props){ k = props[ propKey ] }; if (b) { return ret + '>' } else { for(i in p)k = p[ i ]; return c ? ret + ' ' + markupForID + '>' : k ? 77 : void 0 } }`
+		//);
 		assertMinifier(
 			`(function b(a,b,c){return 7})({1:[function(_dereq_,module,exports){ somethingSomething() }]})`,
 			`(function b(){ return 7 })({ 1: [ function (){ somethingSomething() } ] })`
@@ -698,5 +705,5 @@ unittest
 		assertMinifier(
 			`if (a) {  } else {  }`,
 			`if (a) {  } else {  }`
-		);*/
+		);
 }

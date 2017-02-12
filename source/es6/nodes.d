@@ -20,8 +20,9 @@ module es6.nodes;
 import es6.tokens;
 import es6.scopes;
 import std.format : formattedWrite, format;
-import std.algorithm : each, countUntil;
-import std.range : lockstep;
+import std.algorithm : each, countUntil, map;
+import std.range : lockstep, stride, take;
+import std.array : array, insertInPlace;
 import option;
 import es6.utils;
 import es6.lexer : Keyword;
@@ -289,27 +290,27 @@ class Node
 	@property void hints(int hs) { _hints = Hints(hs); }
 	this(NodeType t)
 	{
-		version(chatty) { writeln(t); }
 		_type = t;
+		version(chatty) { writeln(t, this); }
 	}
 	this(NodeType t, Node n)
 	{
-		version(chatty) { writeln(t); }
 		_type = t;
 		if (n !is null)
 		{
 			n.parent = this;
 			children = [n];
 		}
+		version(chatty) { writeln(t, this); }
 	}
 	this(NodeType t, Node[] cs)
 	{
-		version(chatty) { writeln(t); }
 		_type = t;
 		import std.algorithm :each;
 		foreach(c;cs)
 			c.parent = this;
 		children = cs;
+		version(chatty) { writeln(t, this); }
 	}
 	void toString(scope void delegate(const(char)[]) sink) const
 	{
@@ -362,11 +363,6 @@ class Node
 	{
 		if (other is this)
 			return other;
-		version (unittest)
-		{
-			if (other.parent !is this)
-				assert(other.parent is null, "Please first detach node before using");
-		}
 		assert(other !is null);
 		if (parent !is null)
 			this.parent.replaceChild(this,other);
@@ -407,14 +403,19 @@ class Node
 	}
 	void addChildren(Node[] children)
 	{
-		children.each!((c){c.branch = branch; c.parent = this;});
 		this.children ~= children;
+		children.each!((c){c.parent = this; c.assignBranch(branch);});
+	}
+	void insertInPlace(size_t idx, Node child)
+	{
+		this.children.insertInPlace(idx,child);
+		child.parent = this;
+		child.assignBranch(branch);
 	}
 	void prependChildren(Node[] children)
 	{
-		children.each!((c){c.branch = branch; c.parent = this;});
-		import std.array : insertInPlace;
 		this.children.insertInPlace(0,children);
+		children.each!((c){c.parent = this; c.assignBranch(branch);});
 	}
 	void addChildren(Option!(Node[]) children)
 	{
@@ -424,8 +425,8 @@ class Node
 	void addChild(Node child)
 	{
 		child.parent = this;
-		child.branch = branch;
 		this.children ~= child;
+		child.assignBranch(branch);
 	}
 	Node[] detachStatementsAfter(Node node)
 	{
@@ -436,7 +437,10 @@ class Node
 	void insertAfter(Node node)
 	{
 		// TODO: Test this
-		if (this.parent.type == NodeType.FunctionBodyNode)
+		if (this.parent.type == NodeType.CaseBodyNode)
+		{
+			this.parent.as!(CaseBodyNode).insertAfter(this,[node]);
+		} else if (this.parent.type == NodeType.FunctionBodyNode)
 		{
 			if (node.type == NodeType.BlockStatementNode)
 				this.parent.as!(FunctionBodyNode).insertAfter(this, node.children);
@@ -457,6 +461,32 @@ class Node
 		}
 		this.parent.reanalyseHints();
 	}
+	void insertBefore(Node node)
+	{
+		if (node.type == NodeType.BlockStatementNode)
+			this.insertBefore(node.children);
+		else
+			this.insertBefore([node]);
+	}
+	void insertBefore(Node[] nodes)
+	{
+		if (this.parent.type == NodeType.ExpressionNode)
+			this.parent.as!(ExpressionNode).insertBefore(this, nodes);
+		else if (this.parent.type == NodeType.FunctionBodyNode)
+			this.parent.as!(FunctionBodyNode).insertBefore(this, nodes);
+		else if (this.parent.type == NodeType.ModuleNode)
+			this.parent.as!(ModuleNode).insertBefore(this, nodes);
+		else {
+			if (this.parent.type != NodeType.BlockStatementNode)
+			{
+				auto block = new BlockStatementNode([]);
+				this.replaceWith(block);
+				block.addChild(this);
+			}
+			this.parent.as!(BlockStatementNode).insertBefore(this, nodes);
+		}
+		this.parent.reanalyseHints();
+	}
 	Node findFirst(NodeType t)
 	{
 		if (type == t)
@@ -470,13 +500,23 @@ class Node
 	{
 		import std.algorithm : remove;
 		this.children = this.children.remove!(c => c is child);
+		if (this.type == NodeType.ExpressionNode)
+		{
+			if (this.children.length == 1)
+			{
+				this.children[0].parent = null;
+				this.replaceWith(this.children[0]);
+			}
+			return;
+		}
 	}
 	void detach()
 	{
 		if (this.parent is null)
 			return;
-		this.parent.removeChild(this);
+		auto parent = this.parent;
 		this.parent = null;
+		parent.removeChild(this);
 	}
 }
 
@@ -751,6 +791,14 @@ class ExpressionNode : Node
 		else
 			this.addChild(node);
 	}
+	void insertBefore(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		this.children.insertInPlace(idx, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
+	}
 }
 class ParenthesisNode : Node
 {
@@ -955,12 +1003,53 @@ class BinaryExpressionNode : Node
 	{
 		super(NodeType.BinaryExpressionNode,children);
 	}
+	// TODO: we can remove the array if we return a custom range...
+	ExpressionOperatorNode[] getOperatorsSurrounding(Node node)
+	{
+		auto idx = this.getIndexOfChild(node);
+		if (idx > 0)
+			return this.children[idx-1..$].stride(2).take(1).map!(op=>op.as!(ExpressionOperatorNode)).array();
+		if (this.children.length == 1)
+			return [];
+		return this.children[idx+1..idx+2].map!(op=>op.as!(ExpressionOperatorNode)).array();
+	}
+	// TODO: we can remove the array if we return a custom range...
+	ExpressionOperatorNode[] getOperators()
+	{
+		if (this.children.length < 2)
+			return [];
+		return this.children[1..$].stride(2).map!(op=>op.as!(ExpressionOperatorNode)).array();
+	}
+	void replaceChildWith(Node child, BinaryExpressionNode bin)
+	{
+		auto idx = this.getIndexOfChild(child);
+		this.children[idx] = bin.children[0];
+		if (bin.children.length > 1)
+			this.children.insertInPlace(idx+1, bin.children[1..$]);
+		bin.children.each!((c){ c.parent = this; c.assignBranch(this.branch); });
+	}
+	auto nodes()
+	{
+		return this.children.stride(2);
+	}
 }
 class ConditionalExpressionNode : Node
 {
 	this(Node cond, Node truthPath, Node elsePath)
 	{
 		super(NodeType.ConditionalExpressionNode,[cond,truthPath,elsePath]);
+	}
+	Node condition()
+	{
+		return this.children[0];
+	}
+	Node truthPath()
+	{
+		return this.children[1];
+	}
+	Node elsePath()
+	{
+		return this.children[2];
 	}
 }
 class AssignmentExpressionNode : Node
@@ -1092,10 +1181,17 @@ class BlockStatementNode : Node
 		import std.algorithm : countUntil, each;
 		auto idx = this.children.countUntil!(c=>c is sibling);
 		assert(idx != -1);
-		import std.array : insertInPlace;
 		this.children.insertInPlace(idx+1, children);
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 		// ALSO move branches in children 
+	}
+	void insertBefore(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		this.children.insertInPlace(idx, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
 struct IfPath
@@ -1301,12 +1397,20 @@ class CaseBodyNode : Node
 	{
 		super(NodeType.CaseBodyNode,children);
 	}
+	void insertAfter(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		this.children.insertInPlace(idx+1, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
+	}
 }
 class DefaultNode : Node
 {
-	this(Node[] children)
+	this(Node child)
 	{
-		super(NodeType.DefaultNode,children);
+		super(NodeType.DefaultNode,child);
 	}
 }
 class ForStatementNode : Node
@@ -1320,7 +1424,11 @@ class ForStatementNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("ForStatement %s\n",loopType);
+		sink.formattedWrite("ForStatement %s",loopType);
+		if (_hints != Hint.None)
+			sink.formattedWrite(" %s\n",_hints);
+		else
+			sink.formattedWrite("\n");
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
@@ -1580,6 +1688,10 @@ class PropertyDefinitionNode : Node
 	{
 		super(NodeType.PropertyDefinitionNode,[name,expr]);
 	}
+	Node name()
+	{
+		return this.children[0];
+	}
 }
 class CoverInitializedName : Node
 {
@@ -1623,8 +1735,15 @@ class FunctionBodyNode : Node
 		import std.algorithm : countUntil, each;
 		auto idx = this.children.countUntil!(c=>c is sibling);
 		assert(idx != -1);
-		import std.array : insertInPlace;
 		this.children.insertInPlace(idx+1, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
+	}
+	void insertBefore(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		this.children.insertInPlace(idx, children);
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
@@ -1753,6 +1872,14 @@ class ModuleNode : Node
 	{
 		super(NodeType.ModuleNode,children);
 	}
+	void insertBefore(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		this.children.insertInPlace(idx, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
+	}
 }
 class SemicolonNode : Node
 {
@@ -1791,6 +1918,7 @@ enum Diff
 	Content,
 	BranchChildren,
 	BranchEntryTypes,
+	BranchHints,
 	Hints
 }
 struct DiffResult
@@ -1808,13 +1936,15 @@ string getDiffMessage(DiffResult d)
 		case Diff.Type:
 			return format("Node a is of type %s but Node b is of type %s\n%s%s",d.a.type,d.b.type,d.a,d.b);
 		case Diff.Children:
-			return format("Node a has the following children\n%sYet node b has\n%s",d.a.children,d.b.children);
+			return format("Node a has the following children\n%sYet node b has\n%s",d.a,d.b);
 		case Diff.Content:
 			return format("Node a doesn't have the same content as node b");
 		case Diff.BranchChildren:
 			return format("Branch a has %s children, but branch b has %s\n%s%sFrom nodes\n%s%s",d.a.branch.children.length,d.b.branch.children.length,d.a.branch,d.b.branch,d.a,d.b);
 		case Diff.BranchEntryTypes:
 			return format("Branch a has entry\n%swhile branch b has\n%s--%s++%s",d.a,d.b,d.a.branch,d.b.branch);
+		case Diff.BranchHints:
+			return format("Branch a has hints\n%swhile branch b has\n%s",d.a.branch.hints,d.b.branch.hints);
 		case Diff.Hints:
 			return format("Node a has hints\n%swhile node b has\n%s",d.a,d.b);
 	}
@@ -1894,6 +2024,8 @@ private DiffResult diffBranch(Branch a, Branch b, Node c, Node d)
 		return DiffResult(c,d,Diff.BranchChildren);
 	if (a.entry.type != b.entry.type)
 		return DiffResult(c,d,Diff.BranchEntryTypes);
+	if (a.hints != b.hints)
+		return DiffResult(c,d,Diff.BranchHints);
 
 	//foreach(ca,cb; lockstep(a.children,b.children))
 	//{
@@ -1973,7 +2105,7 @@ unittest
     AssignmentOperatorNode HasAssignment
     IdentifierNode d
   LabelledStatementNode NonExpression
-  ForStatement ExprCStyle
+  ForStatement ExprCStyle NonExpression
     SemicolonNode
     SemicolonNode
     EmptyStatementNode

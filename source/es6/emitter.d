@@ -43,6 +43,7 @@ version (unittest)
 		auto parser = parser(input);
 		parser.scanToken();
 		auto root = parser.parseModule();
+		writeln(root);
 		return Result(root.emit());
 	}
 }
@@ -54,15 +55,18 @@ enum Guide
 	EndOfStatement = 1 << 3,
 	Void = 1 << 4,
 	RequiresWhitespaceBeforeIdentifier = 1 << 5,
-	EndOfList = 1 << 6
+	EndOfList = 1 << 6,
+	PlusRequiresWhitespace = 1 << 7,
+	MinusRequiresWhitespace = 1 << 8
 }
 Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide = Guide.None)
 {
 	if (nodes.length == 0)
 		return Guide.Void;
+	auto g = guide;
 	foreach(c; nodes[0..$-1])
 	{
-		auto r = c.emit(sink,guide);
+		auto r = c.emit(sink,g);
 		if (r & Guide.RequiresSemicolon)
 			sink.put(";");
 		else if (!(r & Guide.EndOfStatement) || delimiter != ";")
@@ -71,8 +75,9 @@ Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide =
 			//guide |= Guide.RequiresWhitespaceBeforeIdentifier;
 		//else
 			guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
+		g = (guide | r) & ~Guide.RequiresWhitespaceBeforeIdentifier;
 	}
-	auto r = nodes[$-1].emit(sink,guide | Guide.EndOfList);
+	auto r = nodes[$-1].emit(sink,g | Guide.EndOfList);
 	if (r & Guide.RequiresSemicolon)
 		return Guide.RequiresSemicolon;
 	if (r & Guide.RequiresDelimiter)
@@ -82,13 +87,15 @@ Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide =
 Guide emit(Sink)(Node[] nodes, Sink sink, int guide = Guide.None)
 {
 	Guide r;
+	auto g = guide;
 	foreach(c; nodes)
 	{
-		r = c.emit(sink,guide);
+		r = c.emit(sink,g);
 		if (r & Guide.RequiresWhitespaceBeforeIdentifier)
 			guide |= Guide.RequiresWhitespaceBeforeIdentifier;
 		else
 			guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
+		g = guide | r;
 	}
 	return r;
 }
@@ -198,10 +205,26 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 				case Prefix.Delete: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("delete"); return Guide.RequiresWhitespaceBeforeIdentifier;
 				case Prefix.Void: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("void"); return Guide.RequiresWhitespaceBeforeIdentifier;
 				case Prefix.Typeof: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("typeof"); return Guide.RequiresWhitespaceBeforeIdentifier;
-				case Prefix.Increment: sink.put("++"); break;
-				case Prefix.Decrement: sink.put("--"); break;
-				case Prefix.Positive: sink.put("+"); break;
-				case Prefix.Negative: sink.put("-"); break;
+				case Prefix.Increment:
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("++"); 
+					break;
+				case Prefix.Decrement:
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("--");
+					break;
+				case Prefix.Positive:
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("+");
+					break;
+				case Prefix.Negative:
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("-");
+					break;
 				case Prefix.Tilde: sink.put("~"); break;
 				case Prefix.Negation: sink.put("!"); break;
 			}
@@ -255,8 +278,16 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			n.children[0].emit(sink,g);
 			final switch(n.postfix)
 			{
-				case Postfix.Increment: sink.put("++"); break;
-				case Postfix.Decrement: sink.put("--"); break;
+				case Postfix.Increment: 
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("++");
+					return Guide.RequiresDelimiter;
+				case Postfix.Decrement: 
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("--");
+					return Guide.RequiresDelimiter;
 				case Postfix.None: break;
 			}
 			return Guide.RequiresDelimiter;
@@ -282,8 +313,16 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 				case ExpressionOperator.LeftShift: sink.put("<<"); break;
 				case ExpressionOperator.TripleRightSift: sink.put(">>>"); break;
 				case ExpressionOperator.RightShift: sink.put(">>"); break;
-				case ExpressionOperator.Add: sink.put("+"); break;
-				case ExpressionOperator.Minus: sink.put("-"); break;
+				case ExpressionOperator.Add: 
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("+");
+					return Guide.PlusRequiresWhitespace;
+				case ExpressionOperator.Minus:
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("-");
+					return Guide.MinusRequiresWhitespace;
 				case ExpressionOperator.Multiply: sink.put("*"); break;
 				case ExpressionOperator.Division: sink.put("/"); break;
 				case ExpressionOperator.Mod: sink.put("%"); break;
@@ -382,7 +421,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put("switch(");
 			node.children[0].emit(sink);
 			sink.put("){");
-			node.children[1..$].emit(sink);
+			node.children[1..$].emitDelimited(sink,";");
 			sink.put("}");
 			return Guide.EndOfStatement;
 		case NodeType.DoWhileStatementNode:
@@ -404,18 +443,14 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			sink.put(":");
 			if (node.children.length == 2)
-			{
-				auto r = node.children[1].emit(sink);
-				if (r == Guide.RequiresSemicolon || r == Guide.RequiresDelimiter)
-					sink.put(";");
-			}
-			return Guide.None;
+				return node.children[1].emit(sink);
+			return Guide.EndOfStatement;
 		case NodeType.CaseBodyNode:
 			node.children.emitDelimited(sink,";");
-			return node.children.length > 0 ? Guide.RequiresSemicolon : Guide.None;
+			return node.children.length > 0 ? Guide.RequiresSemicolon : Guide.EndOfStatement;
 		case NodeType.DefaultNode:
 			sink.put("default:");
-			node.children.emit(sink);
+			node.children.emitDelimited(sink,";");
 			return Guide.None;
 		case NodeType.ForStatementNode:
 			auto n = node.as!ForStatementNode;
@@ -765,6 +800,7 @@ unittest
 unittest
 {
 	assertEmitted("a=function(){};");
+	assertEmitted("a=function(a,b,c){};");
 	assertEmitted("a=function(){;};");
 	assertEmitted("a=function fun(...rest){};");
 	assertEmitted("a=function fun(a,b,c){};");
@@ -869,14 +905,30 @@ unittest
 	assertEmitted(`()=>{a}`);
 	assertEmitted(`()=>{if(a)bla()}`);
 }
+@("Unary Expression")
+unittest
+{
+	assertEmitted(`void 0;`);
+	assertEmitted(`var t=arguments.length>1&&void 0!==arguments[1]?arguments[1]:.15;`);
+}
 @("Binary Expression")
 unittest
 {
-	assertEmitted(`a instanceof b;`);
-	assertEmitted(`a in b;`);
-	assertEmitted(`'using'in options;`);
-	assertEmitted(`'using'in{b,c,d}`);
-	assertEmitted(`a&b|c&&d||e^f===g==h!==i!=j<=k<l>=m>n<<o>>>p>>q+r-s*t/u%v;`);
+	//assertEmitted(`a instanceof b;`);
+	//assertEmitted(`a in b;`);
+	//assertEmitted(`'using'in options;`);
+	//assertEmitted(`'using'in{b,c,d}`);
+	//assertEmitted(`a&b|c&&d||e^f===g==h!==i!=j<=k<l>=m>n<<o>>>p>>q+r-s*t/u%v;`);
+	assertEmitted(`'O'+ ++h;`);
+	assertEmitted(`'O'-++h;`);
+	assertEmitted(`'O'+--h;`);
+	assertEmitted(`'O'- --h;`);
+	assertEmitted(`'O'+++h;`);
+	assertEmitted(`'O'++-h;`);
+	assertEmitted(`'O'+++--h;`);
+	assertEmitted(`'O'++- --h;`);
+	assertEmitted(`'O'+++ ++h;`);
+	assertEmitted(`'O'++-++h;`);
 }
 @("Variable Statement")
 unittest

@@ -1015,7 +1015,7 @@ final class Parser(Source) : Lexer!(Source)
 							break;
 						default:
 							if (content !is null)
-								return content;
+								goto end;
 							content = parsePrimaryExpression(attributes);
 							break;
 					}
@@ -1545,7 +1545,7 @@ final class Parser(Source) : Lexer!(Source)
 								return error("Expected colon");
 							scanAndSkipCommentsAndTerminators();
 							caseChildren ~= parseStatementList(attributes);
-							children ~= new DefaultNode(caseChildren);
+							children ~= new DefaultNode(new CaseBodyNode(caseChildren));
 							break;
 						default:
 							scanToken(attributes.toGoal);
@@ -2277,6 +2277,7 @@ unittest
 	}
 	assertUnaryExpressionPrefix("delete abc",[Prefix.Delete]);
 	assertUnaryExpressionPrefix("void abc",[Prefix.Void]);
+	assertUnaryExpressionPrefix("void 0",[Prefix.Void]);
 	assertUnaryExpressionPrefix("typeof abc",[Prefix.Typeof]);
 	assertUnaryExpressionPrefix("++abc",[Prefix.Increment]);
 	assertUnaryExpressionPrefix("--abc",[Prefix.Decrement]);
