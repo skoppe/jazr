@@ -229,6 +229,8 @@ void negateUnaryExpression(UnaryExpressionNode node)
 }
 void negateNode(Node node)
 {
+	if (node.hints.has(Hint.HasAssignment))
+		node = node.parenthesizeExpression();
 	auto unary = new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Negation)]).withBranch(node.branch);
 	node.replaceWith(unary);
 	unary.addChild(node);
@@ -263,6 +265,7 @@ unittest
 	assertNegateCondition(`if (!!a) b = 5;`,`if (!a) b = 5;`);
 	assertNegateCondition(`if (!(a && b)) b = 5;`,`if ((a && b)) b = 5;`);
 	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);
+	assertNegateCondition(`if (a = 5) b = 5;`,`if (!(a = 5)) b = 5;`);
 }
 
 bool convertIfElseToConditionalExpression(IfStatementNode ifStmt, out Node replacedWith)

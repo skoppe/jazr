@@ -253,6 +253,8 @@ auto coerceToSingleQuotedString(string str)
 			sink.put('\\');
 		sink.put(s);
 	}
+	if (escape)
+		sink.put('\\');
 	return sink.data;
 }
 @("coerceToSingleQuotedString")
@@ -264,6 +266,7 @@ unittest
 	"a \\\"good\\\" way to go".coerceToSingleQuotedString.shouldEqual(`a "good" way to go`);
 	assert(`*(?:'((?:\\\\.|[^\\\\'])*)'|\"((?:\\\\.|[^\\\\\"])*)\"|(`.coerceToSingleQuotedString == `*(?:\'((?:\\\\.|[^\\\\\'])*)\'|"((?:\\\\.|[^\\\\"])*)"|(`);
 	assert(`a \xaa\xbb`.coerceToSingleQuotedString == `a \xaa\xbb`);
+	assert(`\\`.coerceToSingleQuotedString == `\\`);
 }
 class Lexer(Source)
 {
@@ -1144,6 +1147,12 @@ unittest
 	lexer = createLexer(`"\xaa\xb5"`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`\xaa\xb5`));
 	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
+	lexer = createLexer(`'\\';`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"\\\\"));
+	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
+	lexer = createLexer(`"\\";`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"\\\\"));
+	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
 }
 @("lexBinaryLiteral")
 unittest

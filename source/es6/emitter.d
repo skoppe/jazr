@@ -240,7 +240,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			auto n = node.as!AccessorNode;
 			sink.put(".");
 			sink.put(n.identifier);
-			return Guide.RequiresDelimiter;
+			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
 		case NodeType.NewTargetNode:
 			sink.put("new.target");
 			return Guide.RequiresDelimiter;
@@ -270,8 +270,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			"new ".repeat(n.news).copy(sink);
-			n.children.emit(sink);
-			return Guide.RequiresDelimiter;
+			return n.children.emit(sink) | Guide.RequiresDelimiter;
 		case NodeType.UnaryExpressionNode:
 			auto n = node.as!UnaryExpressionNode;
 			auto g = n.prefixs.emit(sink,guide);
@@ -418,6 +417,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			}
 			return r;
 		case NodeType.SwitchStatementNode:
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
 			sink.put("switch(");
 			node.children[0].emit(sink);
 			sink.put("){");
@@ -425,6 +426,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put("}");
 			return Guide.EndOfStatement;
 		case NodeType.DoWhileStatementNode:
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
 			sink.put("do");
 			auto r = node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (r & (Guide.RequiresSemicolon | Guide.RequiresDelimiter))
@@ -434,6 +437,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put(")");
 			return Guide.RequiresSemicolon;
 		case NodeType.WhileStatementNode:
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
 			sink.put("while(");
 			node.children[0].emit(sink);
 			sink.put(")");
@@ -449,10 +454,14 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			node.children.emitDelimited(sink,";");
 			return node.children.length > 0 ? Guide.RequiresSemicolon : Guide.EndOfStatement;
 		case NodeType.DefaultNode:
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
 			sink.put("default:");
 			node.children.emitDelimited(sink,";");
 			return Guide.None;
 		case NodeType.ForStatementNode:
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
 			auto n = node.as!ForStatementNode;
 			sink.put("for(");
 			guide = Guide.None;
@@ -756,6 +765,8 @@ unittest
 {
 	assertEmitted(`if(a)d=5,p=6;`);
 	assertEmitted(`d=5,p=6;`);
+	assertEmitted(`a in hup;`);
+	assertEmitted(`a.bla in hup;`);
 }
 @("Import Declaration")
 unittest
@@ -973,18 +984,21 @@ unittest
 	assertEmitted(`switch(a){case 4:}`);
 	assertEmitted(`switch(a){case 4:case'abd':}`);
 	assertEmitted(`switch(a){case 4:break;case 0x5a:default:}`);
+	assertEmitted(`if(a){}else switch(a){}`);
 }
 @("DoWhile Statement")
 unittest
 {
 	assertEmitted(`do a;while(true);`);
 	assertEmitted(`do{a}while(true);`);
+	assertEmitted(`if(b){}else do bla();while(true);`);
 }
 @("While Statement")
 unittest
 {
 	assertEmitted(`while(true)a;`);
 	assertEmitted(`while(true){a}`);
+	assertEmitted(`if(b){}else while(true){a}`);
 }
 @("For Statement")
 unittest
@@ -1021,6 +1035,7 @@ unittest
 	assertEmitted(`for([a,c]of'b'){}`);
 	assertEmitted(`for({a,c}in'b'){}`);
 	assertEmitted(`for({a,c}of'b'){}`);
+	assertEmitted(`if(b)bla();else for({a,c}of'b'){}`);
 }
 @("With Statement")
 unittest
@@ -1064,6 +1079,11 @@ unittest
 	assertEmitted(`class a{*boo(b,c=5){}}`);
 	assertEmitted(`class a{static *coo(b,c=5){}}`);
 	assertEmitted(`class a extends b.bla[b](){get fun(){return b}static fun(){return b}set bla(b){}static set bla(b){}bla(b,c=5){}static bla(b,c=5){}static bla(b,c=5){}*boo(b,c=5){}static *coo(b,c=5){}}`);
+}
+@("String Literals")
+unittest
+{
+	assertEmitted(`var a='\\';`);
 }
 @("Function Declaration")
 unittest

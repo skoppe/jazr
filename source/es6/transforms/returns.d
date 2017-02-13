@@ -499,6 +499,27 @@ unittest
 		`function bla(s) { switch (s) { case 5: if (c) return a; return b; case 6: if (d) return 5; return 7; }}`,
 		`function bla(s) { switch (s) { case 5: return c ? a : b; case 6: return d ? 5 : 7 } }`,
 	);
+	assertCombineReturn(
+		`function a(){
+			if ( (elem = context.getElementById( m )) ) {
+				if ( elem.id === m ) {
+					results.push( elem );
+					return results;
+				}
+			} else {
+				return results;
+			}
+		}`,
+		`function a(){
+			if ( (elem = context.getElementById( m )) ) {
+				if ( elem.id === m ) {
+					results.push( elem );
+					return results;
+				}
+			} else {
+				return results;
+			}
+		}`);
 	// TODO: this doesn't work since we start at the end looking for the maximum length of ifs/returns statements of at least size 2, and d() fails that
 	// to fix it we need to skip any expressions at the end, which we will combine with the void 0 later on
 	//assertCombineReturn(

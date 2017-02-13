@@ -57,6 +57,10 @@ bool shortenLiteralPropertyNames(PropertyDefinitionNode node, out Node replacedW
 	if (!strLit.value[0].isStartIdentifier)
 		return false;
 
+	foreach(c; strLit.value)
+		if (c.isWhitespace)
+			return false;
+
 	node.name.replaceWith(new IdentifierNode(strLit.value));
 	return true;
 }
@@ -76,7 +80,8 @@ unittest
 			\">\": \"&gt;\",
 			'\\\"': \"&quot;\",
 			\"'\": \"&#x27;\",
-			\"`\": \"&#x60;\"
+			\"`\": \"&#x60;\",
+			\"stuff with spaces\": 4
 		}",
 		"var a = {
 			\"&\": \"&amp;\",
@@ -84,7 +89,8 @@ unittest
 			\">\": \"&gt;\",
 			'\\\"': \"&quot;\",
 			\"'\": \"&#x27;\",
-			\"`\": \"&#x60;\"
+			\"`\": \"&#x60;\",
+			\"stuff with spaces\": 4
         }",
 	);
 

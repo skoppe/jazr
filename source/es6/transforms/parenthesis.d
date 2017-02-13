@@ -441,10 +441,6 @@ unittest
 		`g&&((a=5,e)&&(d=5),b=5);`,
 		`g&&(a=5,e&&(d=5),b=5);`
 	);
-	assertRemoveParens(
-		`(f ? (c ? '+' : '') : '-')`,
-		`f ? c ? '+' : '' : '-'`
-	);
 	//assertRemoveParens(
 	//	`(1)&&(true)?d=5:g=5;`,
 	//	`1&&true?d=5:g=5;`
@@ -454,9 +450,17 @@ unittest
 	//	"!a && !b && (d = 5)"
 	//);
 	assertRemoveParens(
+		`if (!(a = bla())) bar();`,
+		`if (!(a = bla())) bar();`
+	);	
+	assertRemoveParens(
 		`var E = n(0), R = (u(E), n(1017)), G = (9);`,
 		`var E = n(0), R = (u(E), n(1017)), G = 9;`
 	);
+	//assertRemoveParens(
+	//	`(f ? (c ? '+' : '') : '-')`,
+	//	`f ? c ? '+' : '' : '-'`
+	//);
 
 	assertRemoveParens(`(1 - 2) - 3 + 4`,	`1 - 2 - 3 + 4`);
 	assertRemoveParens(`(1 - 2) + 3 + 4`,	`1 - 2 + 3 + 4`);
