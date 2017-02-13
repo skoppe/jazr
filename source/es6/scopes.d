@@ -47,9 +47,9 @@ enum IdentifierType
 struct Variable
 {
 	IdentifierType type;
-	IdentifierNode node;
+	IdentifierReferenceNode node;
 	Node[] references;
-	this(IdentifierNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
+	this(IdentifierReferenceNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.format;
 		assert(t != IdentifierType.Identifier,format("At %s:%s",file,line));
@@ -59,9 +59,9 @@ struct Variable
 }
 struct Identifier
 {
-	IdentifierNode node;
+	IdentifierReferenceNode node;
 	Node definition;
-	this(IdentifierNode n)
+	this(IdentifierReferenceNode n)
 	{
 		node = n;
 	}

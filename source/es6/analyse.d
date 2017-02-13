@@ -173,7 +173,7 @@ private void analyseBindingElementNode(Node node, Scope s, Branch b, IdentifierT
 	else if (node.children[0].type == NodeType.ObjectBindingPatternNode)
 		analyseObjectBindingPatternNode(node.children[0],s,b,v);
 	else{
-		s.addVariableOrIdentifier(node.children[0].as!IdentifierNode,v);
+		s.addVariableOrIdentifier(node.children[0].as!IdentifierReferenceNode,v);
 		node.children[0].branch = b;
 	}
 	analyse(node.children[1],s,b);
@@ -189,7 +189,7 @@ private void analyseArrayBindingPatternNode(Node node, Scope s, Branch b, Identi
 			case NodeType.RestElementNode:
 				item.children[0].branch = b;
 				item.branch = b;
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,v);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,v);
 				break;
 			case NodeType.BindingElementNode:
 				analyseBindingElementNode(item,s,b,v);
@@ -197,11 +197,11 @@ private void analyseArrayBindingPatternNode(Node node, Scope s, Branch b, Identi
 			case NodeType.SingleNameBindingNode:
 				item.children[0].branch = b;
 				item.branch = b;
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,v);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,v);
 				analyse(item.children[1],s,b);
 				break;
-			case NodeType.IdentifierNode:
-				s.addVariableOrIdentifier(item.as!IdentifierNode,v);
+			case NodeType.IdentifierReferenceNode:
+				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,v);
 				item.branch = b;
 				break;
 			case NodeType.ObjectBindingPatternNode:
@@ -228,7 +228,7 @@ private void analyseFormalParameterList(Node node, Scope s, Branch b = null)
 		switch(item.type)
 		{
 			case NodeType.RestElementNode:
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,IdentifierType.Parameter);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter);
 				item.branch = b;
 				item.children[0].branch = b;
 				break;
@@ -241,14 +241,14 @@ private void analyseFormalParameterList(Node node, Scope s, Branch b = null)
 			case NodeType.ArrayBindingPatternNode:
 				analyseArrayBindingPatternNode(item,s,b,IdentifierType.Parameter);
 				break;
-			case NodeType.IdentifierNode:
-				s.addVariableOrIdentifier(item.as!IdentifierNode,IdentifierType.Parameter);
+			case NodeType.IdentifierReferenceNode:
+				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,IdentifierType.Parameter);
 				item.branch = b;
 				break;
 			case NodeType.SingleNameBindingNode:
 				item.children[0].branch = b;
 				item.branch = b;
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,IdentifierType.Parameter);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter);
 				analyse(item.children[1],s,b);
 				break;
 			default: break;
@@ -262,10 +262,10 @@ private void analyseClassSetterParam(Node node, Scope s)
 	else
 	{
 		node.branch = s.branch;
-		s.addVariable(Variable(node.as!IdentifierNode,IdentifierType.Parameter));
+		s.addVariable(Variable(node.as!IdentifierReferenceNode,IdentifierType.Parameter));
 	}
 }
-private void addVariableOrIdentifier(Scope s, IdentifierNode node, IdentifierType i)
+private void addVariableOrIdentifier(Scope s, IdentifierReferenceNode node, IdentifierType i)
 {
 	if (i == IdentifierType.Identifier)
 		s.addIdentifier(Identifier(node));
@@ -281,7 +281,7 @@ private void analyseObjectBindingPatternNode(Node node, Scope s, Branch b, Ident
 		switch(item.type)
 		{
 			case NodeType.SingleNameBindingNode:
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,v);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,v);
 				item.children[0].branch = b;
 				analyse(item.children[1],s,b);
 				break;
@@ -301,18 +301,18 @@ private void analyseObjectBindingPatternNode(Node node, Scope s, Branch b, Ident
 					case NodeType.SingleNameBindingNode:
 						item.children[1].branch = b;
 						item.children[1].children[0].branch = b;
-						s.addVariableOrIdentifier(item.children[1].children[0].as!IdentifierNode,v);
+						s.addVariableOrIdentifier(item.children[1].children[0].as!IdentifierReferenceNode,v);
 						analyse(item.children[1].children[1],s,b);
 						break;
-					case NodeType.IdentifierNode:
+					case NodeType.IdentifierReferenceNode:
 						item.children[1].branch = b;
-						s.addVariableOrIdentifier(item.children[1].as!IdentifierNode,IdentifierType.Identifier);
+						s.addVariableOrIdentifier(item.children[1].as!IdentifierReferenceNode,IdentifierType.Identifier);
 						break;
 					default: version(unittest) throw new UnitTestException([format("Didn't expect %s",item.children[1].type)]);assert(0);
 				}
 				break;
-			case NodeType.IdentifierNode:
-				s.addVariable(Variable(item.as!IdentifierNode,v));
+			case NodeType.IdentifierReferenceNode:
+				s.addVariable(Variable(item.as!IdentifierReferenceNode,v));
 				break;
 			default: break;
 		}
@@ -326,8 +326,8 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 	{
 		switch(item.type)
 		{
-			case NodeType.IdentifierNode:
-				s.addVariableOrIdentifier(item.as!IdentifierNode,i);
+			case NodeType.IdentifierReferenceNode:
+				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,i);
 				item.branch = b;
 				break;
 			case NodeType.PropertyDefinitionNode:
@@ -339,8 +339,8 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 					case NodeType.AssignmentExpressionNode:
 						analyseArrowFunctionParamsAssignmentExpression(rhs,s,IdentifierType.Parameter);
 						break;
-					case NodeType.IdentifierNode:
-						s.addVariableOrIdentifier(rhs.as!IdentifierNode,IdentifierType.Parameter);
+					case NodeType.IdentifierReferenceNode:
+						s.addVariableOrIdentifier(rhs.as!IdentifierReferenceNode,IdentifierType.Parameter);
 						rhs.branch = b;
 						break;
 					case NodeType.ObjectLiteralNode:
@@ -356,15 +356,15 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 				item.branch = b;
 				item.children[0].branch = b;
 				if (i == IdentifierType.Parameter)
-					s.addVariable(Variable(item.children[0].as!IdentifierNode,IdentifierType.Parameter));
+					s.addVariable(Variable(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter));
 				auto rhs = item.children[1];
 				switch(rhs.type)
 				{
 					case NodeType.AssignmentExpressionNode:
 						analyseArrowFunctionParamsAssignmentExpression(rhs,s,IdentifierType.Identifier);
 						break;
-					case NodeType.IdentifierNode:
-						s.addVariableOrIdentifier(rhs.as!IdentifierNode,IdentifierType.Identifier);
+					case NodeType.IdentifierReferenceNode:
+						s.addVariableOrIdentifier(rhs.as!IdentifierReferenceNode,IdentifierType.Identifier);
 						rhs.branch = b;
 						break;
 					case NodeType.ObjectLiteralNode:
@@ -395,8 +395,8 @@ private void analyseArrowFunctionParamsArrayLiteral(Node node, Scope s, Identifi
 	{
 		switch(item.type)
 		{
-			case NodeType.IdentifierNode:
-				s.addVariableOrIdentifier(item.as!IdentifierNode,i);
+			case NodeType.IdentifierReferenceNode:
+				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,i);
 				item.branch = b;
 				break;
 			case NodeType.ArrayLiteralNode:
@@ -409,7 +409,7 @@ private void analyseArrowFunctionParamsArrayLiteral(Node node, Scope s, Identifi
 				analyseArrowFunctionParamsAssignmentExpression(item,s,i);
 				break;
 			case NodeType.SpreadElementNode:
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,i);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,i);
 				item.branch = b;
 				item.children[0].branch = b;
 				break;
@@ -434,8 +434,8 @@ private void analyseArrowFunctionParamsAssignmentExpression(Node node, Scope s, 
 		case NodeType.ObjectLiteralNode:
 			analyseArrowFunctionParamsObjectLiteral(lhs,s,i);
 			break;
-		case NodeType.IdentifierNode:
-			s.addVariableOrIdentifier(lhs.as!IdentifierNode,i);
+		case NodeType.IdentifierReferenceNode:
+			s.addVariableOrIdentifier(lhs.as!IdentifierReferenceNode,i);
 			lhs.branch = b;
 			break;
 		default: assert(0);
@@ -446,8 +446,8 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 {
 	Branch b = s.branch;
 	node.branch = b;
-	if (node.type == NodeType.IdentifierNode)
-		s.addVariable(Variable(node.as!IdentifierNode,IdentifierType.Parameter));
+	if (node.type == NodeType.IdentifierReferenceNode)
+		s.addVariable(Variable(node.as!IdentifierReferenceNode,IdentifierType.Parameter));
 	else
 	{
 		foreach(item; node.children)
@@ -456,7 +456,7 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 			{
 				case NodeType.SpreadElementNode:
 					item.branch = b;
-					s.addVariable(Variable(item.children[0].as!IdentifierNode,IdentifierType.Parameter));
+					s.addVariable(Variable(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter));
 					item.children[0].branch = b;
 					break;
 				case NodeType.ExpressionNode:
@@ -465,8 +465,8 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 					{
 						switch(e.type)
 						{
-							case NodeType.IdentifierNode:
-								s.addVariable(Variable(e.as!IdentifierNode,IdentifierType.Parameter));
+							case NodeType.IdentifierReferenceNode:
+								s.addVariable(Variable(e.as!IdentifierReferenceNode,IdentifierType.Parameter));
 								e.branch = b;
 								break;
 							case NodeType.ObjectLiteralNode:
@@ -482,8 +482,8 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 						}
 					}
 					break;
-				case NodeType.IdentifierNode:
-					s.addVariable(Variable(item.as!IdentifierNode,IdentifierType.Parameter));
+				case NodeType.IdentifierReferenceNode:
+					s.addVariable(Variable(item.as!IdentifierReferenceNode,IdentifierType.Parameter));
 					item.branch = b;
 					break;
 				case NodeType.ObjectLiteralNode:
@@ -695,7 +695,7 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			bool hasName = node.children.length == 3;
 			if (hasName)
 			{
-				s.addVariable(Variable(node.children[0].as!IdentifierNode,IdentifierType.Function));
+				s.addVariable(Variable(node.children[0].as!IdentifierReferenceNode,IdentifierType.Function));
 				node.children[0].branch = b;
 			}
 			auto funcBody = node.children[hasName ? 2 : 1];
@@ -746,8 +746,8 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 					case NodeType.ObjectBindingPatternNode:
 						analyseObjectBindingPatternNode(decl.children[0],s,b,IdentifierType.Variable);
 						break;
-					case NodeType.IdentifierNode:
-						s.addVariable(Variable(decl.children[0].as!IdentifierNode,IdentifierType.Variable));
+					case NodeType.IdentifierReferenceNode:
+						s.addVariable(Variable(decl.children[0].as!IdentifierReferenceNode,IdentifierType.Variable));
 						decl.children[0].branch = b;
 						break;
 					default: break;
@@ -756,8 +756,8 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 					analyse(decl.children[1],s,b);
 			}
 			break;
-		case NodeType.IdentifierNode:
-			s.addIdentifier(Identifier(node.as!IdentifierNode));
+		case NodeType.IdentifierReferenceNode:
+			s.addIdentifier(Identifier(node.as!IdentifierReferenceNode));
 			break;
 		case NodeType.IfStatementNode:
 			hints |= analyse(node.children[0],s,b);

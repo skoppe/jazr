@@ -45,7 +45,7 @@ ObjectBindingPatternNode objectLiteralToObjectBindingPattern(Node obj)
 {
 	return new ObjectBindingPatternNode(
 		obj.children.map!((child){
-			if (child.type == NodeType.IdentifierNode)
+			if (child.type == NodeType.IdentifierReferenceNode)
 				return child;
 			if (child.type == NodeType.PropertyDefinitionNode)
 				return cast(Node)(new BindingPropertyNode(child.children[0],child.children[1]));
@@ -59,7 +59,7 @@ ArrayBindingPatternNode arrayLiteralToArrayBindingPattern(Node arr)
 {
 	return new ArrayBindingPatternNode(
 		arr.children.map!((child){
-			if (child.type == NodeType.IdentifierNode)
+			if (child.type == NodeType.IdentifierReferenceNode)
 				return cast(Node)child;
 			if (child.type == NodeType.ElisionNode)
 				return cast(Node)child;
@@ -93,7 +93,7 @@ FormalParameterListNode arrowFunctionArgumentsToFormalParameterListNode(Node arg
 			first.children.map!((arg){
 				switch(arg.type)
 				{
-					case NodeType.IdentifierNode:
+					case NodeType.IdentifierReferenceNode:
 						return arg;
 					case NodeType.ObjectLiteralNode:
 						return arg.objectLiteralToObjectBindingPattern();
@@ -109,7 +109,7 @@ FormalParameterListNode arrowFunctionArgumentsToFormalParameterListNode(Node arg
 							case NodeType.ObjectLiteralNode:
 								lhs = lhs.objectLiteralToObjectBindingPattern();
 								break;
-							case NodeType.IdentifierNode:
+							case NodeType.IdentifierReferenceNode:
 								if (arg.children.length == 3)
 									return new SingleNameBindingNode(lhs,arg.children[2]);
 								auto a = new AssignmentExpressionNode(arg.children[2..$]);
@@ -134,7 +134,7 @@ FormalParameterListNode arrowFunctionArgumentsToFormalParameterListNode(Node arg
 		return new FormalParameterListNode(children);
 	} else
 	{
-		assert(args.type == NodeType.IdentifierNode);
+		assert(args.type == NodeType.IdentifierReferenceNode);
 		return new FormalParameterListNode([args]);
 	}
 }

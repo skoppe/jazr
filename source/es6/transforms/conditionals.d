@@ -89,7 +89,7 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out 
 	auto truthAssign = truthAssignExpr.children[0];
 	auto falseAssign = falseAssignExpr.children[0];
 
-	if (truthAssign.type != NodeType.IdentifierNode ||
+	if (truthAssign.type != NodeType.IdentifierReferenceNode ||
 		truthAssign.diff(falseAssign) != Diff.No)
 		return false;
 

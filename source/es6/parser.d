@@ -222,7 +222,7 @@ final class Parser(Source) : Lexer!(Source)
 				imports ~= new ImportSpecifierNode(name,parseIdentifier());
 			} else
 			{
-				auto iden = cast(IdentifierNode)name;
+				auto iden = cast(IdentifierReferenceNode)name;
 				assert(iden !is null);
 				if (isIdentifierReservedKeyword(iden))
 					return error(format("ImportBinding cannot contain reserved keyword %s",iden.identifier));
@@ -490,7 +490,7 @@ final class Parser(Source) : Lexer!(Source)
 								children.put(parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield),name));
 								break;
 							}
-							auto iden = cast(IdentifierNode)name;
+							auto iden = cast(IdentifierReferenceNode)name;
 							assert(iden !is null);
 							if (isIdentifierReservedKeyword(iden))
 								return error(format("Unexpected keyword %s",iden.identifier));
@@ -745,7 +745,7 @@ final class Parser(Source) : Lexer!(Source)
 		if (cond.type == NodeType.ConditionalExpressionNode)
 			return cond;
 		skipCommentsAndLineTerminators();
-		if (cond.type == NodeType.IdentifierNode && token.type == Type.Arrow)
+		if (cond.type == NodeType.IdentifierReferenceNode && token.type == Type.Arrow)
 		{
 			scanAndSkipCommentsAndTerminators();
 			return new ArrowFunctionNode(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
@@ -791,7 +791,7 @@ final class Parser(Source) : Lexer!(Source)
 				children ~= cond;
 				return new AssignmentExpressionNode(children);
 			}
-			if (cond.type == NodeType.IdentifierNode && token.type == Type.Arrow)
+			if (cond.type == NodeType.IdentifierReferenceNode && token.type == Type.Arrow)
 			{
 				scanToken(attributes.toGoal);
 				children ~= new ArrowFunctionNode(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
@@ -1086,7 +1086,7 @@ final class Parser(Source) : Lexer!(Source)
 		}
 		return content;
 	}
-	bool isIdentifierReservedKeyword(IdentifierNode i)
+	bool isIdentifierReservedKeyword(IdentifierReferenceNode i)
 	{
 		return i.identifier.isReservedKeyword();
 		//return (i.identifier == "break" || i.identifier == "do" || i.identifier == "in" || i.identifier == "typeof" || i.identifier == "case" || i.identifier == "else" ||
@@ -1102,7 +1102,7 @@ final class Parser(Source) : Lexer!(Source)
 		version(chatty) { writeln("parseIdentifier"); }
 		assert(token.type == Type.Identifier);
 
-		IdentifierNode n = new IdentifierNode(token.match);
+		IdentifierReferenceNode n = new IdentifierReferenceNode(token.match);
 		if (token.match == "yield")
 		{
 			if (!attributes.has!(Attribute.Yield))
@@ -1118,7 +1118,7 @@ final class Parser(Source) : Lexer!(Source)
 	{
 		version(chatty) { writeln("parseIdentifierName"); }
 		assert(token.type == Type.Identifier);
-		auto n = new IdentifierNode(token.match);
+		auto n = new IdentifierReferenceNode(token.match);
 		scanAndSkipCommentsAndTerminators();
 		return n;
 	}
@@ -1252,7 +1252,7 @@ final class Parser(Source) : Lexer!(Source)
 			return node;
 		}
 		// this while loop can't run forever
-		while (!isEndOfExpression || (node.type == NodeType.IdentifierNode && token.type == Type.Colon))
+		while (!isEndOfExpression || (node.type == NodeType.IdentifierReferenceNode && token.type == Type.Colon))
 		{
 			switch (token.type)
 			{
@@ -1262,9 +1262,9 @@ final class Parser(Source) : Lexer!(Source)
 					scanToken(attributes.toGoal);
 					break;
 				case Type.Colon:
-					if (node.type == NodeType.IdentifierNode)
+					if (node.type == NodeType.IdentifierReferenceNode)
 					{
-						auto idNode = cast(IdentifierNode)node;
+						auto idNode = cast(IdentifierReferenceNode)node;
 						assert(idNode !is null);
 						scanToken(attributes.toGoal);
 						return new LabelledStatementNode(idNode.identifier);
@@ -1459,7 +1459,7 @@ final class Parser(Source) : Lexer!(Source)
 				children ~= new BindingPropertyNode(name,elem);
 			} else
 			{
-				auto iden = cast(IdentifierNode)name;
+				auto iden = cast(IdentifierReferenceNode)name;
 				if (iden is null)
 					return error(format("Expected identifier, got %s",name));
 				if (isIdentifierReservedKeyword(iden))
@@ -2250,7 +2250,7 @@ unittest
 	assertNodeType!HexLiteralNode(`0xfaf0`);
 	assertNodeType!TemplateLiteralNode("`template`");
 	assertNodeType!RegexLiteralNode("/abc/gi");
-	assertNodeType!IdentifierNode("identifier");
+	assertNodeType!IdentifierReferenceNode("identifier");
 	assertNodeType!ParenthesisNode("()");
 	assertNodeType!KeywordNode("this").keyword.shouldEqual(Keyword.This);
 	assertNodeType!KeywordNode("null").keyword.shouldEqual(Keyword.Null);
@@ -2344,7 +2344,7 @@ unittest
 
 	assertNodeType!TemplateLiteralNode("`template`");
 	assertNodeType!RegexLiteralNode("/abc/gi");
-	assertNodeType!IdentifierNode("identifier");
+	assertNodeType!IdentifierReferenceNode("identifier");
 	assertNodeType!ParenthesisNode("()");
 	assertNodeType!KeywordNode("this").keyword.shouldEqual(Keyword.This);
 	assertNodeType!KeywordNode("null").keyword.shouldEqual(Keyword.Null);
@@ -2405,7 +2405,7 @@ unittest
 {
 	alias parseConditionalExpression(Type = ConditionalExpressionNode) = parseNode!("parseConditionalExpression",Type);
 
-	parseConditionalExpression!(IdentifierNode)("abc");
+	parseConditionalExpression!(IdentifierReferenceNode)("abc");
 	parseConditionalExpression("abc ? 6 : 7");
 	parseConditionalExpression("abc ?").shouldThrow();
 	parseConditionalExpression("abc ? 6").shouldThrow();
@@ -2423,12 +2423,12 @@ unittest
 			//throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
-	parseAssignmentExpression!(IdentifierNode)("abc");
+	parseAssignmentExpression!(IdentifierReferenceNode)("abc");
 	auto assign = parseAssignmentExpression("abc12 = def");
 	assign.children.length.shouldEqual(3);
-	assign.children[0].shouldBeOfType!IdentifierNode;
+	assign.children[0].shouldBeOfType!IdentifierReferenceNode;
 	assign.children[1].shouldBeOfType!AssignmentOperatorNode;
-	assign.children[2].shouldBeOfType!IdentifierNode;
+	assign.children[2].shouldBeOfType!IdentifierReferenceNode;
 
 	parseAssignmentExpression!(ConditionalExpressionNode)("abc ? 6 : 7");
 	parseAssignmentExpression!(UnaryExpressionNode)("!bla");
@@ -2464,7 +2464,7 @@ unittest
 			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
-	parseExpression!(IdentifierNode)("abc");
+	parseExpression!(IdentifierReferenceNode)("abc");
 	parseExpression!(ConditionalExpressionNode)("abc ? 7 : 6");
 	parseExpression!(UnaryExpressionNode)("!bla");
 	parseExpression!(BinaryExpressionNode)("bla & 7");
@@ -2475,8 +2475,8 @@ unittest
 
 	auto expr = parseExpression("abc, def");
 	expr.children.length.shouldEqual(2);
-	expr.children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("abc");
-	expr.children[1].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("def");
+	expr.children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("abc");
+	expr.children[1].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("def");
 
 	expr = parseExpression("abc(), def = ghi");
 	expr.children.length.shouldEqual(2);
@@ -2501,11 +2501,11 @@ unittest
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 
-	parseStatement!(IdentifierNode)("abc").identifier.shouldEqual("abc");
-	parseStatement!(IdentifierNode)("abc;");
-	parseStatement!(IdentifierNode)("abc  \n\r\n;");
-	parseStatement!(IdentifierNode)("abc  \n\r\n // \n;");
-	parseStatement!(IdentifierNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n;");
+	parseStatement!(IdentifierReferenceNode)("abc").identifier.shouldEqual("abc");
+	parseStatement!(IdentifierReferenceNode)("abc;");
+	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n;");
+	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n // \n;");
+	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n;");
 	parseStatement!(LabelledStatementNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n:");
 }
 @("parseVariableStatement")
@@ -2514,8 +2514,8 @@ unittest
 	alias parseVariableStatement(Type = VariableStatementNode) = parseNode!("parseVariableStatement",Type);
 
 	parseVariableStatement("var ").shouldThrow();
-	parseVariableStatement("var a").children[0].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("a");
-	parseVariableStatement("var a,b").children[1].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("b");
+	parseVariableStatement("var a").children[0].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("a");
+	parseVariableStatement("var a,b").children[1].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("b");
 	parseVariableStatement("var a = 77").children[0].shouldBeOfType!(VariableDeclarationNode).children[1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("77");
 	parseVariableStatement("var a = b = 77").children[0].shouldBeOfType!(VariableDeclarationNode).children[1].shouldBeOfType!(AssignmentExpressionNode);
 	parseVariableStatement("var a = b = 77, c = 44").children[1].shouldBeOfType!(VariableDeclarationNode).children[1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("44");
@@ -2691,7 +2691,7 @@ unittest
 @("parseIdentifier")
 unittest
 {
-	alias parseIdentifier(Type = IdentifierNode) = parseNode!("parseIdentifier",Type);
+	alias parseIdentifier(Type = IdentifierReferenceNode) = parseNode!("parseIdentifier",Type);
 
 	parseIdentifier("name");
 	parseIdentifier("name_");
@@ -2702,24 +2702,24 @@ unittest
 {
 	alias parseClassDeclaration(Type = ClassDeclarationNode) = parseNode!("parseClassDeclaration",Type);
 
-	parseClassDeclaration("class abc{}").name.shouldBeOfType!(IdentifierNode).identifier.shouldEqual("abc");
-	parseClassDeclaration("class abc extends def{}").base.shouldBeOfType!(IdentifierNode).identifier.shouldEqual("def");
+	parseClassDeclaration("class abc{}").name.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("abc");
+	parseClassDeclaration("class abc extends def{}").base.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("def");
 	parseClassDeclaration("class abc{m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{*m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{*m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{*m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{set m(abc){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{get m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static *m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static *m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static *m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static set m(abc){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static get m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class name { a(){}/*comment*/b(){}\nc(){} // comment \nd(){}; ;; }");
 	parseClassDeclaration("class {}").shouldThrowSaying("Expected Identifier as part of ClassDeclaration");
 	parseClassDeclaration("class name").shouldThrowSaying("Expected opening brace as part of class declaration");

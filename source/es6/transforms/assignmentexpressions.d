@@ -45,12 +45,12 @@ bool simplifyRedundantAssignmentExpressions(ExpressionNode expr, out Node replac
 	auto assignExpr = expr.children[$-2].as!AssignmentExpressionNode;
 	Node lhs = assignExpr.children[0];
 
-	if (expr.children[$-1].type == NodeType.IdentifierNode)
+	if (expr.children[$-1].type == NodeType.IdentifierReferenceNode)
 	{
-		if (lhs.type != NodeType.IdentifierNode)
+		if (lhs.type != NodeType.IdentifierReferenceNode)
 			return false;
 
-		if (lhs.as!IdentifierNode.identifier != expr.children[$-1].as!IdentifierNode.identifier)
+		if (lhs.as!IdentifierReferenceNode.identifier != expr.children[$-1].as!IdentifierReferenceNode.identifier)
 			return false;
 	} else if (expr.children[$-1].type == NodeType.CallExpressionNode)
 	{

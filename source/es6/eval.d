@@ -203,8 +203,8 @@ RawValue getRawValue(Node node)
 		case NodeType.UnaryExpressionNode:
 			auto unary = node.as!UnaryExpressionNode;
 			return getRawValue(node.children[0]).processPrefixExpressions(unary.prefixs);
-		case NodeType.IdentifierNode:
-			switch (node.as!(IdentifierNode).identifier)
+		case NodeType.IdentifierReferenceNode:
+			switch (node.as!(IdentifierReferenceNode).identifier)
 			{
 				case "undefined": return RawValue("undefined",ValueType.Undefined);
 				case "NaN": return RawValue("NaN",ValueType.NaN);
@@ -1100,7 +1100,7 @@ auto toUnaryExpression(RawValue value)
 		case ValueType.Undefined:
 		case ValueType.NaN:
 		case ValueType.Infinity:
-			return cast(Node)new IdentifierNode(value.value);
+			return cast(Node)new IdentifierReferenceNode(value.value);
 		case ValueType.Null:
 			return cast(Node)new KeywordNode(Keyword.Null);
 		case ValueType.Bool:
@@ -1115,9 +1115,9 @@ auto toUnaryExpression(RawValue value)
 @("toUnaryExpression")
 unittest
 {
-	toUnaryExpression(RawValue("undefined",ValueType.Undefined)).as!(IdentifierNode).identifier.shouldEqual("undefined");
-	toUnaryExpression(RawValue("NaN",ValueType.NaN)).as!(IdentifierNode).identifier.shouldEqual("NaN");
-	toUnaryExpression(RawValue("Infinity",ValueType.Infinity)).as!(IdentifierNode).identifier.shouldEqual("Infinity");
+	toUnaryExpression(RawValue("undefined",ValueType.Undefined)).as!(IdentifierReferenceNode).identifier.shouldEqual("undefined");
+	toUnaryExpression(RawValue("NaN",ValueType.NaN)).as!(IdentifierReferenceNode).identifier.shouldEqual("NaN");
+	toUnaryExpression(RawValue("Infinity",ValueType.Infinity)).as!(IdentifierReferenceNode).identifier.shouldEqual("Infinity");
 	toUnaryExpression(RawValue("Null",ValueType.Null)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
 	toUnaryExpression(RawValue("true",ValueType.Bool)).as!(BooleanNode).value.shouldEqual(true);
 	toUnaryExpression(RawValue("str",ValueType.String)).as!(StringLiteralNode).value.shouldEqual("str");

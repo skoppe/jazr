@@ -93,7 +93,7 @@ enum NodeType {
 	TemplateLiteralNode,
 	RegexLiteralNode,
 	KeywordNode,
-	IdentifierNode,
+	IdentifierReferenceNode,
 	ExpressionNode,
 	ParenthesisNode,
 	PrefixExpressionNode,
@@ -747,17 +747,17 @@ class KeywordNode : Node
 	}
 }
 
-class IdentifierNode : Node
+class IdentifierReferenceNode : Node
 {
 	string identifier;
 	this(string i)
 	{
 		identifier = i;
-		super(NodeType.IdentifierNode);
+		super(NodeType.IdentifierReferenceNode);
 	}
 	override string toString()
 	{
-		return "IdentifierNode (\""~identifier~"\")";
+		return "IdentifierReferenceNode (\""~identifier~"\")";
 	}
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
@@ -2084,58 +2084,58 @@ unittest
     TemplateNode t
   RegexLiteralNode /regex/
   KeywordNode
-  IdentifierNode identifier
+  IdentifierReferenceNode identifier
   UnaryExpressionNode
     PrefixExpressionNode Negation
-    IdentifierNode expr
+    IdentifierReferenceNode expr
   CallExpressionNode
-    IdentifierNode obj
+    IdentifierReferenceNode obj
     AccessorNode a
   NewExpressionNode
-    IdentifierNode a
+    IdentifierReferenceNode a
   CallExpressionNode
-    IdentifierNode a
+    IdentifierReferenceNode a
     ArgumentsNode
   BinaryExpressionNode
-    IdentifierNode a
+    IdentifierReferenceNode a
     ExpressionOperatorNode
-    IdentifierNode b
+    IdentifierReferenceNode b
   AssignmentExpressionNode HasAssignment
-    IdentifierNode c
+    IdentifierReferenceNode c
     AssignmentOperatorNode HasAssignment
-    IdentifierNode d
+    IdentifierReferenceNode d
   LabelledStatementNode NonExpression
   ForStatement ExprCStyle NonExpression
     SemicolonNode
     SemicolonNode
     EmptyStatementNode
   ClassDeclarationNode NonExpression
-    IdentifierNode b
+    IdentifierReferenceNode b
     ClassGetterNode
-      IdentifierNode x
+      IdentifierReferenceNode x
       FunctionBodyNode
     ClassSetterNode
-      IdentifierNode x
-      IdentifierNode a
+      IdentifierReferenceNode x
+      IdentifierReferenceNode a
       FunctionBodyNode
     ClassMethodNode
-      IdentifierNode method
+      IdentifierReferenceNode method
       FormalParameterListNode
       FunctionBodyNode
     ClassGeneratorMethodNode
-      IdentifierNode gen
+      IdentifierReferenceNode gen
       FormalParameterListNode
       FunctionBodyNode
   AssignmentExpressionNode HasAssignment
     ArrayLiteralNode
       ElisionNode 2
-      IdentifierNode a
+      IdentifierReferenceNode a
     AssignmentOperatorNode HasAssignment
-    IdentifierNode b
+    IdentifierReferenceNode b
   LexicalDeclarationNode NonExpression
     LexicalDeclarationItemNode
-      IdentifierNode b
-      IdentifierNode d
+      IdentifierReferenceNode b
+      IdentifierReferenceNode d
 ");
 }
 bool startsNewScope(Node node)
