@@ -521,7 +521,7 @@ class Node
 	}
 }
 
-class ErrorNode : Node
+final class ErrorNode : Node
 {
 	string value;
 	size_t line;
@@ -552,7 +552,7 @@ class ErrorNode : Node
 		return o.value == value && o.line == line && o.column == column ? Diff.No : Diff.Content;
 	}
 }
-class BooleanNode : Node
+final class BooleanNode : Node
 {
 	bool value;
 	this(bool v)
@@ -570,7 +570,7 @@ class BooleanNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class StringLiteralNode : Node
+final class StringLiteralNode : Node
 {
 	string value; // all strings are normalized to single quoted string (meaning original double quoted strings are properly unescaped)
 	this(string v)
@@ -594,7 +594,7 @@ class StringLiteralNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class BinaryLiteralNode : Node
+final class BinaryLiteralNode : Node
 {
 	string value;
 	this(string v)
@@ -612,7 +612,7 @@ class BinaryLiteralNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class OctalLiteralNode : Node
+final class OctalLiteralNode : Node
 {
 	string value;
 	this(string v)
@@ -630,7 +630,7 @@ class OctalLiteralNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class DecimalLiteralNode : Node
+final class DecimalLiteralNode : Node
 {
 	string value;
 	this(string v)
@@ -652,7 +652,7 @@ class DecimalLiteralNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class HexLiteralNode : Node
+final class HexLiteralNode : Node
 {
 	string value;
 	this(string v)
@@ -670,7 +670,7 @@ class HexLiteralNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class TemplateLiteralNode : Node
+final class TemplateLiteralNode : Node
 {
 	this(TemplateNode n)
 	{
@@ -681,7 +681,7 @@ class TemplateLiteralNode : Node
 		super(NodeType.TemplateLiteralNode,children);
 	}
 }
-class TemplateNode : Node
+final class TemplateNode : Node
 {
 	string value;
 	this(string v)
@@ -705,7 +705,7 @@ class TemplateNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class RegexLiteralNode : Node
+final class RegexLiteralNode : Node
 {
 	string value;
 	this(string v)
@@ -729,7 +729,7 @@ class RegexLiteralNode : Node
 		return o.value == value ? Diff.No : Diff.Content;
 	}
 }
-class KeywordNode : Node
+final class KeywordNode : Node
 {
 	Keyword keyword;
 	this(Keyword k)
@@ -771,7 +771,7 @@ class IdentifierNode : Node
 	}
 }
 
-class IdentifierReferenceNode : IdentifierNode
+final class IdentifierReferenceNode : IdentifierNode
 {
 	this(string identifier)
 	{
@@ -782,19 +782,18 @@ class IdentifierReferenceNode : IdentifierNode
 		return "IdentifierReferenceNode (\""~identifier~"\")";
 	}
 }
-class IdentifierNameNode : IdentifierNode
+final class IdentifierNameNode : IdentifierNode
 {
 	this(string identifier)
 	{
 		super(NodeType.IdentifierNameNode,identifier);
 	}
-	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
+	override string toString()
 	{
-		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,identifier);
+		return "IdentifierNameNode (\""~identifier~"\")";
 	}
 }
-class ExpressionNode : Node
+final class ExpressionNode : Node
 {
 	this(Node[] children)
 	{
@@ -820,7 +819,7 @@ class ExpressionNode : Node
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
-class ParenthesisNode : Node
+final class ParenthesisNode : Node
 {
 	this()
 	{
@@ -836,7 +835,7 @@ class ParenthesisNode : Node
 	}
 }
 
-class PrefixExpressionNode : Node
+final class PrefixExpressionNode : Node
 {
 	Prefix prefix;
 	this(Prefix p)
@@ -860,7 +859,7 @@ class PrefixExpressionNode : Node
 		return o.prefix == prefix ? Diff.No : Diff.Content;
 	}
 }
-class SuperPropertyNode : Node
+final class SuperPropertyNode : Node
 {
 	this(Node n)
 	{
@@ -873,7 +872,7 @@ class SuperPropertyNode : Node
 		sink.print(children,level+1);
 	}
 }
-class AccessorNode : Node
+final class AccessorNode : Node
 {
 	string identifier;
 	this(string i)
@@ -897,21 +896,21 @@ class AccessorNode : Node
 		return o.identifier == identifier ? Diff.No : Diff.Content;
 	}
 }
-class NewTargetNode : Node
+final class NewTargetNode : Node
 {
 	this()
 	{
 		super(NodeType.NewTargetNode);
 	}
 }
-class SpreadOperatorNode : Node
+final class SpreadOperatorNode : Node
 {
 	this()
 	{
 		super(NodeType.SpreadOperatorNode);
 	}
 }
-class ArgumentsNode : Node
+final class ArgumentsNode : Node
 {
 	this()
 	{
@@ -922,14 +921,14 @@ class ArgumentsNode : Node
 		super(NodeType.ArgumentsNode,args);
 	}
 }
-class ArrayIndexNode : Node
+final class ArrayIndexNode : Node
 {
 	this(Node expr)
 	{
 		super(NodeType.ArrayIndexNode,[expr]);
 	}
 }
-class NewExpressionNode : Node
+final class NewExpressionNode : Node
 {
 	size_t news;
 	this(size_t news, Node[] calls)
@@ -947,7 +946,7 @@ class NewExpressionNode : Node
 		return o.news == news ? Diff.No : Diff.Content;
 	}
 }
-class CallExpressionNode : Node
+final class CallExpressionNode : Node
 {
 	size_t news;
 	this(size_t news, Node[] calls)
@@ -965,7 +964,7 @@ class CallExpressionNode : Node
 		return o.news == news ? Diff.No : Diff.Content;
 	}
 }
-class UnaryExpressionNode : Node
+final class UnaryExpressionNode : Node
 {
 	Node[] prefixs;
 	Postfix postfix = Postfix.None;
@@ -999,7 +998,7 @@ class UnaryExpressionNode : Node
 		return o.postfix == postfix ? Diff.No : Diff.Content;
 	}
 }
-class ExpressionOperatorNode : Node
+final class ExpressionOperatorNode : Node
 {
 	ExpressionOperator operator;
 	this(ExpressionOperator op)
@@ -1017,7 +1016,7 @@ class ExpressionOperatorNode : Node
 		return o.operator == operator ? Diff.No : Diff.Content;
 	}
 }
-class BinaryExpressionNode : Node
+final class BinaryExpressionNode : Node
 {
 	this(Node[] children)
 	{
@@ -1053,7 +1052,7 @@ class BinaryExpressionNode : Node
 		return this.children.stride(2);
 	}
 }
-class ConditionalExpressionNode : Node
+final class ConditionalExpressionNode : Node
 {
 	this(Node cond, Node truthPath, Node elsePath)
 	{
@@ -1072,7 +1071,7 @@ class ConditionalExpressionNode : Node
 		return this.children[2];
 	}
 }
-class AssignmentExpressionNode : Node
+final class AssignmentExpressionNode : Node
 {
 	this(Node[] children)
 	{
@@ -1086,14 +1085,14 @@ void removeFirstAssignment(AssignmentExpressionNode node)
 	else
 		node.children = node.children[2..$];
 }
-class ArrowFunctionNode : Node
+final class ArrowFunctionNode : Node
 {
 	this(Node parameter, Node functionBody)
 	{
 		super(NodeType.ArrowFunctionNode,[parameter,functionBody]);
 	}
 }
-class AssignmentOperatorNode : Node
+final class AssignmentOperatorNode : Node
 {
 	Assignment assignment;
 	this(Assignment a)
@@ -1111,28 +1110,28 @@ class AssignmentOperatorNode : Node
 		return o.assignment == assignment ? Diff.No : Diff.Content;
 	}
 }
-class ContinueStatementNode : Node
+final class ContinueStatementNode : Node
 {
 	this()
 	{
 		super(NodeType.ContinueStatementNode);
 	}
 }
-class BreakStatementNode : Node
+final class BreakStatementNode : Node
 {
 	this()
 	{
 		super(NodeType.BreakStatementNode);
 	}
 }
-class EmptyStatementNode : Node
+final class EmptyStatementNode : Node
 {
 	this()
 	{
 		super(NodeType.EmptyStatementNode);
 	}
 }
-class LabelledStatementNode : Node
+final class LabelledStatementNode : Node
 {
 	string label;
 	this(string l)
@@ -1150,7 +1149,7 @@ class LabelledStatementNode : Node
 		return o.label == label ? Diff.No : Diff.Content;
 	}
 }
-class VariableDeclarationNode : Node
+final class VariableDeclarationNode : Node
 {
 	this(Node lhs, Node init = null)
 	{
@@ -1160,21 +1159,21 @@ class VariableDeclarationNode : Node
 			super(NodeType.VariableDeclarationNode,[lhs,init]);
 	}
 }
-class VariableStatementNode : Node
+final class VariableStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.VariableStatementNode,children);
 	}
 }
-class ReturnStatementNode : Node
+final class ReturnStatementNode : Node
 {
 	this(Node expr = null)
 	{
 		super(NodeType.ReturnStatementNode,expr);
 	}
 }
-class BlockStatementNode : Node
+final class BlockStatementNode : Node
 {
 	this(Node[] children)
 	{
@@ -1341,7 +1340,7 @@ unittest
 		`(d=5,b=6,e=5)`
 	);
 }
-class IfStatementNode : Node
+final class IfStatementNode : Node
 {
 	this(Node cond, Node truth, Node falsy = null)
 	{
@@ -1383,35 +1382,35 @@ class IfStatementNode : Node
 		block.branch = branch;
 	}
 }
-class SwitchStatementNode : Node
+final class SwitchStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.SwitchStatementNode,children);
 	}
 }
-class DoWhileStatementNode : Node
+final class DoWhileStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.DoWhileStatementNode,children);
 	}
 }
-class WhileStatementNode : Node
+final class WhileStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.WhileStatementNode,children);
 	}
 }
-class CaseNode : Node
+final class CaseNode : Node
 {
 	this(Node condition, Node caseBody)
 	{
 		super(NodeType.CaseNode,[condition,caseBody]);
 	}
 }
-class CaseBodyNode : Node
+final class CaseBodyNode : Node
 {
 	this(Node[] children)
 	{
@@ -1426,14 +1425,14 @@ class CaseBodyNode : Node
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
-class DefaultNode : Node
+final class DefaultNode : Node
 {
 	this(Node child)
 	{
 		super(NodeType.DefaultNode,child);
 	}
 }
-class ForStatementNode : Node
+final class ForStatementNode : Node
 {
 	ForLoop loopType;
 	this(ForLoop l, Node[] children)
@@ -1468,49 +1467,49 @@ bool isEitherA(Ts...)(Node node)
 	else
 		return node.type == Ts[0] || node.isEitherA!(Ts[1..$]);
 }
-class WithStatementNode : Node
+final class WithStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.WithStatementNode,children);
 	}
 }
-class CatchStatementNode : Node
+final class CatchStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.CatchStatementNode,children);
 	}
 }
-class FinallyStatementNode : Node
+final class FinallyStatementNode : Node
 {
 	this(Node block)
 	{
 		super(NodeType.FinallyStatementNode,[block]);
 	}
 }
-class TryStatementNode : Node
+final class TryStatementNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.TryStatementNode,children);
 	}
 }
-class ThrowStatementNode : Node
+final class ThrowStatementNode : Node
 {
 	this(Node expr)
 	{
 		super(NodeType.ThrowStatementNode,[expr]);
 	}
 }
-class DebuggerStatementNode : Node
+final class DebuggerStatementNode : Node
 {
 	this()
 	{
 		super(NodeType.DebuggerStatementNode);
 	}
 }
-class ClassDeclarationNode : Node
+final class ClassDeclarationNode : Node
 {
 	Node name;
 	Node base;
@@ -1541,7 +1540,7 @@ class ClassDeclarationNode : Node
 		return Diff.No;
 	}
 }
-class ClassGetterNode : Node
+final class ClassGetterNode : Node
 {
 	bool isStatic;
 	this(bool isStatic, Node name, Node funcBody)
@@ -1559,7 +1558,7 @@ class ClassGetterNode : Node
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
 }
-class ClassMethodNode : Node
+final class ClassMethodNode : Node
 {
 	bool isStatic;
 	this(bool isStatic, Node name, Node params, Node funcBody)
@@ -1577,7 +1576,7 @@ class ClassMethodNode : Node
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
 }
-class ClassGeneratorMethodNode : Node
+final class ClassGeneratorMethodNode : Node
 {
 	bool isStatic;
 	this(bool isStatic, Node name, Node params, Node funcBody)
@@ -1595,7 +1594,7 @@ class ClassGeneratorMethodNode : Node
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
 }
-class ClassSetterNode : Node
+final class ClassSetterNode : Node
 {
 	bool isStatic;
 	this(bool isStatic, Node name, Node param, Node funcBody)
@@ -1613,21 +1612,21 @@ class ClassSetterNode : Node
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
 	}
 }
-class ComputedPropertyNameNode : Node
+final class ComputedPropertyNameNode : Node
 {
 	this(Node expr)
 	{
 		super(NodeType.ComputedPropertyNameNode,[expr]);
 	}
 }
-class FormalParameterListNode : Node
+final class FormalParameterListNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.FormalParameterListNode,children);
 	}
 }
-class FunctionDeclarationNode : Node
+final class FunctionDeclarationNode : Node
 {
 	this(Node name, Node params, Node funcBody)
 	{
@@ -1637,7 +1636,7 @@ class FunctionDeclarationNode : Node
 			super(NodeType.FunctionDeclarationNode,[name,params,funcBody]);
 	}
 }
-class FunctionExpressionNode : Node
+final class FunctionExpressionNode : Node
 {
 	this(Node name, Node params, Node funcBody)
 	{
@@ -1647,7 +1646,7 @@ class FunctionExpressionNode : Node
 			super(NodeType.FunctionExpressionNode,[params,funcBody]);
 	}
 }
-class GeneratorDeclarationNode : Node
+final class GeneratorDeclarationNode : Node
 {
 	this(Node name, Node params, Node funcBody)
 	{
@@ -1657,7 +1656,7 @@ class GeneratorDeclarationNode : Node
 			super(NodeType.GeneratorDeclarationNode,[name,params,funcBody]);
 	}
 }
-class GeneratorExpressionNode : Node
+final class GeneratorExpressionNode : Node
 {
 	this(Node name, Node params, Node funcBody)
 	{
@@ -1667,42 +1666,42 @@ class GeneratorExpressionNode : Node
 			super(NodeType.GeneratorExpressionNode,[name,params,funcBody]);
 	}
 }
-class RestElementNode : Node
+final class RestElementNode : Node
 {
 	this(Node iden)
 	{
 		super(NodeType.RestElementNode,[iden]);
 	}
 }
-class SingleNameBindingNode : Node
+final class SingleNameBindingNode : Node
 {
 	this(Node name, Node expr)
 	{
 		super(NodeType.SingleNameBindingNode,[name,expr]);
 	}
 }
-class SpreadElementNode : Node
+final class SpreadElementNode : Node
 {
 	this(Node iden)
 	{
 		super(NodeType.SpreadElementNode,[iden]);
 	}
 }
-class ArrayLiteralNode : Node
+final class ArrayLiteralNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.ArrayLiteralNode,children);
 	}
 }
-class ObjectLiteralNode : Node
+final class ObjectLiteralNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.ObjectLiteralNode,children);
 	}
 }
-class PropertyDefinitionNode : Node
+final class PropertyDefinitionNode : Node
 {
 	this(Node name, Node expr)
 	{
@@ -1713,14 +1712,14 @@ class PropertyDefinitionNode : Node
 		return this.children[0];
 	}
 }
-class CoverInitializedName : Node
+final class CoverInitializedName : Node
 {
 	this(Node iden, Node init)
 	{
 		super(NodeType.CoverInitializedName,[iden,init]);
 	}
 }
-class ElisionNode : Node
+final class ElisionNode : Node
 {
 	int cnt;
 	this(int cnt)
@@ -1744,7 +1743,7 @@ class ElisionNode : Node
 		return o.cnt == cnt ? Diff.No : Diff.Content;
 	}
 }
-class FunctionBodyNode : Node
+final class FunctionBodyNode : Node
 {
 	this(Node[] children)
 	{
@@ -1767,7 +1766,7 @@ class FunctionBodyNode : Node
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
-class LexicalDeclarationNode : Node
+final class LexicalDeclarationNode : Node
 {
 	LexicalDeclaration declaration;
 	this(LexicalDeclaration decl, Node[] children)
@@ -1785,7 +1784,7 @@ class LexicalDeclarationNode : Node
 		return o.declaration == declaration ? Diff.No : Diff.Content;
 	}
 }
-class LexicalDeclarationItemNode : Node
+final class LexicalDeclarationItemNode : Node
 {
 	this(Node lhs, Node init = null)
 	{
@@ -1795,35 +1794,35 @@ class LexicalDeclarationItemNode : Node
 			super(NodeType.LexicalDeclarationItemNode,[lhs,init]);
 	}
 }
-class ArrayBindingPatternNode : Node
+final class ArrayBindingPatternNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.ArrayBindingPatternNode,children);
 	}
 }
-class ObjectBindingPatternNode : Node
+final class ObjectBindingPatternNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.ObjectBindingPatternNode,children);
 	}
 }
-class BindingPropertyNode : Node
+final class BindingPropertyNode : Node
 {
 	this(Node name, Node elem)
 	{
 		super(NodeType.BindingPropertyNode,[name,elem]);
 	}
 }
-class ExportClauseNode : Node
+final class ExportClauseNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.ExportClauseNode,children);
 	}
 }
-class ExportDeclarationNode : Node
+final class ExportDeclarationNode : Node
 {
 	this(Node clause, Node specifier = null)
 	{
@@ -1833,28 +1832,28 @@ class ExportDeclarationNode : Node
 			super(NodeType.ExportDeclarationNode,[clause,specifier]);
 	}
 }
-class ExportDefaultDeclarationNode : Node
+final class ExportDefaultDeclarationNode : Node
 {
 	this(Node child)
 	{
 		super(NodeType.ExportDefaultDeclarationNode,child);
 	}
 }
-class ExportSpecifierNode : Node
+final class ExportSpecifierNode : Node
 {
 	this(Node name, Node as)
 	{
 		super(NodeType.ExportSpecifierNode,[name,as]);
 	}
 }
-class ImportClauseNode : Node
+final class ImportClauseNode : Node
 {
 	this(Node clause, Node imports)
 	{
 		super(NodeType.ImportClauseNode,[clause,imports]);
 	}
 }
-class ImportDeclarationNode : Node
+final class ImportDeclarationNode : Node
 {
 	this(Node string)
 	{
@@ -1865,28 +1864,28 @@ class ImportDeclarationNode : Node
 		super(NodeType.ImportDeclarationNode,[clause,string]);
 	}
 }
-class ImportSpecifierNode : Node
+final class ImportSpecifierNode : Node
 {
 	this(Node name, Node identifier)
 	{
 		super(NodeType.ImportSpecifierNode,[name,identifier]);
 	}
 }
-class NamedImportsNode : Node
+final class NamedImportsNode : Node
 {
 	this(Node[] children)
 	{
 		super(NodeType.NamedImportsNode,children);
 	}
 }
-class NameSpaceImportNode : Node
+final class NameSpaceImportNode : Node
 {
 	this(Node child)
 	{
 		super(NodeType.NameSpaceImportNode,child);
 	}
 }
-class ModuleNode : Node
+final class ModuleNode : Node
 {
 	this(Node[] children)
 	{
@@ -1901,14 +1900,14 @@ class ModuleNode : Node
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
 }
-class SemicolonNode : Node
+final class SemicolonNode : Node
 {
 	this()
 	{
 		super(NodeType.SemicolonNode);
 	}
 }
-class BindingElementNode : Node
+final class BindingElementNode : Node
 {
 	this(Node pattern, Node init)
 	{
@@ -2090,7 +2089,7 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 unittest
 {
 	import std.format;
-	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
+	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);final class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
 	n.analyseNode();
 	diffTree(n,n).type.shouldEqual(Diff.No);
 	format("%s",n).shouldEqual("ModuleNode NonExpression, HasAssignment
