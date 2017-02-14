@@ -61,7 +61,7 @@ bool shortenLiteralPropertyNames(PropertyDefinitionNode node, out Node replacedW
 		if (c.isWhitespace)
 			return false;
 
-	node.name.replaceWith(new IdentifierReferenceNode(strLit.value));
+	node.name.replaceWith(new IdentifierNameNode(strLit.value));
 	return true;
 }
 @("shortenLiteralPropertyNames")

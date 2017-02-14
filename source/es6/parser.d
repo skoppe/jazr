@@ -222,9 +222,9 @@ final class Parser(Source) : Lexer!(Source)
 				imports ~= new ImportSpecifierNode(name,parseIdentifier());
 			} else
 			{
-				auto iden = cast(IdentifierReferenceNode)name;
+				auto iden = cast(IdentifierNameNode)name;
 				assert(iden !is null);
-				if (isIdentifierReservedKeyword(iden))
+				if (isIdentifierReservedKeyword(iden.identifier))
 					return error(format("ImportBinding cannot contain reserved keyword %s",iden.identifier));
 				imports ~= iden;
 			}
@@ -320,7 +320,7 @@ final class Parser(Source) : Lexer!(Source)
 			if (token.match == "as")
 			{
 				scanAndSkipCommentsAndTerminators();
-				auto as = parseIdentifierName();
+				auto as = parseIdentifier();
 				children ~= new ExportSpecifierNode(name,as);
 			} else
 				children ~= name;
@@ -490,9 +490,9 @@ final class Parser(Source) : Lexer!(Source)
 								children.put(parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield),name));
 								break;
 							}
-							auto iden = cast(IdentifierReferenceNode)name;
+							auto iden = cast(IdentifierNameNode)name;
 							assert(iden !is null);
-							if (isIdentifierReservedKeyword(iden))
+							if (isIdentifierReservedKeyword(iden.identifier))
 								return error(format("Unexpected keyword %s",iden.identifier));
 							if (token.type == Type.Assignment)
 							{
@@ -1086,9 +1086,9 @@ final class Parser(Source) : Lexer!(Source)
 		}
 		return content;
 	}
-	bool isIdentifierReservedKeyword(IdentifierReferenceNode i)
+	bool isIdentifierReservedKeyword(string identifier)
 	{
-		return i.identifier.isReservedKeyword();
+		return identifier.isReservedKeyword();
 		//return (i.identifier == "break" || i.identifier == "do" || i.identifier == "in" || i.identifier == "typeof" || i.identifier == "case" || i.identifier == "else" ||
 		//	i.identifier == "instanceof" || i.identifier == "var" || i.identifier == "catch" || i.identifier == "export" || i.identifier == "new" ||
 		//	i.identifier == "void" || i.identifier == "class" || i.identifier == "extends" || i.identifier == "return" || i.identifier == "while" || i.identifier == "const" ||
@@ -1108,7 +1108,7 @@ final class Parser(Source) : Lexer!(Source)
 			if (!attributes.has!(Attribute.Yield))
 				return error("keyword yield cannot be used in this context");
 
-		} else if (isIdentifierReservedKeyword(n))
+		} else if (isIdentifierReservedKeyword(n.identifier))
 			return error(format("Invalid IdentifierReference %s",token.match));
 
 		scanAndSkipCommentsAndTerminators(attributes);
@@ -1118,7 +1118,7 @@ final class Parser(Source) : Lexer!(Source)
 	{
 		version(chatty) { writeln("parseIdentifierName"); }
 		assert(token.type == Type.Identifier);
-		auto n = new IdentifierReferenceNode(token.match);
+		auto n = new IdentifierNameNode(token.match);
 		scanAndSkipCommentsAndTerminators();
 		return n;
 	}
@@ -1459,10 +1459,10 @@ final class Parser(Source) : Lexer!(Source)
 				children ~= new BindingPropertyNode(name,elem);
 			} else
 			{
-				auto iden = cast(IdentifierReferenceNode)name;
+				auto iden = cast(IdentifierNameNode)name;
 				if (iden is null)
 					return error(format("Expected identifier, got %s",name));
-				if (isIdentifierReservedKeyword(iden))
+				if (isIdentifierReservedKeyword(iden.identifier))
 					return error(format("Invalid IdentifierReference %s",iden.identifier));
 				if (token.type != Type.Assignment)
 					children ~= iden;
@@ -2705,21 +2705,21 @@ unittest
 	parseClassDeclaration("class abc{}").name.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("abc");
 	parseClassDeclaration("class abc extends def{}").base.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("def");
 	parseClassDeclaration("class abc{m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{*m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{*m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{*m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{set m(abc){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{get m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static m(){}}").methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static *m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static *m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static *m(){}}").methods[0].shouldBeOfType!(ClassGeneratorMethodNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static set m(abc){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static get m(){}}").methods.length.shouldEqual(1);
-	parseClassDeclaration("class abc{static get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("m");
+	parseClassDeclaration("class abc{static get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class name { a(){}/*comment*/b(){}\nc(){} // comment \nd(){}; ;; }");
 	parseClassDeclaration("class {}").shouldThrowSaying("Expected Identifier as part of ClassDeclaration");
 	parseClassDeclaration("class name").shouldThrowSaying("Expected opening brace as part of class declaration");

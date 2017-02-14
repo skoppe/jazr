@@ -94,6 +94,7 @@ enum NodeType {
 	RegexLiteralNode,
 	KeywordNode,
 	IdentifierReferenceNode,
+	IdentifierNameNode,
 	ExpressionNode,
 	ParenthesisNode,
 	PrefixExpressionNode,
@@ -746,18 +747,13 @@ class KeywordNode : Node
 		return o.keyword == keyword ? Diff.No : Diff.Content;
 	}
 }
-
-class IdentifierReferenceNode : Node
+class IdentifierNode : Node
 {
 	string identifier;
-	this(string i)
+	this(NodeType parentType, string i)
 	{
 		identifier = i;
-		super(NodeType.IdentifierReferenceNode);
-	}
-	override string toString()
-	{
-		return "IdentifierReferenceNode (\""~identifier~"\")";
+		super(parentType);		
 	}
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
@@ -772,6 +768,30 @@ class IdentifierReferenceNode : Node
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.identifier == identifier ? Diff.No : Diff.Content;
+	}
+}
+
+class IdentifierReferenceNode : IdentifierNode
+{
+	this(string identifier)
+	{
+		super(NodeType.IdentifierReferenceNode,identifier);
+	}
+	override string toString()
+	{
+		return "IdentifierReferenceNode (\""~identifier~"\")";
+	}
+}
+class IdentifierNameNode : IdentifierNode
+{
+	this(string identifier)
+	{
+		super(NodeType.IdentifierNameNode,identifier);
+	}
+	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
+	{
+		sink.indent(level);
+		sink.formattedWrite("%s %s\n",type,identifier);
 	}
 }
 class ExpressionNode : Node
@@ -2112,18 +2132,18 @@ unittest
   ClassDeclarationNode NonExpression
     IdentifierReferenceNode b
     ClassGetterNode
-      IdentifierReferenceNode x
+      IdentifierNameNode x
       FunctionBodyNode
     ClassSetterNode
-      IdentifierReferenceNode x
+      IdentifierNameNode x
       IdentifierReferenceNode a
       FunctionBodyNode
     ClassMethodNode
-      IdentifierReferenceNode method
+      IdentifierNameNode method
       FormalParameterListNode
       FunctionBodyNode
     ClassGeneratorMethodNode
-      IdentifierReferenceNode gen
+      IdentifierNameNode gen
       FormalParameterListNode
       FunctionBodyNode
   AssignmentExpressionNode HasAssignment

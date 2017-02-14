@@ -48,16 +48,20 @@ version (unittest)
 		s.children.length.shouldBeGreaterThan(0,file,line);
 		return s.children[0];
 	}
+	void assertIdentifierEqual(IdentifierNode node, string identifier, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		node.identifier.shouldEqual(identifier,file,line);
+	}
 	void assertIdentifier(Scope s, size_t idx, string identifier, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		s.identifiers.length.shouldBeGreaterThan(idx,file,line);
-		s.identifiers[idx].node.identifier.shouldEqual(identifier,file,line);
+		s.identifiers[idx].node.assertIdentifierEqual(identifier,file,line);
 	}
 	auto assertIdentifiers(Scope s, string[] identifiers, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		s.identifiers.length.shouldEqual(identifiers.length,file,line);
 		foreach(got,expected; lockstep(s.identifiers,identifiers))
-			got.node.identifier.shouldEqual(expected,file,line);
+			got.node.assertIdentifierEqual(expected,file,line);
 		return s;
 	}
 	auto assertVariables(alias type)(Scope s, string[] variables, in string file = __FILE__, in size_t line = __LINE__)
@@ -65,7 +69,7 @@ version (unittest)
 		auto f = s.variables.filter!(v=>v.type == type);
 		f.walkLength.shouldEqual(variables.length,file,line);
 		foreach(got,expected; lockstep(f,variables))
-			got.node.identifier.shouldEqual(expected,file,line);
+			got.node.assertIdentifierEqual(expected,file,line);
 		return s;
 	}
 }
@@ -173,7 +177,7 @@ private void analyseBindingElementNode(Node node, Scope s, Branch b, IdentifierT
 	else if (node.children[0].type == NodeType.ObjectBindingPatternNode)
 		analyseObjectBindingPatternNode(node.children[0],s,b,v);
 	else{
-		s.addVariableOrIdentifier(node.children[0].as!IdentifierReferenceNode,v);
+		s.addVariableOrIdentifier(node.children[0].as!IdentifierNode,v);
 		node.children[0].branch = b;
 	}
 	analyse(node.children[1],s,b);
@@ -189,7 +193,7 @@ private void analyseArrayBindingPatternNode(Node node, Scope s, Branch b, Identi
 			case NodeType.RestElementNode:
 				item.children[0].branch = b;
 				item.branch = b;
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,v);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,v);
 				break;
 			case NodeType.BindingElementNode:
 				analyseBindingElementNode(item,s,b,v);
@@ -197,11 +201,11 @@ private void analyseArrayBindingPatternNode(Node node, Scope s, Branch b, Identi
 			case NodeType.SingleNameBindingNode:
 				item.children[0].branch = b;
 				item.branch = b;
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,v);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,v);
 				analyse(item.children[1],s,b);
 				break;
 			case NodeType.IdentifierReferenceNode:
-				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,v);
+				s.addVariableOrIdentifier(item.as!IdentifierNode,v);
 				item.branch = b;
 				break;
 			case NodeType.ObjectBindingPatternNode:
@@ -228,7 +232,7 @@ private void analyseFormalParameterList(Node node, Scope s, Branch b = null)
 		switch(item.type)
 		{
 			case NodeType.RestElementNode:
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,IdentifierType.Parameter);
 				item.branch = b;
 				item.children[0].branch = b;
 				break;
@@ -242,13 +246,13 @@ private void analyseFormalParameterList(Node node, Scope s, Branch b = null)
 				analyseArrayBindingPatternNode(item,s,b,IdentifierType.Parameter);
 				break;
 			case NodeType.IdentifierReferenceNode:
-				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,IdentifierType.Parameter);
+				s.addVariableOrIdentifier(item.as!IdentifierNode,IdentifierType.Parameter);
 				item.branch = b;
 				break;
 			case NodeType.SingleNameBindingNode:
 				item.children[0].branch = b;
 				item.branch = b;
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,IdentifierType.Parameter);
 				analyse(item.children[1],s,b);
 				break;
 			default: break;
@@ -262,10 +266,10 @@ private void analyseClassSetterParam(Node node, Scope s)
 	else
 	{
 		node.branch = s.branch;
-		s.addVariable(Variable(node.as!IdentifierReferenceNode,IdentifierType.Parameter));
+		s.addVariable(Variable(node.as!IdentifierNode,IdentifierType.Parameter));
 	}
 }
-private void addVariableOrIdentifier(Scope s, IdentifierReferenceNode node, IdentifierType i)
+private void addVariableOrIdentifier(Scope s, IdentifierNode node, IdentifierType i)
 {
 	if (i == IdentifierType.Identifier)
 		s.addIdentifier(Identifier(node));
@@ -281,7 +285,7 @@ private void analyseObjectBindingPatternNode(Node node, Scope s, Branch b, Ident
 		switch(item.type)
 		{
 			case NodeType.SingleNameBindingNode:
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,v);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,v);
 				item.children[0].branch = b;
 				analyse(item.children[1],s,b);
 				break;
@@ -301,18 +305,20 @@ private void analyseObjectBindingPatternNode(Node node, Scope s, Branch b, Ident
 					case NodeType.SingleNameBindingNode:
 						item.children[1].branch = b;
 						item.children[1].children[0].branch = b;
-						s.addVariableOrIdentifier(item.children[1].children[0].as!IdentifierReferenceNode,v);
+						s.addVariableOrIdentifier(item.children[1].children[0].as!IdentifierNode,v);
 						analyse(item.children[1].children[1],s,b);
 						break;
+					case NodeType.IdentifierNameNode:
 					case NodeType.IdentifierReferenceNode:
 						item.children[1].branch = b;
-						s.addVariableOrIdentifier(item.children[1].as!IdentifierReferenceNode,IdentifierType.Identifier);
+						s.addVariableOrIdentifier(item.children[1].as!IdentifierNode,IdentifierType.Identifier);
 						break;
 					default: version(unittest) throw new UnitTestException([format("Didn't expect %s",item.children[1].type)]);assert(0);
 				}
 				break;
+			case NodeType.IdentifierNameNode:
 			case NodeType.IdentifierReferenceNode:
-				s.addVariable(Variable(item.as!IdentifierReferenceNode,v));
+				s.addVariable(Variable(item.as!IdentifierNode,v));
 				break;
 			default: break;
 		}
@@ -326,8 +332,9 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 	{
 		switch(item.type)
 		{
+			case NodeType.IdentifierNameNode:
 			case NodeType.IdentifierReferenceNode:
-				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,i);
+				s.addVariableOrIdentifier(item.as!IdentifierNode,i);
 				item.branch = b;
 				break;
 			case NodeType.PropertyDefinitionNode:
@@ -340,7 +347,7 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 						analyseArrowFunctionParamsAssignmentExpression(rhs,s,IdentifierType.Parameter);
 						break;
 					case NodeType.IdentifierReferenceNode:
-						s.addVariableOrIdentifier(rhs.as!IdentifierReferenceNode,IdentifierType.Parameter);
+						s.addVariableOrIdentifier(rhs.as!IdentifierNode,IdentifierType.Parameter);
 						rhs.branch = b;
 						break;
 					case NodeType.ObjectLiteralNode:
@@ -356,15 +363,16 @@ private void analyseArrowFunctionParamsObjectLiteral(Node node, Scope s, Identif
 				item.branch = b;
 				item.children[0].branch = b;
 				if (i == IdentifierType.Parameter)
-					s.addVariable(Variable(item.children[0].as!IdentifierReferenceNode,IdentifierType.Parameter));
+					s.addVariable(Variable(item.children[0].as!IdentifierNode,IdentifierType.Parameter));
 				auto rhs = item.children[1];
 				switch(rhs.type)
 				{
 					case NodeType.AssignmentExpressionNode:
 						analyseArrowFunctionParamsAssignmentExpression(rhs,s,IdentifierType.Identifier);
 						break;
+					case NodeType.IdentifierNameNode:
 					case NodeType.IdentifierReferenceNode:
-						s.addVariableOrIdentifier(rhs.as!IdentifierReferenceNode,IdentifierType.Identifier);
+						s.addVariableOrIdentifier(rhs.as!IdentifierNode,IdentifierType.Identifier);
 						rhs.branch = b;
 						break;
 					case NodeType.ObjectLiteralNode:
@@ -396,7 +404,7 @@ private void analyseArrowFunctionParamsArrayLiteral(Node node, Scope s, Identifi
 		switch(item.type)
 		{
 			case NodeType.IdentifierReferenceNode:
-				s.addVariableOrIdentifier(item.as!IdentifierReferenceNode,i);
+				s.addVariableOrIdentifier(item.as!IdentifierNode,i);
 				item.branch = b;
 				break;
 			case NodeType.ArrayLiteralNode:
@@ -409,7 +417,7 @@ private void analyseArrowFunctionParamsArrayLiteral(Node node, Scope s, Identifi
 				analyseArrowFunctionParamsAssignmentExpression(item,s,i);
 				break;
 			case NodeType.SpreadElementNode:
-				s.addVariableOrIdentifier(item.children[0].as!IdentifierReferenceNode,i);
+				s.addVariableOrIdentifier(item.children[0].as!IdentifierNode,i);
 				item.branch = b;
 				item.children[0].branch = b;
 				break;
@@ -434,8 +442,9 @@ private void analyseArrowFunctionParamsAssignmentExpression(Node node, Scope s, 
 		case NodeType.ObjectLiteralNode:
 			analyseArrowFunctionParamsObjectLiteral(lhs,s,i);
 			break;
+		case NodeType.IdentifierNameNode:
 		case NodeType.IdentifierReferenceNode:
-			s.addVariableOrIdentifier(lhs.as!IdentifierReferenceNode,i);
+			s.addVariableOrIdentifier(lhs.as!IdentifierNode,i);
 			lhs.branch = b;
 			break;
 		default: assert(0);
@@ -986,15 +995,15 @@ unittest
 {
     // todo: here we prepend the objectbindingpattern with an identifier to force parsing as an ObjectBindingPattern. Babel also has this problem. Don't know if bug or not.
     // // todo: WRONG!!
-	getScope(`e,{a}=b;`).assertIdentifiers(["e","a","b"]);
-	getScope(`e,{a,b}=c;`).assertIdentifiers(["e","a","b","c"]);
-	getScope(`e,{a=b}=c;`).assertIdentifiers(["e","a","b","c"]);
-	getScope(`e,{a:b}=c;`).assertIdentifiers(["e","a","b","c"]);
-	getScope(`e,{a:b=c}=d;`).assertIdentifiers(["e","a","b","c","d"]);
-	getScope(`e,{a:{b}}=c;`).assertIdentifiers(["e","a","b","c"]);
-	getScope(`e,{a:[b]}=c;`).assertIdentifiers(["e","a","b","c"]);
-	getScope(`e,{a:{b}=c}=d;`).assertIdentifiers(["e","a","b","c","d"]);
-	getScope(`e,{a:[b]=c}=d;`).assertIdentifiers(["e","a","b","c","d"]);
+	getScope(`e,{a}=b;`).assertIdentifiers(["e","b"]);
+	getScope(`e,{a,b}=c;`).assertIdentifiers(["e","c"]);
+	getScope(`e,{a=b}=c;`).assertIdentifiers(["e","b","c"]);
+	getScope(`e,{a:b}=c;`).assertIdentifiers(["e","b","c"]);
+	getScope(`e,{a:b=c}=d;`).assertIdentifiers(["e","b","c","d"]);
+	getScope(`e,{a:{b}}=c;`).assertIdentifiers(["e","c"]);
+	getScope(`e,{a:[b]}=c;`).assertIdentifiers(["e","b","c"]);
+	getScope(`e,{a:{b}=c}=d;`).assertIdentifiers(["e","c","d"]);
+	getScope(`e,{a:[b]=c}=d;`).assertIdentifiers(["e","b","c","d"]);
 }
 @("ArrayLiteral")
 unittest
@@ -1008,8 +1017,8 @@ unittest
 	//assertIdentifier(s,1,"b");
 	getScope(`[a=c]=b;`).assertIdentifiers(["a","c","b"]);
 	getScope(`[[a]]=b;`).assertIdentifiers(["a","b"]);
-	getScope(`[{a}]=b;`).assertIdentifiers(["a","b"]);
-	getScope(`[{a}=b]=c;`).assertIdentifiers(["a","b","c"]);
+	getScope(`[{a}]=b;`).assertIdentifiers(["b"]);
+	getScope(`[{a}=b]=c;`).assertIdentifiers(["b","c"]);
 	getScope(`[[a]=b]=c;`).assertIdentifiers(["a","b","c"]);
 	getScope(`[,,[a]=b,,c]=d;`).assertIdentifiers(["a","b","c","d"]);
 }

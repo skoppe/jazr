@@ -29,11 +29,18 @@ version (unittest)
 	import std.stdio;
 	import es6.parser;
 	import es6.analyse;
+	void assertIdentifierEqual(Node node, string identifier, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		if (node.type == NodeType.IdentifierReferenceNode)
+			node.as!(IdentifierReferenceNode).identifier.shouldEqual(identifier,file,line);
+		else if (node.type == NodeType.IdentifierNameNode)
+			node.as!(IdentifierNameNode).identifier.shouldEqual(identifier,file,line);		
+	}
 	void assertGlobals(Scope s, string[] expecteds, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		expecteds.length.shouldEqual(s.globals.length,file,line);
 		foreach(got, expected; lockstep(s.globals,expecteds))
-			got.node.identifier.shouldEqual(expected,file,line);
+			got.node.assertIdentifierEqual(expected,file,line);
 	}
 }
 
@@ -47,9 +54,9 @@ enum IdentifierType
 struct Variable
 {
 	IdentifierType type;
-	IdentifierReferenceNode node;
+	IdentifierNode node;
 	Node[] references;
-	this(IdentifierReferenceNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
+	this(IdentifierNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.format;
 		assert(t != IdentifierType.Identifier,format("At %s:%s",file,line));
@@ -59,9 +66,9 @@ struct Variable
 }
 struct Identifier
 {
-	IdentifierReferenceNode node;
+	IdentifierNode node;
 	Node definition;
-	this(IdentifierReferenceNode n)
+	this(IdentifierNode n)
 	{
 		node = n;
 	}

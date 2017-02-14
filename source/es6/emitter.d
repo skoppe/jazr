@@ -189,6 +189,12 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 				sink.put(" ");
 			sink.put(n.identifier);
 			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
+		case NodeType.IdentifierNameNode:
+			auto n = node.as!IdentifierNameNode;
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put(n.identifier);
+			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
 		case NodeType.ExpressionNode:
 			node.children.emitDelimited(sink,",",guide);
 			return Guide.RequiresDelimiter;
@@ -232,7 +238,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 		case NodeType.SuperPropertyNode:
 			auto n = node.as!SuperPropertyNode;
 			sink.put("super");
-			if (n.children[0].type == NodeType.IdentifierReferenceNode)
+			if (n.children[0].type == NodeType.IdentifierNameNode)
 				sink.put(".");
 			n.children[0].emit(sink);
 			return Guide.RequiresDelimiter;

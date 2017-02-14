@@ -115,7 +115,7 @@ void shortenVariables(Scope scp, BookKeepingList list = new BookKeepingList())
 		int idCounter = 0;
 		foreach(v; s.getVariables)
 		{
-			IdentifierReferenceNode node = v.node;
+			auto node = v.node;
 			string id = s.generateFreeIdentifier(globals, idCounter, list);
 			list.add(node.identifier,id);
 			if (v.type == IdentifierType.Parameter || v.type == IdentifierType.Function)
