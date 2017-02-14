@@ -1027,7 +1027,7 @@ final class BinaryExpressionNode : Node
 	{
 		auto idx = this.getIndexOfChild(node);
 		if (idx > 0)
-			return this.children[idx-1..$].stride(2).take(1).map!(op=>op.as!(ExpressionOperatorNode)).array();
+			return this.children[idx-1..$].stride(2).take(2).map!(op=>op.as!(ExpressionOperatorNode)).array();
 		if (this.children.length == 1)
 			return [];
 		return this.children[idx+1..idx+2].map!(op=>op.as!(ExpressionOperatorNode)).array();

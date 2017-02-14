@@ -813,6 +813,7 @@ bool isNonCommutative(ExpressionOperator operator)
 	{
 		case ExpressionOperator.Minus:
 		case ExpressionOperator.Division:
+		case ExpressionOperator.In:
 			return true;
 		default:
 			return false;

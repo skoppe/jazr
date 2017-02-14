@@ -41,7 +41,8 @@ void removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWi
 			node.parent.as!(IfStatementNode).hasElsePath)
 			return;
 		if (node.parent.type == NodeType.TryStatementNode ||
-			node.parent.type == NodeType.CatchStatementNode)
+			node.parent.type == NodeType.CatchStatementNode ||
+			node.parent.type == NodeType.FinallyStatementNode)
 			return;
 		replacedWith = node.replaceWith(node.children[0]);
 	}

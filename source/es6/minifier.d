@@ -710,4 +710,12 @@ unittest
 			`function bla( ch, asCodePoint ) { if ( asCodePoint ) { if ( ch === "\0" ) { return "\uFFFD"; } return ch.slice( 0, -1 ) + "\\" + ch.charCodeAt( ch.length - 1 ).toString( 16 ) + " "; } return "\\" + ch; }`,
 			`function bla(a,b){return b?a==='\0'?'\uFFFD':a.slice(0,-1)+'\\'+a.charCodeAt(a.length-1).toString(16)+' ':'\\'+a}`
 		);
+		assertMinifier(
+			`try{ b = 9; } catch(exception) { c = 5; } finally { k = 6 }`,
+			`try{b=9}catch(exception){c=5}finally{k=6}`
+		);
+
 }
+
+
+

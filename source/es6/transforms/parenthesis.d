@@ -25,6 +25,7 @@ import option;
 import es6.analyse;
 import es6.eval;
 import std.algorithm : map, min, max, any;
+import std.range : drop;
 
 version(unittest)
 {
@@ -97,6 +98,8 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 			auto innerOperators = innerBinaryExpr.getOperators();
 			auto outerOperators = outerBinaryExpr.getOperatorsSurrounding(node);
 			if (!isLeftChild && outerOperators.take(1).any!(o => o.operator.isNonCommutative))
+				return false;
+			if (outerOperators.drop(isLeftChild ? 0 : 1).take(1).any!(o => o.operator == ExpressionOperator.In))
 				return false;
 			auto innerLowestPrecedence = innerOperators.map!(o => o.operator.getExprOperatorPrecedence()).reduce!(min);
 			auto outerHighestPrecedence = outerOperators.map!(o => o.operator.getExprOperatorPrecedence()).reduce!(max);
@@ -456,6 +459,14 @@ unittest
 	assertRemoveParens(
 		`var E = n(0), R = (u(E), n(1017)), G = (9);`,
 		`var E = n(0), R = (u(E), n(1017)), G = 9;`
+	);
+	assertRemoveParens(
+		`( length - 1 ) in obj`,
+		`(length-1)in obj;`
+	);
+	assertRemoveParens(
+		`a && ( length - 1 ) in obj`,
+		`a&&(length-1)in obj;`
 	);
 	//assertRemoveParens(
 	//	`(f ? (c ? '+' : '') : '-')`,
