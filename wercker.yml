@@ -9,7 +9,7 @@ build:
     - script:
         name: unittests
         code: |
-          dub test -b unittest-cov
+          dub test -b unittest-cov -- -d
     - script:
         name: minify RxJS
         code: |
