@@ -2089,7 +2089,7 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 unittest
 {
 	import std.format;
-	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);final class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
+	Node n = parseModule("true;\"s\";0b01;0o01;10;0x01;`t`;/regex/;null;identifier;!expr;obj.a;new a;a();a+b;c=d;bla:;for(;;);class b{get x(){}set x(a){}method(){}*gen(){}}[,,a]=b;let b=d;");
 	n.analyseNode();
 	diffTree(n,n).type.shouldEqual(Diff.No);
 	format("%s",n).shouldEqual("ModuleNode NonExpression, HasAssignment
