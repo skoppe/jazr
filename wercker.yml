@@ -28,6 +28,7 @@ build:
         name: unittest jQuery
         code: |
           ln -s $PWD/tests/jquery /usr/share/nginx/html/jquery
+          php-fpm
           cd tests
           ./run-jquery.sh
     - script:
