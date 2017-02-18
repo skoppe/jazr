@@ -294,7 +294,7 @@ class Branch
 }
 void linkIdentifierToDefinitions(Scope scp)
 {
-	scp.identifiers.each!(i => scp.linkToDefinition(i));
+	scp.identifiers.each!((ref i) => scp.linkToDefinition(i));
 	foreach(s; scp.children)
 		s.linkIdentifierToDefinitions();
 }

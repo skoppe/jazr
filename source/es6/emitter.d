@@ -43,7 +43,6 @@ version (unittest)
 		auto parser = parser(input);
 		parser.scanToken();
 		auto root = parser.parseModule();
-		writeln(root);
 		return Result(root.emit());
 	}
 }

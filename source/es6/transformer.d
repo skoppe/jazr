@@ -92,6 +92,9 @@ version (unittest)
 	}
 }
 
+// TODO: when a transformer replaces the currently iterated node (with a new one), the transformer stops handling any siblings
+// and instead starts transformation at the newly inserted node.
+// This is inefficient in that the transformer will transform ALL child nodes of the new node. However, at some point those children are already processed.
 auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line = __LINE__)
 {
 	import std.typetuple : staticMap, Filter, templateAnd, templateNot, NoDuplicates;
@@ -163,7 +166,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 								version(unittest) {
 									root.checkInternals(file,line);
 								}
-								if (replacedWith !is null)
+								if (replacedWith !is null && replacedWith.parent !is node.parent)
 									return replacedWith;
 								if (typedNode.parent is null)
 									return null;
@@ -176,7 +179,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 									version (unittest) {
 										root.checkInternals(file,line);
 									}
-									if (replacedWith !is null)
+									if (replacedWith !is null && replacedWith.parent !is node.parent)
 										return replacedWith;
 									if (typedNode.parent is null)
 										return null;
@@ -200,7 +203,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 							version(unittest) {
 								root.checkInternals(file,line);
 							}
-							if (replacedWith !is null)
+							if (replacedWith !is null && replacedWith.parent !is node.parent)
 								return replacedWith;
 							if (node.parent is null)
 								return null;
@@ -213,7 +216,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 								version (unittest) {
 									root.checkInternals(file,line);
 								}
-								if (replacedWith !is null)
+								if (replacedWith !is null && replacedWith.parent !is node.parent)
 									return replacedWith;
 								if (node.parent is null)
 									return null;
