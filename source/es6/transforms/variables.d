@@ -90,7 +90,7 @@ unittest
 	list.get("x").shouldEqual("a");
 }
 
-void shortenVariables(Scope scp, BookKeepingList list = new BookKeepingList())
+/*void shortenVariables(Scope scp, BookKeepingList list = new BookKeepingList())
 {
 	void renameIdentifiers(Node node, BookKeepingList list)
 	{
@@ -128,11 +128,42 @@ void shortenVariables(Scope scp, BookKeepingList list = new BookKeepingList())
 	}
 	foreach (s; scp.children)
 		walkScope(s, list);
+}*/
+void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList())
+{
+	import std.algorithm : map, canFind, sort, max, reduce;
+	import std.array : appender;
+	auto vars = appender!(Variable[]);
+	void collectVars(Scope s)
+	{
+		vars.put(s.getVariables);
+		foreach (c; s.children)
+			collectVars(c);
+	}
+	foreach(c; scp.children)
+		collectVars(c);
+	auto sortedVars = vars.data.sort!((a,b) => b.references.length < a.references.length);
+	int[void*] counters;
+	foreach(v; sortedVars)
+	{
+		auto node = v.node;
+		Scope s = node.branch.scp;
+		int idCounter = max(
+			counters.get(cast(void*)s,0),
+			reduce!(max)(0,v.references.map!(r => counters.get(cast(void*)r.branch.scp,0)))
+		);
+		string id = s.generateFreeIdentifier(idCounter);
+		counters[cast(void*)s] = idCounter;
+		node.identifier = id;
+		foreach(n; v.references)
+			n.as!(IdentifierReferenceNode).identifier = id;
+	}
 }
-private string generateFreeIdentifier(Scope s, string[] globals, ref int idCounter, BookKeepingList list)
+private string generateFreeIdentifier(Scope s, ref int idCounter)
 {
 	import std.algorithm : canFind;
 	string id;
+	auto globals = s.getGlobals().map!(g => g.node.identifier).array;
 	do
 	{
 		id = generateValidIdentifier(idCounter++);
@@ -180,12 +211,12 @@ unittest
 		`function bla(b){function c(){return 6*a*b}}`
 	);
 	assertVariableRenaming(
-		`function bla(x){function w(a){return x*a*y*b}var y,z}`,
-		`function bla(a){function c(c){return a*c*d*b}var d,e}`
+		`function bla(x){function w(p){return x*p*y*p*b}var y,z}`,
+		`function bla(c){function e(a){return c*a*d*a*b}var d,f}`
 	);
 	assertVariableRenaming(
 		`function bla(c,b,a){function w(p){function k(p){return p*2}return a.a*b*f*e*p}function r(h,i,j){return h*i*j*g*e*d}var f,e,d}`,
-		`function bla(a,b,c){function d(a){function d(a){return a*2}return c.a*b*f*h*a}function e(a,b,c){return a*b*c*g*h*i}var f,h,i}`
+		`function bla(f,b,c){function h(e){function f(a){return a*2}return c.a*b*d*a*e}function i(b,c,d){return b*c*d*g*a*e}var d,a,e}`
 	);
 	assertVariableRenaming(
 		`function s(o,u){var a=c;t(function(e){var n=t[o][e]})}`,
@@ -228,3 +259,41 @@ unittest
 		"function bla() { return 7 }"
 	);
 }
+
+void mergeVariableDeclarationStatements(VariableStatementNode stmt, out Node replacedWith)
+{
+	auto idx = stmt.parent.getIndexOfChild(stmt);
+	if (idx == 0)
+		return;
+	if (stmt.parent.children[idx-1].type != NodeType.VariableStatementNode)
+		return;
+	auto sibling = stmt.parent.children[idx-1].as!VariableStatementNode;
+
+	sibling.addChildren(stmt.children);
+	stmt.detach();
+	replacedWith = sibling;
+}
+@("mergeVariableDeclarationStatements")
+unittest
+{
+	alias assertMergeVars = assertTransformations!(mergeVariableDeclarationStatements);
+	assertMergeVars(
+		`var a; var b;`,
+		`var a, b;`
+	);
+	assertMergeVars(
+		`var a; var b; var c;`,
+		`var a, b, c;`
+	);
+	assertMergeVars(
+		`var a = 1; var b; var c = 3;`,
+		`var a = 1, b, c = 3;`
+	);
+	assertMergeVars(
+		`var a = 1; bla(); var b; var c = 3;`,
+		`var a = 1; bla(); var b, c = 3;`
+	);
+}
+
+
+

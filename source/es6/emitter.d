@@ -368,6 +368,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			}
 			return Guide.None;
 		case NodeType.ContinueStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("continue");
 			return Guide.RequiresSemicolon;
 		case NodeType.BreakStatementNode:

@@ -292,7 +292,7 @@ class Node
 	this(NodeType t)
 	{
 		_type = t;
-		version(chatty) { writeln(t, this); }
+		version(chatty) { writeln(t); }
 	}
 	this(NodeType t, Node n)
 	{
@@ -302,7 +302,7 @@ class Node
 			n.parent = this;
 			children = [n];
 		}
-		version(chatty) { writeln(t, this); }
+		version(chatty) { writeln(t); }
 	}
 	this(NodeType t, Node[] cs)
 	{
@@ -311,7 +311,7 @@ class Node
 		foreach(c;cs)
 			c.parent = this;
 		children = cs;
-		version(chatty) { writeln(t, this); }
+		version(chatty) { writeln(t); }
 	}
 	void toString(scope void delegate(const(char)[]) sink) const
 	{

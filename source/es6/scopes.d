@@ -120,7 +120,6 @@ class Scope
 	}
 	void addIdentifier(Identifier i)
 	{
-		this.linkToDefinition(i);
 		identifiers ~= i;
 	}
 	Variable[] getVariables()
@@ -292,6 +291,12 @@ class Branch
 				return entry.parent.parent; default: assert(0);
 		}
 	}
+}
+void linkIdentifierToDefinitions(Scope scp)
+{
+	scp.identifiers.each!(i => scp.linkToDefinition(i));
+	foreach(s; scp.children)
+		s.linkIdentifierToDefinitions();
 }
 void findGlobals(Scope scp)
 {

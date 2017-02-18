@@ -117,7 +117,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 				static if (is(ReturnType!_fun : void))
 				{
 					if (first) {
-						version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+						version(chatty) { writeln(fullyQualifiedName!_fun); }
 						version(unittest) {	writeln(fullyQualifiedName!_fun); }
 						_fun(scp);
 						version(unittest) {
@@ -125,7 +125,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 						}
 					}
 				} else {
-					version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+					version(chatty) { writeln(fullyQualifiedName!_fun); }
 					version(unittest) {	writeln(fullyQualifiedName!_fun); }
 					if (_fun(scp))
 					{
@@ -157,7 +157,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 						{
 							static if (is(ReturnType!_fun : void))
 							{
-								version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
+								version(chatty) { writeln(fullyQualifiedName!_fun); }
 								version(unittest) {	writeln(fullyQualifiedName!_fun); }
 								_fun(typedNode, replacedWith);
 								version(unittest) {
@@ -168,7 +168,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 								if (typedNode.parent is null)
 									return null;
 							} else {
-								version(chatty) { writeln(fullyQualifiedName!_fun, typedNode); }
+								version(chatty) { writeln(fullyQualifiedName!_fun); }
 								version(unittest) {	writeln(fullyQualifiedName!_fun); }
 								if (_fun(typedNode, replacedWith))
 								{
@@ -193,7 +193,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 					{
 						static if (is(ReturnType!_fun : void))
 						{
-							version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+							version(chatty) { writeln(fullyQualifiedName!_fun); }
 							version(unittest) {	writeln(fullyQualifiedName!_fun); }
 
 							_fun(node, replacedWith);
@@ -205,7 +205,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 							if (node.parent is null)
 								return null;
 						} else {
-							version(chatty) { writeln(fullyQualifiedName!_fun, node); }
+							version(chatty) { writeln(fullyQualifiedName!_fun); }
 							version(unittest) {	writeln(fullyQualifiedName!_fun); }
 							if (_fun(node, replacedWith))
 							{
@@ -230,13 +230,21 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 		Node replacedWith;
 		foreach(c; node.children)
 		{
-			if (!c.startsNewScope)
+			if (c.startsNewScope)
+				continue;
+			if (c.parent is null)
+				continue;
+			replacedWith = transformNodes(c);
+			while(replacedWith !is null && replacedWith !is c)
 			{
-				replacedWith = transformNodes(c);
-				if (replacedWith !is null && replacedWith.parent !is node)
+				if (replacedWith.parent !is node)	
 				{
-					return replacedWith.parent;
+					if (replacedWith.parent is null)
+						return transformNodes(replacedWith);
+					return transformNodes(replacedWith).parent;
 				}
+				c = replacedWith;
+				replacedWith = transformNodes(c);
 			}
 		}
 		replacedWith = node;

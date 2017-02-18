@@ -9,6 +9,7 @@ configuration "application" {
 configuration "chatty" {
 	targetType "executable"
 	versions "chatty"
+	dependency "unit-threaded" version="==0.7.2"
 }
 configuration "unittest" {
 	preBuildCommands "dub run unit-threaded -c gen_ut_main -- -f bin/ut.d"

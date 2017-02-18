@@ -70,26 +70,24 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 		if (isExpression)
 			return false;
 	}
-
-	if (isPartOfConditionalExpr && isConditionalNode)
-		return false;
-
-	if (isPartOfNewExpr || isPartOfCallExpr)
-		return false;
-
-	if (isFunctionExpr)
-		return false;
-
-	if (isCallExpr || isExpression)
-	{
-		if (node.children[0].children.any!(c =>
-			c.type == NodeType.FunctionExpressionNode ||
-			c.type == NodeType.GeneratorExpressionNode ||
-			(c.type == NodeType.ClassDeclarationNode && c.as!(ClassDeclarationNode).name is null)))
-			return false;
-	}
 	auto parent = node.parent;
-	if (isPartOfBinaryExpr)
+	if (isPartOfConditionalExpr && isConditionalNode)
+	{
+		if (!isLeftChild)
+		{
+			replacedWith = node.replaceWith(node.children[0]);
+		} else
+			return false;
+	} else if (isPartOfNewExpr || isPartOfCallExpr)
+		return false;
+	else if (isFunctionExpr)
+		return false;
+	else if ((isCallExpr || isExpression) && node.children[0].children.any!(c =>
+		c.type == NodeType.FunctionExpressionNode ||
+		c.type == NodeType.GeneratorExpressionNode ||
+		(c.type == NodeType.ClassDeclarationNode && c.as!(ClassDeclarationNode).name is null)))
+		return false;
+	else if (isPartOfBinaryExpr)
 	{
 		if (isBinaryExpr)
 		{
@@ -223,6 +221,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 	return true;
 }
 
+@("removeUnnecessaryParenthesis")
 unittest
 {
 	alias assertRemoveParens = assertTransformations!(removeUnnecessaryParenthesis);
@@ -377,7 +376,6 @@ unittest
 		`a && (b = a)`,
 		`a && (b = a)`
 	);
-	writeln("yep!");
   	assertRemoveParens(
   		`var a = (a * b * c) + 6`,
         `var a = a * b * c + 6`
@@ -467,6 +465,18 @@ unittest
 	assertRemoveParens(
 		`a && ( length - 1 ) in obj`,
 		`a&&(length-1)in obj;`
+	);
+	assertRemoveParens(
+		`(a && (d = 5), b) && (g = 5)`,
+		`a && (d = 5), b && (g = 5)`
+	);
+	assertRemoveParens(
+		`a ? b : (c ? d : e);`,
+		`a ? b : c ? d : e;`
+	);
+	assertRemoveParens(
+		`a ? (c ? d : e) : b;`,
+		`a ? c ? d : e : b;`
 	);
 	//assertRemoveParens(
 	//	`(f ? (c ? '+' : '') : '-')`,

@@ -23,6 +23,7 @@ import es6.transforms.conditionals;
 import option;
 import es6.analyse;
 import es6.eval;
+import std.range : retro, enumerate;
 
 version(unittest)
 {
@@ -315,5 +316,72 @@ unittest
 		`var b = !!0`
 	);
 }
+
+void moveStringComparisonToLeftOperand(BinaryExpressionNode binExpr, out Node replacedWith)
+{
+	auto ops = binExpr.getOperators();
+	foreach(idx, op; ops.enumerate)
+	{
+		if (op.operator != ExpressionOperator.StrictEqual && op.operator != ExpressionOperator.StrictNotEqual)
+			continue;
+
+		auto leftOperand = binExpr.children[idx*2];
+		auto rightOperand = binExpr.children[(idx+1)*2];
+
+		if (leftOperand.type != NodeType.StringLiteralNode &&
+			rightOperand.type != NodeType.StringLiteralNode)
+			continue;
+
+		auto leftPrecedence = idx > 0 ? ops[idx-1].operator.getExprOperatorPrecedence() : 0;
+		auto rightPrecedence = idx+1 < ops.length ? ops[idx+1].operator.getExprOperatorPrecedence() : 0;
+
+		auto precedence = op.operator.getExprOperatorPrecedence();
+		if (precedence <= leftPrecedence || precedence < rightPrecedence)
+			continue;
+
+		if (leftOperand.type != NodeType.StringLiteralNode)
+		{
+			binExpr.children[idx*2] = rightOperand;
+			binExpr.children[(idx+1)*2] = leftOperand;
+		}
+		
+		if (op.operator == ExpressionOperator.StrictEqual)
+			op.operator = ExpressionOperator.Equal;
+		else
+			op.operator = ExpressionOperator.NotEqual;
+	}
+}
+
+@("moveStringComparisonToLeftOperand")
+unittest
+{
+	alias assertMoveStringComparison = assertTransformations!(moveStringComparisonToLeftOperand);
+	assertMoveStringComparison(
+		`a === "a"`,
+		`"a" == a`
+	);
+	assertMoveStringComparison(
+		`a !== "a"`,
+		`"a" != a`
+	);
+	assertMoveStringComparison(
+		`b === a !== "a"`,
+		`b === a !== "a"`
+	);
+	assertMoveStringComparison(
+		`a !== "a" === b`,
+		`"a" != a === b`
+	);
+	assertMoveStringComparison(
+		`false === "false" < 1`,
+		`false === "false" < 1`
+	);
+	assertMoveStringComparison(
+		`"abc" < "def" === true`,
+		`"abc" < "def" === true`
+	);
+}
+
+
 
 

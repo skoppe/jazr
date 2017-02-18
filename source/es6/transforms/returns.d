@@ -21,7 +21,8 @@ import es6.nodes;
 import es6.scopes;
 import es6.transforms.conditionals;
 import option;
-import std.algorithm : each;
+import std.algorithm : each, until;
+import std.range : retro;
 import es6.analyse;
 import es6.transforms.expressions;
 
@@ -384,6 +385,8 @@ void combineReturnStatements(Scope scp)
 		auto returnValues = ifStmts.map!((i){
 			if (i.truthPath.type == NodeType.BlockStatementNode)
 				return i.truthPath.children[0].children[0];
+			if (i.truthPath.children.length == 0)
+				return createVoid0Node();
 			return i.truthPath.children[0];
 		}).map!(parenthesizeIfNecessary);
 
@@ -534,5 +537,78 @@ unittest
 	//);
 }
 
+bool moveExpressionsIntoReturn(ReturnStatementNode retStmt, out Node replacedWith)
+{
+	if (retStmt.parent.type != NodeType.BlockStatementNode &&
+		retStmt.parent.type != NodeType.ModuleNode &&
+		retStmt.parent.type != NodeType.FunctionBodyNode)
+		return false;
+	if (retStmt.children.length == 0)
+		return false;
+	auto idx = retStmt.parent.getIndexOfChild(retStmt);
+	if (idx == 0)
+		return false;
+	auto candidates = retStmt.parent.children[0..idx];
+	auto exprs = candidates.retro.until!(c => c.hints.has(Hint.NonExpression)).array;
+	if (exprs.length == 0)
+		return false;
 
+	exprs.each!(expr => expr.detach());
+	auto child = retStmt.children[0];
+	if (child.type != NodeType.ExpressionNode)
+		child.replaceWith(new ExpressionNode([])).addChild(child);
+	child = retStmt.children[0];
+	foreach(expr; exprs)
+		if (expr.type == NodeType.ExpressionNode)
+			child.prependChildren(expr.children);
+		else
+			child.prependChildren([expr]);
+	child.reanalyseHints();
+	return true;
+}
 
+@("moveExpressionsIntoReturn")
+unittest
+{
+	alias assertMoveIntoReturn = assertTransformations!(moveExpressionsIntoReturn);
+	assertMoveIntoReturn(
+		`function foo() { bla(); return; }`,
+		`function foo() { bla(); return; }`
+	);
+	assertMoveIntoReturn(
+		`function foo() { bla(); return 4; }`,
+		`function foo() { return bla(), 4; }`
+	);
+	assertMoveIntoReturn(
+		`function foo() { bla(), hup(); return 4; }`,
+		`function foo() { return bla(), hup(), 4; }`,
+	);
+	assertMoveIntoReturn(
+		`function foo() { bla(); hup(); return 4; }`,
+		`function foo() { return bla(), hup(), 4; }`
+	);
+	assertMoveIntoReturn(
+		`function foo() { bla(), bar(); hup(); return 4; }`,
+		`function foo() { return bla(), bar(), hup(), 4; }`
+	);
+	assertMoveIntoReturn(
+		`function foo() { if(b) kaz(); bla(), bar(); hup(); return 4; }`,
+		`function foo() { if(b) kaz(); return bla(), bar(), hup(), 4; }`,
+	);
+	assertMoveIntoReturn(
+		`function foo() { if(b) kaz(); return 4; }`,
+		`function foo() { if(b) kaz(); return 4; }`,
+	);
+	assertMoveIntoReturn(
+		`function foo() { bla(), hup(); return foo(), 4; }`,
+		`function foo() { return bla(), hup(), foo(), 4; }`,
+	);
+	assertMoveIntoReturn(
+		`function foo() { bla(); hup(); return foo(), 4; }`,
+		`function foo() { return bla(), hup(), foo(), 4; }`,
+	);
+	assertMoveIntoReturn(
+		"function d(a) { b = 3; return p; }",
+		"function d(a) { return b = 3,p }"
+	);
+}

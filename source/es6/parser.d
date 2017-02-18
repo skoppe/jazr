@@ -150,7 +150,7 @@ final class Parser(Source) : Lexer!(Source)
 	Node parseImportDeclaration()
 	{
 		version(chatty) { writeln("parseImportDeclaration"); }
-		assert(token.type == Type.Identifier && token.match == "import");
+		assert(token.matches(Type.Identifier,"import"));
 		scanAndSkipCommentsAndTerminators();
 		Node decl;
 		if (token.type == Type.StringLiteral)
@@ -1594,16 +1594,16 @@ final class Parser(Source) : Lexer!(Source)
 		if (token.type != Type.OpenParenthesis)
 			return error("expected parenthesis as part of DoWhileStatement");
 		scanToken(attributes.toGoal);
-		Node[] children = [parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+		Node expr = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of DoWhileStatement");
 
 		scanToken(attributes.toGoal);
-		children ~= parseStatement(attributes);
+		Node stmt = parseStatement(attributes);
 
 		if (token.type == Type.Semicolon)
 			scanToken(attributes.toGoal);
-		return new WhileStatementNode(children);
+		return new WhileStatementNode([expr,stmt]);
 	}
 	Node parseForStatement(int attributes = 0)
 	{

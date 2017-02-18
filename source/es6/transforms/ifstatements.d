@@ -24,6 +24,9 @@ import es6.transforms.conditionals;
 import option;
 import es6.analyse;
 import es6.eval;
+import std.range : retro;
+import std.algorithm : until;
+import std.array : array;
 
 version(unittest)
 {
@@ -481,3 +484,80 @@ unittest
 		`bla(),(hup());a();`
 	);
 }
+
+bool moveExpressionsIntoIfCond(IfStatementNode ifStmt, out Node replacedWith)
+{
+	if (ifStmt.parent.type != NodeType.BlockStatementNode &&
+		ifStmt.parent.type != NodeType.ModuleNode &&
+		ifStmt.parent.type != NodeType.FunctionBodyNode)
+		return false;
+	auto idx = ifStmt.parent.getIndexOfChild(ifStmt);
+	if (idx == 0)
+		return false;
+	auto candidates = ifStmt.parent.children[0..idx];
+	auto exprs = candidates.retro.until!(c => c.hints.has(Hint.NonExpression)).array;
+	if (exprs.length == 0)
+		return false;
+	exprs.each!(expr => expr.detach());
+	auto cond = ifStmt.condition;
+	if (cond.type != NodeType.ExpressionNode)
+		cond.replaceWith(new ExpressionNode([])).addChild(cond);
+	cond = ifStmt.condition;
+	foreach(expr; exprs)
+		if (expr.type == NodeType.ExpressionNode)
+			cond.prependChildren(expr.children);
+		else
+			cond.prependChildren([expr]);
+	cond.reanalyseHints();
+	ifStmt.parent.reanalyseHints();
+	return true;
+}
+
+@("moveExpressionsIntoIfCond")
+unittest
+{
+	alias assertMoveIntoIf = assertTransformations!(moveExpressionsIntoIfCond);
+	assertMoveIntoIf(
+		`bla(); if(a) foo();`,
+		`if(bla(), a) foo();`
+	);
+	assertMoveIntoIf(
+		`b = 6; if(a) foo();`,
+		`if(b = 6, a) foo();`
+	);
+	assertMoveIntoIf(
+		`bla(), hup(); if(a) foo();`,
+		`if(bla(), hup(), a) foo();`
+	);
+	assertMoveIntoIf(
+		`bla(); hup(); if(a) foo();`,
+		`if(bla(), hup(), a) foo();`
+	);
+	assertMoveIntoIf(
+		`bla(), bar(); hup(); if(a) foo();`,
+		`if(bla(), bar(), hup(), a) foo();`
+	);
+	assertMoveIntoIf(
+		`if(b) kaz(); bla(), bar(); hup(); if(a) foo();`,
+		`if(b) kaz(); if(bla(), bar(), hup(), a) foo();`
+	);
+	assertMoveIntoIf(
+		`if(b) kaz(); if(a) foo();`,
+		`if(b) kaz(); if(a) foo();`
+	);
+	assertMoveIntoIf(
+		`bla(), hup(); if(a) foo(); bla(), hup(); if(a) foo();`,
+		`if(bla(), hup(), a) foo(); if(bla(), hup(), a) foo();`
+	);
+	assertMoveIntoIf(
+		`bla(); hup(); if(a, b) foo();`,
+		`if(bla(), hup(), a, b) foo();`
+	);
+	assertMoveIntoIf(
+		`bla(), hup(); if(a, b) foo();`,
+		`if(bla(), hup(), a, b) foo();`
+	);
+}
+
+
+

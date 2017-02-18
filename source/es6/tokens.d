@@ -95,3 +95,10 @@ struct Token
 	Type type;
 	string match;
 }
+
+bool matches(Token tok, Type t) {
+	return tok.type == t;
+}
+bool matches(Token tok, Type t, string m) {
+	return tok.type == t && tok.match == m;
+}
