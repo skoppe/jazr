@@ -693,6 +693,7 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 		int hints = Hint.None;
 		foreach(idx, n; ns)
 		{
+			assert(n !is null);
 			hints |= (n.getParentHintMask() & analyse(n,s,b));
 		}
 		return hints;
