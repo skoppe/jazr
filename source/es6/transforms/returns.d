@@ -20,11 +20,12 @@ module es6.transforms.returns;
 import es6.nodes;
 import es6.scopes;
 import es6.transforms.conditionals;
-import option;
-import std.algorithm : each, until;
-import std.range : retro;
 import es6.analyse;
 import es6.transforms.expressions;
+import option;
+import std.algorithm : each, until, find, countUntil;
+import std.range : retro;
+import std.array : array;
 
 version(unittest)
 {
@@ -287,7 +288,7 @@ unittest
 
 Node createVoid0Node()
 {
-	return new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Void)],new DecimalLiteralNode("0"));
+	return new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Void)],new DecimalLiteralNode(cast(const(ubyte)[])"0"));
 }
 
 void combineReturnStatements(Scope scp)

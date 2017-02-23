@@ -702,6 +702,10 @@ unittest
 	//	`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } for (var i in p) k = p[i]; if (c) return ret + ' ' + markupForID + '>'; if (k) return 77; }`,
 	//	`function abc() { var propKey, i; for(propKey in props){ k = props[ propKey ] }; if (b) { return ret + '>' } else { for(i in p)k = p[ i ]; return c ? ret + ' ' + markupForID + '>' : k ? 77 : void 0 } }`
 	//);
+	//assertMinifier(
+	//	`function t(){c.width=w=1920;π=Math.PI/2;λ=0;r=w/4;for(φ=-π;φ<π;φ+=1/r){λ+=.1;x.lineTo(C(φ)*S(λ-t)*r+w/2,(C(t)*S(φ)-S(t)*C(φ)*C(λ-t))*r+r)}x.stroke()}`,
+	//	`function t(){c.width=w=1920;π=Math.PI/2;λ=0;r=w/4;for(φ=-π;φ<π;φ+=1/r){λ+=.1;x.lineTo(C(φ)*S(λ-t)*r+w/2,(C(t)*S(φ)-S(t)*C(φ)*C(λ-t))*r+r)}x.stroke()}`
+	//);
 	assertMinifier(
 		`(function b(a,b,c){return 7})({1:[function(_dereq_,module,exports){ somethingSomething() }]})`,
 		`(function b(){ return 7 })({ 1: [ function (){ somethingSomething() } ] })`

@@ -17,6 +17,8 @@
  */
 module es6.tokens;
 
+@safe pure:
+
 enum Type {
 	Identifier,
 	StringLiteral,
@@ -93,12 +95,33 @@ enum Type {
 struct Token
 {
 	Type type;
-	string match;
+	const (ubyte)[] match;
+	this(Type type)
+	{
+		this.type = type;
+	}
+	this(Type type, string match)
+	{
+		this(type, cast(const(ubyte)[])match);
+	}
+	this(Type type, const (ubyte)[] match)
+	{
+		this.type = type;
+		this.match = cast(const(ubyte)[])match;
+	}
+	string toString()
+	{
+		import std.format : format;
+		return format("Token(%s,%s)",type,cast(const(char)[])match);
+	}
 }
 
 bool matches(Token tok, Type t) {
 	return tok.type == t;
 }
-bool matches(Token tok, Type t, string m) {
+bool matches(Token tok, Type t, const (ubyte)[] m) {
 	return tok.type == t && tok.match == m;
+}
+bool matches(Token tok, Type t, string m) {
+	return tok.type == t && tok.match == cast(const(ubyte)[])m;
 }

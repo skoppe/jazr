@@ -25,7 +25,7 @@ import option;
 import es6.analyse;
 import es6.eval;
 import std.range : retro;
-import std.algorithm : until;
+import std.algorithm : until, each;
 import std.array : array;
 
 version(unittest)

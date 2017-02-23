@@ -17,10 +17,19 @@
  */
 module es6.lexer;
 
-import std.range : empty, front, popFront, save, take, drop;
-import std.array : Appender, appender;
-import es6.tokens;
+@safe:
 
+import std.range : empty, front, popFront, save, take, drop, ElementType;
+import std.array : Appender, appender;
+import std.traits : Unqual;
+import es6.tokens;
+import core.cpuid : sse42;
+
+version (D_InlineAsm_X86_64)
+{
+    version (Windows) {}
+    else version = iasm64NotWindows;
+}
 version (unittest)
 {
 	import unit_threaded;
@@ -90,7 +99,7 @@ enum Keyword {
 };
 
 
-struct Keywords
+pure struct Keywords
 {
 
 private:
@@ -109,7 +118,7 @@ private:
 
     static const Keyword[128] _map = [Keyword.Unknown, Keyword.Static, Keyword.Unknown, Keyword.True, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Await, Keyword.Enum, Keyword.Unknown, Keyword.Instanceof, Keyword.Unknown, Keyword.Unknown, Keyword.Import, Keyword.Unknown, Keyword.Unknown, Keyword.Null, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.New, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Throw, Keyword.Unknown, Keyword.Export, Keyword.Unknown, Keyword.Unknown, Keyword.False, Keyword.This, Keyword.Continue, Keyword.Unknown, Keyword.For, Keyword.With, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Extends, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.If, Keyword.Unknown, Keyword.Return, Keyword.Unknown, Keyword.Function, Keyword.Unknown, Keyword.Catch, Keyword.Var, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.While, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Switch, Keyword.Void, Keyword.Unknown, Keyword.Unknown, Keyword.Const, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Finally, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Try, Keyword.Unknown, Keyword.Set, Keyword.Typeof, Keyword.Let, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Get, Keyword.Unknown, Keyword.Case, Keyword.Delete, Keyword.In, Keyword.Super, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Else, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Break, Keyword.Unknown, Keyword.Unknown, Keyword.Yield, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Default, Keyword.Class, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Unknown, Keyword.Debugger, Keyword.Unknown, Keyword.Unknown, Keyword.Do];
     
-    static ushort hash(const char[] word) nothrow pure @safe @nogc
+    static ushort hash(const ubyte[] word) nothrow pure @safe @nogc
     {
         ushort result;
         foreach(i; 0..word.length)
@@ -123,7 +132,7 @@ public:
 
     static string opBinaryRight(string op: "in")(const string word)
     {
-        const ushort h = hash(word);
+        const ushort h = hash(cast(const(ubyte)[])word);
         final switch(_filled[h])
         {
             case false: return word;
@@ -133,7 +142,7 @@ public:
             	return _words[h];
         }
     }
-    static Keyword get()(const string word)
+    static Keyword get()(const(ubyte)[] word)
     {
         const ushort h = hash(word);
         if (!_filled[h])
@@ -145,7 +154,7 @@ public:
     }
 }
 
-bool isReservedKeyword(string keyword)
+bool isReservedKeyword(const(ubyte)[] keyword)
 {
 	if (keyword.length < 2 || keyword.length > 10)
 		return false;
@@ -165,6 +174,23 @@ bool isWhitespace(Char)(Char c)
 	if (c < '\u02B0')
 		return false;
 	return (c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
+}
+size_t getWhiteSpaceLength(Range)(Range r, size_t idx = 0)
+{
+	if (r[idx] < 0xc0) // 1 byte code point
+	{
+		return (r[idx] == 0x09 || r[idx] == 0x0B || r[idx] == 0x0C || r[idx] == 0x20) ? 1 : 0;
+	} else if (r[idx] < 0xe0) // 2 byte code point
+	{
+		return (r.decodeUnicodeCodePoint!(2)(idx) == 0xA0) ? 2 : 0;
+	} else if (r[idx] < 0xf0) // 3 byte code point
+	{
+		auto hex = r.decodeUnicodeCodePoint!(3)(idx);
+		if (hex > 0xfeff || hex < 0x2b0)
+			return 0;
+		return (hex <= 0x2ff || hex == 0xfeff) ? 3 : 0;
+	}
+	return 0;
 }
 @("isWhitespace")
 unittest
@@ -198,41 +224,214 @@ unittest
 	r.popNextIf('b').shouldBeFalse();
 	r.shouldEqual("abc");
 }
-auto isLineTerminator(Char)(Char s)
+//auto isLineTerminator(Char)(Char s)
+//{
+//	return (s == 0x0a || s == 0x0d);// || s == '\u2028' || s == '\u2029');
+//}
+size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0)
 {
-	return (s == '\u000A' || s == '\u000D' || s == '\u2028' || s == '\u2029');
+	if (r[idx] <= 0x7f)
+	{
+		if (r[idx] == 0x0d)
+			return r[idx+1] == 0x0a ? 2 : 1;
+		return r[idx] == 0x0a ? 1 : 0;
+	}
+	if (r[idx] >= 0xf0) // 4 byte unicode
+	{
+		return 0;
+	} else if (r[idx] >= 0xe0)
+	{
+		auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
+		return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
+	} else if (r[idx] >= 0xc0) // 2 byte unicode
+	{
+		return 0;
+	}
+	assert(0);
 }
-@("isLineTerminator")
-unittest
+auto getLineTerminatorUnicodeLength(Range)(Range r)
 {
-	import std.algorithm : all;
-	"\u2028\u2029\u000A\u000D".all!(isLineTerminator).shouldBeTrue();
+	if (r[0] < 0xe0 && r[0] >= 0xf0)
+		return 0;
+	auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
+	return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
 }
-auto isStartIdentifier(Char)(Char chr)
+auto getRegexLength(Range)(Range r)
 {
-	return chr == '$' || chr == '_' || (chr >= '\u0041' && chr <= '\u005a') || (chr >= '\u0061' && chr <= '\u007a') || chr == '\u00aa' ||
-		chr == '\u00b5' || chr == '\u00ba' || (chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') || chr == '\u2118' ||
-		chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c');
+	size_t idx = 1;
+	bool inOneOfExpr = false;
+	if (r[idx] == '*' || r[idx] == '/')
+		return 0;
+	while (true)
+	{
+		switch (r[idx])
+		{
+			case '[':
+				inOneOfExpr = true;
+				idx++;
+				break;
+			case ']':
+				inOneOfExpr = false;
+				idx++;
+				break;
+			case '\\':
+				idx++;
+				auto len = r.getLineTerminatorLength(idx);
+				if (len != 0)
+					return 0;
+				if (r[idx] == 0)
+					return 0;
+				idx += r[idx..$].getUnicodeLength();
+				break;
+			case '/':
+				idx++;
+				if (!inOneOfExpr)
+				{
+					while (true)
+					{
+						auto len = r[idx..$].getTailIdentifierLength();
+						if (len == 0)
+							return idx;
+						idx += len;
+					}
+				}
+				break;
+			default:
+				auto len = r[idx..$].getLineTerminatorLength();
+				if (len != 0)
+					return 0;
+				if (r[idx] == 0)
+					return 0;
+				idx += r[idx..$].getUnicodeLength();
+				break;
+		}
+	}
 }
-auto isTailIdentifier(Char)(Char chr)
+//@("isLineTerminator")
+//unittest
+//{
+//	import std.algorithm : all;
+//	"\u2028\u2029\u000A\u000D".all!(isLineTerminator).shouldBeTrue();
+//}
+//auto isStartIdentifier(Char)(Char chr)
+//{
+//	return chr == '$' || chr == '_' || (chr >= '\u0041' && chr <= '\u005a') || (chr >= '\u0061' && chr <= '\u007a') || chr == '\u00aa' ||
+//		chr == '\u00b5' || chr == '\u00ba' || (chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') || chr == '\u2118' ||
+//		chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c');
+//}
+// returns the length of bytes of a start identifer in the range (if any)
+// TODO: there are more valid start identifiers... (look in old es6-grammer source, or in acorn)
+auto getStartIdentifierLength(Range)(Range r)
+	if (is (ElementType!Range : ubyte))
 {
-	return 
-		(chr >= '\u0061' && chr <= '\u007a') || (chr >= '\u0041' && chr <= '\u005a') ||  (chr >= '\u0030' && chr <= '\u0039') || 
-		(!isWhitespace(chr) && (
-			chr == '$' || chr == '_' || chr == '\u005f' ||
-			(chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') ||
-			chr == '\u2118' || chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c') || chr == '\u00aa' || 
-			chr == '\u00b5' || chr == '\u00b7' || chr == '\u00ba' ||
-			chr == '\u00b7' || chr == '\u0387' || (chr >= '\u1369' && chr <= '\u1371') || chr == '\u19da' || chr == '\u200C' ||
-			chr == '\u200D')
-		);
+	ubyte first = r.front();
+	if (first <= 0x7f)
+		return (first == '$' || first == '_' || (first >= '\x41' && first <= '\x5a') || (first >= '\x61' && first <= '\x7a')) ? 1 : 0;
+	if (first >= 0xf0) // 4 byte unicode
+	{
+		return 0;
+	} else if (first >= 0xe0)
+	{
+		auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
+		return (hex == 0x2118 || hex == 0x212e || hex == 0x309b || hex == 0x309c) ? 3 : 0;
+	} else if (first >= 0xc0)
+	{
+		auto hex = r.decodeUnicodeCodePoint!2;	// 2 byte unicode
+		return (hex == 0xaa || hex == 0xb5 || hex == 0xba || (hex >= 0xc0 && hex <= 0xd6) || (hex >= 0xd8 && hex <= 0xf6)) ? 2 : 0;
+	}
+	return 0;
 }
-auto coerceToSingleQuotedString(string str)
+
+size_t decodeUnicodeCodePoint(size_t length, Range)(Range r, size_t idx = 0)
+{
+	static if (length == 2)
+	{
+		return ((r[idx] & 0x1f) << 6) | (r[idx+1] & 0x3f);
+	} else static if (length == 3)
+	{
+		return ((r[idx] & 0x0f) << 12) | ((r[idx+1] & 0x3f) << 6) | (r[idx+2] & 0x3f);
+	} else static if (length == 4)
+	{
+		return ((r[idx] & 0x07) << 18) | ((r[idx+1] & 0x3f) << 12) | ((r[idx+2] & 0x3f) << 6) | (r[idx+3] & 0x3f);
+	}
+	static assert("Invalid unicode code point byte length");
+}
+
+@("decodeUnicodeCodePoint")
+unittest {
+	assert([0xC2,0xA2].decodeUnicodeCodePoint!(2) == 0xA2);
+	assert([0xE3,0x82,0x9B].decodeUnicodeCodePoint!(3) == 0x309b);
+	assert([0xE2,0x82,0xAC].decodeUnicodeCodePoint!(3) == 0x20AC);
+	assert([0xF0,0x90,0x8D,0x88].decodeUnicodeCodePoint!(4) == 0x10348);
+}
+size_t getUnicodeLength(Range)(Range r, size_t idx = 0)
+{
+	if (r[idx] < 0xc0)
+		return 1;
+	if (r[idx] < 0xe0)
+		return 2;
+	if (r[idx] < 0xf0)
+		return 3;
+	return 4;
+}
+
+template unicodeRepresentation(uint i) {
+	static if (i < 0x800) {
+		enum unicodeRepresentation = cast(ubyte[])[0xc0 | ((i >> 6) & 0x1f), 0x80 | (i & 0x3f)];
+	} else static if (i < 0x10000) {
+		enum unicodeRepresentation = cast(ubyte[])[0xe0 | ((i >> 12) & 0x0f), 0x80 | ((i >> 6) & 0x3f), 0x80 | (i & 0x3f)];
+	} else static if (i < 0x110000) {
+		enum unicodeRepresentation = cast(ubyte[])[0xf0 | ((i >> 18) & 0x07), 0x80 | ((i >> 12) & 0x3f), 0x80 | ((i >> 6) & 0x3f), 0x80 | (i & 0x3f)];
+	} else {
+		static assert("invalid unicode code point");
+	}
+}
+//auto isTailIdentifier(Char)(Char chr)
+//{
+//	return 
+//		(chr >= '\u0061' && chr <= '\u007a') || (chr >= '\u0041' && chr <= '\u005a') ||  (chr >= '\u0030' && chr <= '\u0039') || 
+//		(!isWhitespace(chr) && (
+//			chr == '$' || chr == '_' || chr == '\u005f' ||
+//			(chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') ||
+//			chr == '\u2118' || chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c') || chr == '\u00aa' || 
+//			chr == '\u00b5' || chr == '\u00b7' || chr == '\u00ba' ||
+//			chr == '\u00b7' || chr == '\u0387' || (chr >= '\u1369' && chr <= '\u1371') || chr == '\u19da' || chr == '\u200C' ||
+//			chr == '\u200D')
+//		);
+//}
+
+auto getTailIdentifierLength(Range)(Range r, size_t idx = 0)
+{
+	if (r[idx] < 0x80)
+		return ((r[idx] >= 0x61 && r[idx] <= 0x7a) || (r[idx] >= 0x41 && r[idx] <= 0x5a) || (r[idx] >= 0x30 && r[idx] <= 0x39) || r[idx] == '$' || r[idx] == '_' || r[idx] == 0x5f) ? 1 : 0;
+	if (r[idx] >= 0xf0) // 4 byte unicode
+	{
+		return 0;
+	} else if (r[idx] >= 0xe0)
+	{
+		auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
+		return ((hex >= 0x1369 && hex <= 0x1371) || hex == 0x19da || hex == 0x200C || hex == 0x200D || hex == 0x2118 || hex == 0x212e || hex == 0x309b || hex == 0x309c) ? 3 : 0;
+	} else if (r[idx] >= 0xc0)
+	{
+		auto hex = r.decodeUnicodeCodePoint!2;	// 2 byte unicode
+		return hex == 0xaa || hex == 0xb5 || hex == 0xb7 || hex == 0xba || (hex >= 0xc0 && hex <= 0xd6) || (hex >= 0xd8 && hex <= 0xf6) || hex == 0x387;
+	}
+	assert(0);
+}
+//to enable sse4.2 instructions and to get rid of auto-decoding we need to convert everything to a uchar type
+//instead of returning whether some char is a tail/start/whitespace/line we just ask how many ubyte the
+//whitespace/line/start/tail takes and return 0 if there is none
+//this way we combat the fact that stuff sometimes uses up 2, 3 or 4 ubyte\'s and returning a bool aint enough
+//on the other hand we might as well start at the multi line comments and incorperate the sse4.2 instructions there
+//and subsequently expand to other areas, and see how we need to adjust the is-line/tail/start/whitespace functions
+//as we go. (for one, isWhitespace is only being used in popWhitespace, which is easy to sse4.2-ize)
+
+auto coerceToSingleQuotedString(const ubyte[] str)
 {
 	import std.algorithm : max,min;
 	if (str.length == 0)
 		return str;
-	auto sink = appender!string;
+	auto sink = appender!(ubyte[]);
 	sink.reserve(str.length+max(2,min(str.length / 4, 5)));
 
 	bool escape = false;
@@ -257,6 +456,10 @@ auto coerceToSingleQuotedString(string str)
 		sink.put('\\');
 	return sink.data;
 }
+auto coerceToSingleQuotedString(string str)
+{
+	return cast(const(char)[])coerceToSingleQuotedString(cast(const(ubyte)[])str);
+}
 @("coerceToSingleQuotedString")
 unittest
 {
@@ -268,11 +471,65 @@ unittest
 	assert(`a \xaa\xbb`.coerceToSingleQuotedString == `a \xaa\xbb`);
 	assert(`\\`.coerceToSingleQuotedString == `\\`);
 }
-class Lexer(Source)
+ulong rangeMatch(bool invert, chars...)(const ubyte*) pure nothrow @trusted @nogc
+{
+    static assert (chars.length % 2 == 0);
+    enum constant = ByteCombine!chars;
+    static if (invert)
+        enum rangeMatchFlags = 0b0000_0100;
+    else
+        enum rangeMatchFlags = 0b0001_0100;
+    enum charsLength = chars.length;
+    asm pure nothrow @nogc
+    {
+        naked;
+        movdqu XMM1, [RDI];
+        mov R10, constant;
+        movq XMM2, R10;
+        mov RAX, charsLength;
+        mov RDX, 16;
+        pcmpestri XMM2, XMM1, rangeMatchFlags;
+        mov RAX, RCX;
+        ret;
+    }
+}
+ulong skip(bool matching, chars...)(const ubyte*) pure nothrow
+    @trusted @nogc if (chars.length <= 8)
+{
+    enum constant = ByteCombine!chars;
+    enum charsLength = chars.length;
+    static if (matching)
+        enum flags = 0b0001_0000;
+    else
+        enum flags = 0b0000_0000;
+    asm pure nothrow @nogc
+    {
+        naked;
+        movdqu XMM1, [RDI];
+        mov R10, constant;
+        movq XMM2, R10;
+        mov RAX, charsLength;
+        mov RDX, 16;
+        pcmpestri XMM2, XMM1, flags;
+        mov RAX, RCX;
+        ret;
+    }
+}
+template ByteCombine(c...)
+{
+    static assert (c.length <= 8);
+    static if (c.length > 1)
+        enum ulong ByteCombine = c[0] | (ByteCombine!(c[1..$]) << 8);
+    else
+        enum ulong ByteCombine = c[0];
+}
+// TODO: in general whenever we have an invalid char (e.g. an a-z in a decimalliteral), we need to skip all chars until we hit a separator (whitespace or punctuation)
+struct Lexer
 {
 	private
 	{
 		Appender!(State[]) lexerState;
+		bool haveSSE42;
 	}
 	State lexState;
 	Token token;
@@ -280,8 +537,8 @@ class Lexer(Source)
 	size_t column;
 	private size_t tokenLength;
 	private bool newLine;
-	Source s;
-	void pushState(State state)
+	const (ubyte)[] s;
+	void pushState(State state) pure
 	{
 		lexerState.put(lexState);
 		lexState = state;
@@ -294,7 +551,7 @@ class Lexer(Source)
 	}
 	Lexer save()
 	{
-		auto l = new Lexer!(Source)(s);
+		auto l = Lexer(s);
 		l.lexState = this.lexState;
 		l.token = this.token;
 		l.line = this.line;
@@ -304,10 +561,11 @@ class Lexer(Source)
 		l.lexerState = appender!(State[])(this.lexerState.data.dup());
 		return l;
 	}
-	this(Source source)
+	this(const (ubyte)[] source) pure
 	{
 		s = source;
 		pushState(s.empty ? State.EndOfFile : State.TokensRemaining);
+		haveSSE42 = sse42();
 	}
 	version(unittest)
 	{
@@ -344,7 +602,16 @@ class Lexer(Source)
 			return token;
 		}
 	}
-		
+	private auto createTokenAndAdvance(Type tokenType, size_t len, const (ubyte)[] match)
+	{
+		s = s[len..$];
+		return Token(tokenType, match);
+	}
+	private auto createTokenAndAdvance(Type tokenType, size_t len, string match)
+	{
+		s = s[len..$];
+		return Token(tokenType, match);
+	}
 	Token lexUnicodeEscapeSequence(size_t idx)
 	{
 		import std.format : format;
@@ -353,7 +620,7 @@ class Lexer(Source)
 			auto chr = s[idx+i];
 			if ((chr <= '0' || chr >= '9') && (chr <= 'a' && chr >= 'z') && (chr <= 'A' && chr >= 'Z'))
 			{
-				if (chr == '\u0000')
+				if (chr == 0)
 					return Token(Type.Error,"Found eof before finishing parsing UnicodeEscapeSequence");
 				// TODO: if chr is lineterminator (as well as the \r\n one) we need to reset column and line++
 				return Token(Type.Error,format("Invalid hexdigit %s for UnicodeEscapeSequence",chr));
@@ -364,207 +631,183 @@ class Lexer(Source)
 	Token lexStartIdentifier(ref size_t idx)
 	{
 		import std.format : format;
-		dchar chr = s[idx];
-		tokenLength++;
-		idx++;
-		if (chr.isStartIdentifier)
+		auto chr = s[idx];
+		auto len = s.getStartIdentifierLength();
+		if (len > 0)
+		{
+			tokenLength ++;
+			idx += len;
 			return Token(Type.StartIdentifier);
+		}
 		if (chr == '\\')
 		{
-			chr = s[idx];
+			auto chr2 = s[idx];
 			idx++;
 			tokenLength++;
-			if (chr != 'u')
+			if (chr2 != 'u')
 			{
-				if (chr == '\u0000')
+				if (chr2 == 0)
 					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
-				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr2));
 			}
 			idx += 4;
 			tokenLength += 4;
 			return lexUnicodeEscapeSequence(idx-4);
 		}
+		idx++;
 		return Token(Type.Error,format("Invalid character %s to start identifier",chr));
 	}
-	Token lexIdentifier()
+	Token lexIdentifier() @trusted
 	{
 		import std.format : format;
 		size_t idx = 0;
-		auto t = lexStartIdentifier(idx);
-		if (t.type == Type.Error)
+		version (iasm64NotWindows)
 		{
-			s = s[idx..$];
-			return t;
+			//if (haveSSE42)
+			//{
+				immutable ulong i = rangeMatch!(false, 'a', 'z', 'A', 'Z', '_', '_', '$', '$')(s.ptr + idx);
+				if (i > 0)
+				{
+					//import std.stdio;
+					//writeln(cast(const(char)[])s[idx..idx+10],":",i,",");
+					idx += i;
+					tokenLength += i;
+				} else
+				{
+					auto t = lexStartIdentifier(idx);
+					if (t.type == Type.Error)
+					{
+						s = s[idx..$];
+						return t;
+					}
+				}
+			//}
+		} else {
+			auto t = lexStartIdentifier(idx);
+			if (t.type == Type.Error)
+			{
+				s = s[idx..$];
+				return t;
+			}			
 		}
 		for(;;)
 		{
-			dchar chr = s[idx++];
-			if (chr == '\\')
+			auto len = s.getTailIdentifierLength(idx);
+			if (len == 0)
 			{
-				tokenLength++;
-				chr = s[idx++];
-				tokenLength++;
-				if (chr != 'u')
+				if (s[idx] == '\\')
 				{
+					idx++;
+					tokenLength++;
+					ubyte chr = s[idx++];
+					tokenLength++;
+					if (chr != 'u')
+					{
+						s = s[idx..$];
+						if (chr == 0)
+							return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
+						return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+					}
+					// TODO: when lexUnicodeEscapeSequence fails midway, we have already advanced idx and tokenLength by 4...
+					idx += 4;
+					tokenLength += 4;
+					auto token = lexUnicodeEscapeSequence(idx-4);
+					if (token.type == Type.Error)
+					{
+						s = s[idx..$];
+						return token;
+					}
+				} else {
+					auto tok = Token(Type.Identifier,s[0..idx]);
 					s = s[idx..$];
-					if (chr == '\u0000')
-						return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
-					return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+					return tok;
 				}
-				// TODO: when lexUnicodeEscapeSequence fails midway, we have already advanced idx and tokenLength by 4...
-				idx += 4;
-				tokenLength += 4;
-				auto token = lexUnicodeEscapeSequence(idx-4);
-				if (token.type == Type.Error)
-				{
-					s = s[idx..$];
-					return token;
-				}
-			} else if (!chr.isTailIdentifier)
+			} else 
 			{
-				auto tok = Token(Type.Identifier,s[0..idx-1]);
-				s = s[idx-1..$];
-				return tok;
-			} else
-				tokenLength++;
+				idx += len;
+				tokenLength ++;
+			}
 		}
 	}
 	void popWhitespace()
 	{
-		while (s.front.isWhitespace)
+		size_t idx = 0;
+		for (;;)
 		{
-			column++;
-			s.popFront();
+			auto len = s.getWhiteSpaceLength(idx);
+			if (len == 0)
+				break;
+			idx += len;
+			column += 1;
 		}
+		s = s[idx..$];
 	}
+	// TODO: test with nested [ or ]
 	auto lookAheadRegex()
 	{
-		import std.array : appender;
-		auto str = appender!string;
-		auto cpy = s.save();
-		bool inOneOfExpr = false;
-		str.put('/');
-		cpy.popFront();
-		auto incr = 1;
-		if (cpy.front == '*' || cpy.front == '/')
-			return "";
-		while (true)
-		{
-			auto chr = cpy.next();
-			if (chr.isLineTerminator)
-				return "";
-			if (chr == '\u0000')
-				return "";
-			incr++;
-			if (chr == '[')
-				inOneOfExpr = true;
-			else if (chr == ']')
-				inOneOfExpr = false;
-			if (chr == '\\')
-			{
-				str.put(chr);
-				chr = cpy.next;
-				incr++;
-				if (chr.isLineTerminator)
-					return "";
-				if (chr == '\u0000')
-					return "";
-				str.put(chr);
-			} else if (!inOneOfExpr && chr == '/')
-			{
-				str.put(chr);
-				while (true)
-				{
-					chr = cpy.front();
-					if (chr.isTailIdentifier)
-					{
-						str.put(chr);
-						cpy.popFront();
-						incr++;
-					} else if (chr == '\u0000')
-						break;
-					else
-						break;
-				}
-				tokenLength += incr;
-				s = s.drop(incr);
-				return str.data;
-			} else
-				str.put(chr);
-		}
+		return s.getRegexLength();
 	}
 	Token lexString()
 	{
-		import std.array : appender;
 		auto type = s.front();	// either " or '
-		s.popFront();
-		tokenLength++;
-		auto str = appender!string;
+		size_t idx = 1;
 		while (true)
 		{
-			auto chr = s.front();
-			tokenLength++;
-			if (chr == type)
+			// TODO: lineterminators are not allowed!
+			auto len = s.getUnicodeLength(idx);
+			switch (len)
 			{
-				s.popFront();
-				if (type == '"')
-					return Token(Type.StringLiteral,str.data.coerceToSingleQuotedString);
-				return Token(Type.StringLiteral,str.data);
-			}
-			switch (chr)
-			{
-				case '\\':
-					s.popFront();
-					chr = s.front();
-					if (chr == '\u0000')
-						goto eof;
-					if (chr != type)
-						str.put('\\');
-					s.popFront();
-					tokenLength++;
-					str.put(chr);
-					if (chr == '\x0D' && s.popNextIf('\x0A'))
+				case 1:
+					ubyte chr = s[idx++];
+					column++;
+					if (chr == type)
 					{
-						newLine=true;
-						str.put('\x0A');
+						if (type == '"')
+							return createTokenAndAdvance(Type.StringLiteral,idx,s[1..idx-1].coerceToSingleQuotedString);
+						return createTokenAndAdvance(Type.StringLiteral,idx,s[1..idx-1]);
+					}
+					switch (chr)
+					{
+						case '\\':
+							if (s[idx] == 0)
+								goto eof;
+							idx += s.getUnicodeLength(idx);
+							break;
+						case 0:
+							goto eof;
+						default:
+							break;
 					}
 					break;
-				case '\u0000':
-					goto eof;
 				default:
-					s.popFront();
-					str.put(chr);
+					idx += len;
 					break;
 			}
 		}
-		eof: return Token(Type.Error,"Invalid eof while lexing string");
+		eof: return createTokenAndAdvance(Type.Error,idx,"Invalid eof while lexing string");
 	}
 	Token lexBaseLiteral(int base, alias TokenType)(bool isFloat = false)
 	{
 		static assert(base >= 1 && base <= 16,"Can only lex base 1..16 NumericLiterals");
 		import std.array : appender;
 		import std.format : format;
-		auto str = appender!string;
+		size_t idx = 0;
 		bool fraction = false;
 		bool exponent = false;
 		bool expectingNumbers = true;
 		while (true)
 		{
-			auto chr = s.front();
+			ubyte chr = s[idx];
 			if (chr == '.' && isFloat)
 			{
 				if (fraction)
-					return Token(TokenType,str.data);
+					return createTokenAndAdvance(TokenType,idx,s[0..idx]);
 				if (exponent)
-					return Token(TokenType,str.data);
-				str.put(chr);
-				tokenLength++;
-				s.popFront();
+					return createTokenAndAdvance(TokenType,idx,s[0..idx]);
+				idx++;
 				fraction = true;
 				continue;
 			}
-			if (!chr.isTailIdentifier)
-				break;
 
 			switch(chr)
 			{
@@ -573,11 +816,9 @@ class Lexer(Source)
 					static if (base < 10)
 					{
 						if (digit >= base)
-							return Token(Type.Error,format("Invalid digit %s in base %s NumericLiteral",chr,base));
+							return createTokenAndAdvance(Type.Error,idx,format("Invalid digit %s in base %s NumericLiteral",cast(char)chr,base));
 					}
-					str.put(chr);
-					tokenLength++;
-					s.popFront();
+					idx++;
 					expectingNumbers = false;
 					break;
 				case 'A': .. case 'F':
@@ -591,45 +832,41 @@ class Lexer(Source)
 						static if (base != 16)
 						{
 							if (digit >= base)
-								return Token(Type.Error,format("Invalid digit %s in base %s NumericLiteral",chr,base));
+								return createTokenAndAdvance(Type.Error,idx,format("Invalid digit %s in base %s NumericLiteral",cast(char)chr,base));
 						}
-						str.put(chr);
-						tokenLength++;
-						s.popFront();
+						idx++;
 						break;
 					}
 				default:
-					if (chr == '\u0000')
+					if (chr == 0)
 					{
 						if (expectingNumbers)
-							return Token(Type.Error,format("Invalid eof in base %s literal",base));
-						return Token(TokenType,str.data);
+							return createTokenAndAdvance(Type.Error,idx,format("Invalid eof in base %s literal",base));
+						return createTokenAndAdvance(TokenType,idx,s[0..idx]);
 					}
 					static if (base == 10)
 					{
 						if (chr == 'e' || chr == 'E')
 						{
 							if (exponent)
-								return Token(Type.Error,format("Already processed exponent part"));
+								return createTokenAndAdvance(Type.Error,idx,format("Already processed exponent part"));
 							exponent = true;
-							str.put(chr);
-							tokenLength++;
-							s.popFront();
-							chr = s.front();
+							idx++;
+							chr = s[idx];
 							if (chr == '+' || chr == '-')
-							{
-								str.put(chr);
-								tokenLength++;
-								s.popFront();
-							}
+								idx++;
 							expectingNumbers = true;
 							continue;
 						}
 					}
-					return Token(Type.Error,format("Invalid char (%s) in NumericLiteral",chr));
+					auto len = s.getTailIdentifierLength(idx);
+					if (len == 0)
+						return createTokenAndAdvance(TokenType,idx,s[0..idx]);
+					// if it is whitespace we are done, else we need to advance the idx with unicodeLength and
+					return createTokenAndAdvance(Type.Error,idx,format("Invalid char (%s) in NumericLiteral",cast(char)chr));
 			}
 		}
-		return Token(TokenType,str.data);
+		assert(0);
 	}
 	Token lexBinaryLiteral()
 	{
@@ -650,40 +887,39 @@ class Lexer(Source)
 	Token lexTemplateLiteral(Type t = Type.Template)
 	{
 		import std.array : appender;
-		auto str = appender!string;
+		size_t idx = 0;
 		while (true)
 		{
-			auto chr = s.next();
-			if (chr.isLineTerminator)
+			switch (s[idx])
 			{
-				if (chr == '\u000D')
-					s.popNextIf('\u000A');
-				newLine=true;
-			} else
-				tokenLength++;
-			if (chr == '$')
-			{
-				chr = s.next();
-				tokenLength++;
-				if (chr == '{')
-				{
-					pushState(State.LexingTemplateLiteral);
-					return Token(Type.TemplateHead,str.data);
-				}
-				str.put('$');
-			}
-			if (chr == '\u0060')
-				return Token(t,str.data);
-			if (chr == '\u0000')
-				goto eof;
-			str.put(chr);
-			if (chr == '\\')
-			{
-				tokenLength++;
-				chr = s.next();
-				if (chr == '\u0000')
+				case '$':
+					if (s[idx+1] == '{')
+					{
+						pushState(State.LexingTemplateLiteral);
+						return createTokenAndAdvance(Type.TemplateHead,idx+2,s[0..idx]);
+					}
+					idx++;
+					break;
+				case 0x60:
+					return createTokenAndAdvance(t,idx+1,s[0..idx]);
+				case 0:
 					goto eof;
-				str.put(chr);
+				case '\\':
+					idx++;
+					if (s[idx] == 0)
+						goto eof;
+					idx += s.getUnicodeLength(idx);
+					break;
+				default:
+					auto len = s.getLineTerminatorLength(idx);
+					if (len == 0)
+						idx += s.getUnicodeLength(idx);
+					else {
+						line += 1;
+						column = 0;
+						tokenLength = 0;
+						idx += len;
+					}
 			}
 		}
 		eof: return Token(Type.Error,"Found eof before finishing lexing TemplateLiteral");
@@ -734,12 +970,25 @@ class Lexer(Source)
 			}
 		}
 	}
-	Token lexMultiLineComment()
+	Token lexMultiLineComment() @trusted
 	{
 		size_t idx = 0;
 		for(;;)
 		{
-			dchar chr = s[idx];
+			// TODO: this doesn't work very well with the new lines that aren't being counted and the cases where we have /********* bla *********/
+			// there are probably substring sse42 matches that we can run on `*/`. that still leaves the unaccounted newlines though
+			//version (iasm64NotWindows)
+			//{
+			//	if (haveSSE42)
+			//	{
+			//		immutable ulong i = skip!(false, '*', '\x00')(s.ptr + idx);
+			//		idx += i;
+			//		tokenLength += i;
+			//		if (i == 16)
+			//			continue;
+			//	}
+			//}
+			ubyte chr = s[idx];
 			if (chr == '*')
 			{
 				column++;
@@ -747,53 +996,61 @@ class Lexer(Source)
 				chr = s[idx];
 				if (chr == '/')
 				{
-					auto tok = Token(Type.MultiLineComment,s[0..idx-1]);
-					s = s[idx+1..$];
-					return tok;
+					column++;
+					return createTokenAndAdvance(Type.MultiLineComment, idx+1, s[0..idx-1]);
 				}
 				continue;
-			}
-			if (chr.isLineTerminator())
+			} else if (chr == 0)
+				goto eof;
+			// TODO: we can do better here by determining line terminator and unicode length in one (there are also other places)
+			auto len = s.getLineTerminatorLength(idx);
+			if (len == 0)
 			{
-				idx++;
+				len = s.getUnicodeLength(idx);
+				idx += len;
+				column++;
+			} else {
+				idx += len;
 				line++;
 				column=0;
-				tokenLength=0;
-				if (chr == '\u000D' && s[idx] == '\u000A')
-					idx++;
-				continue;
-			} else if (chr == '\u0000')
-				goto eof;
-			idx++;
-			column++;
+			}
 		}
-		eof: 
-		s = s[idx..$];
-		return Token(Type.Error,"Expected end of MultiLineComment before eof");
+		eof:
+		return createTokenAndAdvance(Type.Error,idx,"Expected end of MultiLineComment before eof");
 	}
-	Token lexSingleLineComment()
+	Token lexSingleLineComment() @trusted
 	{
 		size_t idx = 0;
 		for (;;)
 		{
-			dchar chr = s[idx];
-			if (chr.isLineTerminator())
+			version (iasm64NotWindows)
 			{
-				idx++;
-				newLine=true;
-				auto tok = Token(Type.SingleLineComment,s[0..idx-1]);
-				if (chr == '\u000D' && s[idx] == '\u000A')
-					idx++;
+				//if (haveSSE42)
+				//{
+					immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
+					idx += i;
+					tokenLength += i;
+					if (i == 16)
+						continue;
+				//}
+			}
+			auto len = s.getLineTerminatorLength(idx);
+			if (len == 0 && s[idx] != 0)
+			{
+				len = s.getUnicodeLength(idx);
+				idx += len;
+				column ++;
+			} else
+			{
+				auto tok = Token(Type.SingleLineComment,s[0..idx]);
+				idx += len;
+				line += 1;
+				column = 0;
 				s = s[idx..$];
 				return tok;
-			} else if (chr == '\u0000')
-				break;
-			idx++;
-			tokenLength++;
+			}
 		}
-		auto tok = Token(Type.SingleLineComment,s[0..idx]);
-		s = s[idx..$];
-		return tok;
+		assert(0);
 	}
 	Token lexToken(Goal goal = Goal.All)
 	{
@@ -802,14 +1059,12 @@ class Lexer(Source)
 
 		switch(chr)
 		{
-			case '\u000A':
-			case '\u2028':
-			case '\u2029':
-			case '\u000D':
+			case 0x0a:
+			case 0x0d:
 				newLine=true;
 				s.popFront();
-				if (chr == '\u000D')
-					s.popNextIf('\u000A');
+				if (chr == 0x0d)
+					s.popNextIf(0x0a);
 				return Token(Type.LineTerminator);
 			case '{': tokenLength++; s.popFront(); return Token(Type.OpenCurlyBrace);
 			case '}': 
@@ -1019,9 +1274,9 @@ class Lexer(Source)
 			case '/':
 				if (goal != Goal.ProhibitRegex)
 				{
-					auto regex = lookAheadRegex;
-					if (!regex.empty)
-						return Token(Type.Regex,regex.dup);					
+					auto len = lookAheadRegex;
+					if (len > 0)
+						return createTokenAndAdvance(Type.Regex,len,s[0..len]);
 				}
 				tokenLength++;
 				s.popFront();
@@ -1068,7 +1323,7 @@ class Lexer(Source)
 				}
 				if (s.front() < '0' || s.front() > '9')
 					return Token(Type.DecimalLiteral,"0");
-				if (s.front() == '\u0000')
+				if (s.front() == 0)
 					return Token(Type.EndOfFile);
 				return Token(Type.Error,"Not expecting NumericLiteral to start with 0");
 			case '1': .. case '9':
@@ -1077,17 +1332,29 @@ class Lexer(Source)
 				tokenLength++;
 				s.popFront();
 				return lexTemplateLiteral();
-			case '\u0000':
+			case 0:
 				return Token(Type.EndOfFile);
 			default:
-				return lexIdentifier();
+				break;
 		}
+		auto len = s.getLineTerminatorUnicodeLength();
+		if (len != 0)
+		{
+			newLine = true;
+			s = s[len..$];
+			return Token(Type.LineTerminator);
+		}		
+		return lexIdentifier();
 	}
+}
+auto createLexer(const ubyte[] s)
+{
+	auto input = s ~ cast(const(ubyte)[])[0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0];
+	return Lexer(input);
 }
 auto createLexer(string s)
 {
-	auto input = s ~ "\u0000";
-	return new Lexer!(string)(input);
+	return createLexer(cast(const(ubyte)[])s);
 }
 @("lexIdentifier")
 unittest
@@ -1095,6 +1362,9 @@ unittest
 	// TODO: need to test unicode escape sequence stuff
 	auto lexer = createLexer("abcde");
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"abcde"));
+	lexer = createLexer("π");
+	lexer.lexIdentifier();//.shouldEqual(Token(Type.Identifier,"π"));
+	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"π"));
 }
 @("popWhitespace")
 unittest
@@ -1110,21 +1380,22 @@ unittest
 unittest
 {
 	auto lexer = createLexer("/abcd/");
-	lexer.lookAheadRegex.shouldEqual("/abcd/");
+	lexer.lookAheadRegex.shouldEqual(6);
 	lexer = createLexer(`/ab\/ab/`);
-	lexer.lookAheadRegex.shouldEqual(`/ab\/ab/`);
+	lexer.lookAheadRegex.shouldEqual(8);
 	lexer = createLexer(`/also no
 		regex`);
 	lexer.scanToken.shouldEqual(Token(Type.Division));
 	lexer.empty.shouldBeFalse;
 	lexer.column.shouldEqual(0);
 	lexer = createLexer(`/regex with modifiers/gi;`);
-	lexer.lookAheadRegex.shouldEqual("/regex with modifiers/gi");
-	lexer.scanToken.shouldEqual(Token(Type.Semicolon));
+	lexer.lookAheadRegex.shouldEqual(24);
 	lexer = createLexer("/ab[^/]cd/");
-	lexer.lookAheadRegex.shouldEqual("/ab[^/]cd/");
+	lexer.lookAheadRegex.shouldEqual(10);
 	lexer = createLexer(`/ab[^/\\]cd/`);
-	lexer.lookAheadRegex.shouldEqual(`/ab[^/\\]cd/`);
+	lexer.lookAheadRegex.shouldEqual(12);
+	lexer = createLexer(`/^\/(.+)\/([a-z]*)$/`);
+	lexer.lookAheadRegex.shouldEqual(20);
 }
 @("lexString")
 unittest
@@ -1142,7 +1413,7 @@ unittest
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`escaped "string"`));
 	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`'escaped \'string\''`);
-	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"escaped \'string\'"));
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`escaped \'string\'`));
 	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
 	lexer = createLexer(`"\xaa\xb5"`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`\xaa\xb5`));
@@ -1199,6 +1470,8 @@ unittest
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,".5"));
 	lexer = createLexer("1..toFixed");
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"1."));
+	lexer = createLexer("15 ");
+	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"15"));
 }
 @("lexHexLiteral")
 unittest
@@ -1211,14 +1484,14 @@ unittest
 @("lexTemplateLiteral")
 unittest
 {
-	auto lexer = createLexer("some\n$template\\\u0060\rstring\u0060");
-	lexer.lexTemplateLiteral.shouldEqual(Token(Type.Template,"some\n$template\\\u0060\rstring"));
-	lexer = createLexer("some\n$template\\\u0060\rstring${identifier}\u0060");
-	lexer.lexTemplateLiteral.shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\rstring"));
-	lexer.s.shouldEqual("identifier}\u0060\u0000");
+	auto lexer = createLexer("some\n$template\\\u0060\nstring\u0060");
+	lexer.lexTemplateLiteral.shouldEqual(Token(Type.Template,"some\n$template\\\u0060\nstring"));
+	lexer = createLexer("some\n$template\\\u0060\nstring${identifier}\u0060");
+	lexer.lexTemplateLiteral.shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\nstring"));
+	lexer.s[0..13].shouldEqual("identifier}\u0060\u0000");
 
-	lexer = createLexer("\u0060some\n$template\\\u0060\rstring${identifier}\u0060");
-	lexer.lexToken().shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\rstring"));
+	lexer = createLexer("\u0060some\n$template\\\u0060\nstring${identifier}\u0060");
+	lexer.lexToken().shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\nstring"));
 	lexer.lexToken().shouldEqual(Token(Type.Identifier,"identifier"));
 	lexer.lexToken().shouldEqual(Token(Type.TemplateTail,""));
 }
@@ -1231,22 +1504,22 @@ unittest
 
 	lexer = createLexer("// comment");
 	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment," comment"));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 
 	lexer = createLexer("//");
 	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 	
 	lexer = createLexer("//\r\n");
 	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 	
 	lexer = createLexer("//\n");
 	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 
 	lexer = createLexer("/* multi \n line \r\n\n comment */ identifier");
@@ -1255,17 +1528,17 @@ unittest
 
 	lexer = createLexer("/**/");
 	lexer.lexToken.shouldEqual(Token(Type.MultiLineComment,""));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 
 	lexer = createLexer("/*a*b*/");
 	lexer.lexToken.shouldEqual(Token(Type.MultiLineComment,"a*b"));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 
 	lexer = createLexer("/*");
 	lexer.lexToken.shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
-	lexer.s.shouldEqual("\u0000");
+	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 
 	lexer = createLexer("foobar(abc, /** bla **/, def) /** hup */;");
@@ -1286,11 +1559,11 @@ unittest
 	lexer2.scanToken().shouldEqual(Token(Type.LineTerminator));
 	lexer2.scanToken().shouldEqual(Token(Type.MultiLineComment," comment "));
 	lexer2.scanToken().shouldEqual(Token(Type.Comma));
-	lexer2.column.shouldEqual(12);
+	lexer2.column.shouldEqual(13);
 	lexer.scanToken().shouldEqual(Token(Type.LineTerminator));
 	lexer.scanToken().shouldEqual(Token(Type.MultiLineComment," comment "));
 	lexer.scanToken().shouldEqual(Token(Type.Comma));
-	lexer.column.shouldEqual(12);
+	lexer.column.shouldEqual(13);
 }
 @("lookAhead")
 unittest
@@ -1320,12 +1593,12 @@ unittest
 unittest
 {
 	assert("await" in Keywords);
-	isReservedKeyword("await").shouldBeTrue;
-	isReservedKeyword("default").shouldBeTrue;
-	isReservedKeyword("default2").shouldBeFalse;
-	isReservedKeyword("yield").shouldBeTrue;
-	isReservedKeyword("").shouldBeFalse;
-	isReservedKeyword("a").shouldBeFalse;
+	isReservedKeyword(cast(const(ubyte)[])"await").shouldBeTrue;
+	isReservedKeyword(cast(const(ubyte)[])"default").shouldBeTrue;
+	isReservedKeyword(cast(const(ubyte)[])"default2").shouldBeFalse;
+	isReservedKeyword(cast(const(ubyte)[])"yield").shouldBeTrue;
+	isReservedKeyword(cast(const(ubyte)[])"").shouldBeFalse;
+	isReservedKeyword(cast(const(ubyte)[])"a").shouldBeFalse;
 }
 @("scanToken")
 unittest

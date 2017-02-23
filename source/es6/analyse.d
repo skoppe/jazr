@@ -17,6 +17,8 @@
  */
 module es6.analyse;
 
+@safe:
+
 import std.algorithm : each;
 
 version (unittest)
@@ -57,14 +59,14 @@ version (unittest)
 		s.identifiers.length.shouldBeGreaterThan(idx,file,line);
 		s.identifiers[idx].node.assertIdentifierEqual(identifier,file,line);
 	}
-	auto assertIdentifiers(Scope s, string[] identifiers, in string file = __FILE__, in size_t line = __LINE__)
+	auto assertIdentifiers(Scope s, string[] identifiers, in string file = __FILE__, in size_t line = __LINE__) @trusted
 	{
 		s.identifiers.length.shouldEqual(identifiers.length,file,line);
 		foreach(got,expected; lockstep(s.identifiers,identifiers))
 			got.node.assertIdentifierEqual(expected,file,line);
 		return s;
 	}
-	auto assertVariables(alias type)(Scope s, string[] variables, in string file = __FILE__, in size_t line = __LINE__)
+	auto assertVariables(alias type)(Scope s, string[] variables, in string file = __FILE__, in size_t line = __LINE__) @trusted
 	{
 		auto f = s.variables.filter!(v=>v.type == type);
 		f.walkLength.shouldEqual(variables.length,file,line);

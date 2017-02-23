@@ -17,6 +17,8 @@
  */
 module es6.parser;
 
+@safe:
+
 import std.format : format;
 
 import es6.lexer;
@@ -47,8 +49,8 @@ version (unittest)
 		auto errs = n.collectErrors();
 		if (errs.length > 0)
 			throw new UnitTestException([generateErrorMessage(errs[0],r,1)],file,line);
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 	alias parseModule = parseNode!("parseModule",ModuleNode);
@@ -103,21 +105,33 @@ unittest
 	a.mask!(Attribute.In,Attribute.Yield).has!(Attribute.Return).shouldBeFalse;
 	a.mask!(Attribute.In,Attribute.Yield,Attribute.Return).has!(Attribute.Return).shouldBeTrue;
 }
-final class Parser(Source) : Lexer!(Source)
+final class Parser
 {
-	this(Source s)
-	{
-		super(s);
+	private {
+		Lexer lexer;
+		Token token;
 	}
-	Node error(string message, in size_t at = __LINE__)
+	this(const (ubyte)[] s)
 	{
-		string m = message;
+		lexer = Lexer(s);
+	}
+	Token scanToken(Goal goal = Goal.All)
+	{
+		token = lexer.scanToken(goal);
+		return token;
+	}
+	Node error(const(char)[] message, in size_t at = __LINE__)
+	{
 		string debugMessage;
 		version(unittest)
 		{
 			debugMessage = format("in parser.d @ %s",at);
 		}
-		return new ErrorNode(message,line,column,debugMessage,__FILE__,at);
+		return new ErrorNode(message,lexer.line,lexer.column,debugMessage,__FILE__,at);
+	}
+	Node error(const(ubyte)[] message, in size_t at = __LINE__) @trusted
+	{
+		return error(cast(const(char)[])message,at);
 	}
 	Node parseModule()
 	{
@@ -466,12 +480,12 @@ final class Parser(Source) : Lexer!(Source)
 					switch (Keywords.get(token.match))
 					{
 						case Keyword.Set:
-							if (lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon))
+							if (lexer.lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon))
 								goto default;
 							children.put(parseClassSetter(staticAttr,attributes.mask!(Attribute.Yield)));
 							break;
 						case Keyword.Get:
-							if (lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon))
+							if (lexer.lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon))
 								goto default;
 							children.put(parseClassGetter(staticAttr,attributes.mask!(Attribute.Yield)));
 							break;
@@ -656,7 +670,7 @@ final class Parser(Source) : Lexer!(Source)
 			case Type.Regex: auto node = new RegexLiteralNode(token.match); scanToken(attributes.toGoal); return node;
 			case Type.OpenParenthesis: return parseParenthesisExpression(attributes);
 			default:
-				auto node = error(format("unexpected %s token (%s)",token.type,token.match));
+				auto node = error(format("unexpected %s token (%s)",token.type,cast(const(char)[])token.match));
 				// TODO: resync primary expression
 				scanToken(attributes.toGoal);
 				return node;
@@ -759,12 +773,12 @@ final class Parser(Source) : Lexer!(Source)
 		if (cond.type == NodeType.UnaryExpressionNode || cond.type == NodeType.BinaryExpressionNode)
 			return cond;
 
-		if (empty)
+		if (lexer.empty)
 			return cond;
 		Node[] children;
 		children.reserve(3);
 		children ~= cond;
-		while (!empty) // TODO: this one might loop forever with invalid input, not sure, need to check
+		while (!lexer.empty) // TODO: this one might loop forever with invalid input, not sure, need to check
 		{
 			switch (token.type)
 			{
@@ -817,13 +831,13 @@ final class Parser(Source) : Lexer!(Source)
 		if (token.type != Type.QuestionMark)
 			return rhs;
 		scanToken(attributes.toGoal);
-		if (empty)
+		if (lexer.empty)
 			return error(format("Expected AssignmentExpression as part of an ConditionalExpression before eof"));
 		auto yeah = parseAssignmentExpression(Attribute.In | attributes);
 		if (token.type != Type.Colon)
-			return error(format("Expected colon as part of ConditionalExpression, instead got %s token %s",token.type,token.match));
+			return error(format("Expected colon as part of ConditionalExpression, instead got %s token %s",token.type,cast(const(ubyte)[])token.match));
 		scanToken(attributes.toGoal);
-		if (empty)
+		if (lexer.empty)
 			return error(format("Expected AssignmentExpression as part of an ConditionalExpression before eof"));
 		auto nay = parseAssignmentExpression(attributes);
 		return new ConditionalExpressionNode(rhs,yeah,nay);
@@ -1086,7 +1100,7 @@ final class Parser(Source) : Lexer!(Source)
 		}
 		return content;
 	}
-	bool isIdentifierReservedKeyword(string identifier)
+	bool isIdentifierReservedKeyword(const(ubyte)[] identifier)
 	{
 		return identifier.isReservedKeyword();
 		//return (i.identifier == "break" || i.identifier == "do" || i.identifier == "in" || i.identifier == "typeof" || i.identifier == "case" || i.identifier == "else" ||
@@ -2223,8 +2237,9 @@ final class Parser(Source) : Lexer!(Source)
 
 auto parser(string i)
 {
-	auto input = i ~ "\u0000";
-	return new Parser!(string)(input);
+	static const(ubyte)[4] sentinal = [0,0,0,0];
+	const(ubyte)[] input = (cast(const(ubyte)[])i) ~ sentinal;
+	return new Parser(input);
 }
 
 @("parsePrimaryExpression")
@@ -2237,7 +2252,7 @@ unittest
 		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parsePrimaryExpression();
-		parser.empty.shouldBeTrue();
+		parser.lexer.s[0].shouldEqual(0);
 		return n.shouldBeOfType!(Type);
 	}
 	assertNodeType!HexLiteralNode("0x0123");
@@ -2302,8 +2317,8 @@ unittest
 		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseLeftHandSideExpression();
-		if (!parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (parser.lexer.s[0] != 0)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 	//TODO: find a way to test super, new, NewTarget, arguments, literals, arrayindexes and accessors with comments interspered
@@ -2354,14 +2369,14 @@ unittest
 @("parseRightHandSideExpression")
 unittest
 {
-	Type assertBinaryExpression(Type = BinaryExpressionNode)(in string r, ExpressionOperator[] ops, in string file = __FILE__, in size_t line = __LINE__)
+	Type assertBinaryExpression(Type = BinaryExpressionNode)(in string r, ExpressionOperator[] ops, in string file = __FILE__, in size_t line = __LINE__) @trusted
 	{
 		import std.range : lockstep, stride, drop;
 		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseRightHandSideExpression(Attribute.In);
-		if (!parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (!parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		auto t = shouldBeOfType!(Type)(n,file,line);
 		t.children.length.shouldEqual(ops.length*2 + 1);
 		foreach(node,op; t.children.drop(1).stride(2).lockstep(ops))
@@ -2419,8 +2434,8 @@ unittest
 		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseAssignmentExpression();
-		//if (!parser.empty)
-			//throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		//if (!parser.lexer.empty)
+			//throw new UnitTestException([format("Expected input to be empty, got %s",parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 	parseAssignmentExpression!(IdentifierReferenceNode)("abc");
@@ -2460,8 +2475,8 @@ unittest
 		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseExpression();
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 	parseExpression!(IdentifierReferenceNode)("abc");
@@ -2496,8 +2511,8 @@ unittest
 		auto parser = parser(r);
 		parser.scanToken();
 		auto n = parser.parseStatement();
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 
@@ -2535,8 +2550,8 @@ unittest
 			auto err = n.shouldBeOfType!(ErrorNode);
 			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
 		}
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 
@@ -2567,8 +2582,8 @@ unittest
 			auto err = n.shouldBeOfType!(ErrorNode);
 			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
 		}
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 
@@ -2617,8 +2632,8 @@ unittest
 			auto err = n.shouldBeOfType!(ErrorNode);
 			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
 		}
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 
@@ -2668,8 +2683,8 @@ unittest
 			auto err = n.shouldBeOfType!(ErrorNode);
 			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
 		}
-		if (n.type != NodeType.ErrorNode && !parser.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",parser.s)],file,line);
+		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
 

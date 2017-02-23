@@ -18,6 +18,7 @@
 module es6.eval;
 
 import es6.nodes;
+import es6.lexer;
 
 version (unittest)
 {
@@ -70,13 +71,26 @@ enum Ternary
 }
 struct RawValue
 {
-	string value;
+	const(ubyte)[] value;
 	ValueType type;
+	void setValue(string v)
+	{
+		this.value = cast(const(ubyte)[])v;
+	}
+	static RawValue from(string value, ValueType type)
+	{
+		return RawValue(cast(const(ubyte)[])value, type);
+	}
+	auto to(Type)()
+	{
+		import std.conv : to;
+		return (cast(const(char)[])this.value).to!Type;
+	}
 }
 auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 {
-	import std.range : retro;
 	import std.conv : to;
+	import std.range : retro;
 	import std.algorithm : all;
 	assert(prefixs.all!(a=>a.type == NodeType.PrefixExpressionNode));
 	foreach (p; prefixs.retro)
@@ -87,55 +101,55 @@ auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 		{
 			case Prefix.Increment:
 			case Prefix.Decrement: raw.type = ValueType.NotKnownAtCompileTime; break;
-			case Prefix.Void: raw.type = ValueType.Undefined; raw.value = "undefined"; break;
+			case Prefix.Void: raw.type = ValueType.Undefined; raw.setValue("undefined"); break;
 			case Prefix.Positive:
 				return raw.toNumber();
 			case Prefix.Negative:
 				final switch (raw.type)
 				{
 					case ValueType.Undefined:
-					case ValueType.NaN: raw.type = ValueType.NaN; raw.value = "NaN"; break;
-					case ValueType.Infinity: raw.value = "-Infinity"; break;
-					case ValueType.Null: raw.type = ValueType.Numeric; raw.value = "-0"; break;
-					case ValueType.Bool: raw.type = ValueType.Numeric; raw.value = raw.value == "true" ? "-1" : "-0"; break;
+					case ValueType.NaN: raw.type = ValueType.NaN; raw.setValue("NaN"); break;
+					case ValueType.Infinity: raw.setValue("-Infinity"); break;
+					case ValueType.Null: raw.type = ValueType.Numeric; raw.setValue("-0"); break;
+					case ValueType.Bool: raw.type = ValueType.Numeric; raw.setValue(raw.value == "true" ? "-1" : "-0"); break;
 					case ValueType.String:
 						raw.type = ValueType.Numeric;
 						if (raw.value.length == 0)
 						{
-							raw.value = "-0";
+							raw.setValue("-0");
 						} else
 						{
 							try
 							{
-								int t = raw.value.to!int;
+								int t = raw.to!int;
 								if (raw.value[0] == '-')
-									raw.value = (-t).to!string;
+									raw.setValue((-t).to!string);
 								else
-									raw.value = "-"~t.to!string;
+									raw.setValue("-"~t.to!string);
 							} catch (Exception e)
 							{
 								raw.type = ValueType.NaN;
-								raw.value = "NaN";
+								raw.setValue("NaN");
 							}
 						}
 						break;
-					case ValueType.Numeric: raw.value = "-"~raw.value; break;
+					case ValueType.Numeric: raw.value = (cast(const(ubyte)[])"-")~raw.value; break;
 					case ValueType.NotKnownAtCompileTime: break;
-					case ValueType.Object: raw.value = "NaN"; raw.type = ValueType.NaN; break;
+					case ValueType.Object: raw.setValue("NaN"); raw.type = ValueType.NaN; break;
 				}
 				break;
 			case Prefix.Typeof:
 				final switch (raw.type)
 				{
-					case ValueType.Undefined: raw.type = ValueType.String; raw.value = `undefined`; break;
-					case ValueType.NaN: raw.type = ValueType.String; raw.value = `number`; break;
-					case ValueType.Infinity: raw.type = ValueType.String; raw.value = `number`; break;
-					case ValueType.Null: raw.type = ValueType.String; raw.value = `object`; break;
-					case ValueType.Bool: raw.type = ValueType.String; raw.value = `boolean`; break;
-					case ValueType.String: raw.type = ValueType.String; raw.value = `string`; break;
-					case ValueType.Numeric: raw.type = ValueType.String; raw.value = `number`; break;
+					case ValueType.Undefined: raw.type = ValueType.String; raw.setValue(`undefined`); break;
+					case ValueType.NaN: raw.type = ValueType.String; raw.setValue(`number`); break;
+					case ValueType.Infinity: raw.type = ValueType.String; raw.setValue(`number`); break;
+					case ValueType.Null: raw.type = ValueType.String; raw.setValue(`object`); break;
+					case ValueType.Bool: raw.type = ValueType.String; raw.setValue(`boolean`); break;
+					case ValueType.String: raw.type = ValueType.String; raw.setValue(`string`); break;
+					case ValueType.Numeric: raw.type = ValueType.String; raw.setValue(`number`); break;
 					case ValueType.NotKnownAtCompileTime: break;
-					case ValueType.Object: raw.value = `object`; raw.type = ValueType.String; break;
+					case ValueType.Object: raw.setValue(`object`); raw.type = ValueType.String; break;
 				}
 				break;
 			case Prefix.Delete:
@@ -143,12 +157,12 @@ auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 				{
 					case ValueType.Undefined:
 					case ValueType.NaN:
-					case ValueType.Infinity: raw.type = ValueType.Bool; raw.value = "false"; break;
+					case ValueType.Infinity: raw.type = ValueType.Bool; raw.setValue("false"); break;
 					case ValueType.Object:
 					case ValueType.Null:
 					case ValueType.Bool:
 					case ValueType.String:
-					case ValueType.Numeric: raw.type = ValueType.Bool; raw.value = "true"; break;
+					case ValueType.Numeric: raw.type = ValueType.Bool; raw.setValue("true"); break;
 					case ValueType.NotKnownAtCompileTime: break;
 				}
 				break;
@@ -159,21 +173,21 @@ auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 					case ValueType.Undefined:
 					case ValueType.NaN:
 					case ValueType.Infinity:
-					case ValueType.Null: raw.type = ValueType.Numeric; raw.value = "-1"; break;
-					case ValueType.Bool: raw.type = ValueType.Numeric; raw.value = raw.value == "true" ? "-2" : "-1"; break;
+					case ValueType.Null: raw.type = ValueType.Numeric; raw.setValue("-1"); break;
+					case ValueType.Bool: raw.type = ValueType.Numeric; raw.setValue(raw.value == "true" ? "-2" : "-1"); break;
 					case ValueType.String:
 						raw.type = ValueType.Numeric;
 						try
 						{
-							auto t = raw.value.to!int + 1;
+							auto t = raw.to!int + 1;
 							t = -t;
-							raw.value = t.to!string;
+							raw.setValue(t.to!string);
 						} catch (Exception e)
 						{
-							raw.value = "-1";
+							raw.setValue("-1");
 						}
 						break;
-					case ValueType.Numeric: raw.type = ValueType.Numeric; raw.value = (-(raw.value.to!int + 1)).to!string; break;
+					case ValueType.Numeric: raw.type = ValueType.Numeric; raw.setValue((-(raw.to!int + 1)).to!string); break;
 					case ValueType.NotKnownAtCompileTime: break;
 				}
 				break;
@@ -181,13 +195,13 @@ auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 				final switch (raw.type)
 				{
 					case ValueType.Object:
-					case ValueType.Infinity: raw.type = ValueType.Bool; raw.value = "false"; break;
+					case ValueType.Infinity: raw.type = ValueType.Bool; raw.setValue("false"); break;
 					case ValueType.Undefined:
 					case ValueType.NaN:
-					case ValueType.Null: raw.type = ValueType.Bool; raw.value = "true"; break;
-					case ValueType.Bool: raw.type = ValueType.Bool; raw.value = raw.value == "true" ? "false" : "true"; break;
-					case ValueType.String: raw.type = ValueType.Bool; raw.value = raw.value.length == 0 ? "true" : "false"; break;
-					case ValueType.Numeric: raw.type = ValueType.Bool; raw.value = (raw.value == "0" || raw.value == "-0") ? "true" : "false"; break;
+					case ValueType.Null: raw.type = ValueType.Bool; raw.setValue("true"); break;
+					case ValueType.Bool: raw.type = ValueType.Bool; raw.setValue(raw.value == "true" ? "false" : "true"); break;
+					case ValueType.String: raw.type = ValueType.Bool; raw.setValue(raw.value.length == 0 ? "true" : "false"); break;
+					case ValueType.Numeric: raw.type = ValueType.Bool; raw.setValue((raw.value == "0" || raw.value == "-0") ? "true" : "false"); break;
 					case ValueType.NotKnownAtCompileTime: break;
 				}
 				break;
@@ -204,28 +218,28 @@ RawValue getRawValue(Node node)
 			auto unary = node.as!UnaryExpressionNode;
 			return getRawValue(node.children[0]).processPrefixExpressions(unary.prefixs);
 		case NodeType.IdentifierReferenceNode:
-			switch (node.as!(IdentifierReferenceNode).identifier)
+			switch (cast(const(char)[])node.as!(IdentifierReferenceNode).identifier)
 			{
-				case "undefined": return RawValue("undefined",ValueType.Undefined);
-				case "NaN": return RawValue("NaN",ValueType.NaN);
-				case "Infinity": return RawValue("Infinity",ValueType.Infinity);
-				case "null": return RawValue("null",ValueType.Null);
+				case "undefined": return RawValue.from("undefined",ValueType.Undefined);
+				case "NaN": return RawValue.from("NaN",ValueType.NaN);
+				case "Infinity": return RawValue.from("Infinity",ValueType.Infinity);
+				case "null": return RawValue.from("null",ValueType.Null);
 				default: break;
 			}
 			break;
 		case NodeType.KeywordNode:
 			if (node.as!(KeywordNode).keyword == Keyword.Null)
-				return RawValue("null",ValueType.Null);
+				return RawValue.from("null",ValueType.Null);
 			break;
-		case NodeType.BooleanNode: return RawValue(node.as!(BooleanNode).value ? "true" : "false",ValueType.Bool);
+		case NodeType.BooleanNode: return RawValue.from(node.as!(BooleanNode).value ? "true" : "false",ValueType.Bool);
 		case NodeType.StringLiteralNode: return RawValue(node.as!(StringLiteralNode).value,ValueType.String);
 		case NodeType.DecimalLiteralNode: return RawValue(node.as!(DecimalLiteralNode).value,ValueType.Numeric);
-		case NodeType.ObjectLiteralNode: return RawValue("",ValueType.Object);
+		case NodeType.ObjectLiteralNode: return RawValue.from("",ValueType.Object);
 		case NodeType.BinaryExpressionNode:
 			return resolveBinaryExpression(node.as!BinaryExpressionNode);
 		default: break;
 	}
-	return RawValue("",ValueType.NotKnownAtCompileTime);
+	return RawValue.from("",ValueType.NotKnownAtCompileTime);
 }
 
 RawValue toNumber(RawValue raw)
@@ -237,23 +251,23 @@ RawValue toNumber(RawValue raw)
 		case ValueType.Numeric:
 		case ValueType.NaN:
 		case ValueType.Infinity: break;
-		case ValueType.Undefined: raw.type = ValueType.NaN; raw.value = "NaN"; break;
-		case ValueType.Null: raw.type = ValueType.Numeric; raw.value = "0"; break;
-		case ValueType.Bool: raw.type = ValueType.Numeric; raw.value = raw.value == "true" ? "1" : "0"; break;
+		case ValueType.Undefined: raw.type = ValueType.NaN; raw.setValue("NaN"); break;
+		case ValueType.Null: raw.type = ValueType.Numeric; raw.setValue("0"); break;
+		case ValueType.Bool: raw.type = ValueType.Numeric; raw.setValue(raw.value == "true" ? "1" : "0"); break;
 		case ValueType.String:
 			raw.type = ValueType.Numeric;
 			if (raw.value.length == 0)
-				raw.value = "0";
+				raw.setValue("0");
 			else
 			{
 				try
 				{
-					int t = raw.value.to!int;
-					raw.value = t.to!string;
+					int t = raw.to!int;
+					raw.setValue(t.to!string);
 				} catch (Exception e)
 				{
 					raw.type = ValueType.NaN;
-					raw.value = "NaN";
+					raw.setValue("NaN");
 				}
 			}
 			break;
@@ -432,7 +446,7 @@ bool coerceAsBoolean(RawValue raw)
 unittest
 {
 	import unit_threaded;
-	RawValue("",ValueType.Object).coerceAsBoolean.shouldThrow();
+	RawValue.from("",ValueType.Object).coerceAsBoolean.shouldThrow();
 }
 Ternary coerceToTernary(Node node)
 {
@@ -458,7 +472,7 @@ Ternary coerceToTernary(Node node)
 @("toPrimitive identity feature")
 unittest
 {
-	RawValue("Test",ValueType.Undefined).toPrimitive.shouldEqual(RawValue("Test",ValueType.Undefined));
+	RawValue.from("Test",ValueType.Undefined).toPrimitive.shouldEqual(RawValue.from("Test",ValueType.Undefined));
 }
 bool doStrictEquality(alias type = false)(RawValue a, RawValue b, bool invert)
 {
@@ -515,7 +529,7 @@ bool doStrictEquality(alias type = false)(RawValue a, RawValue b)
 @("doStrictEquality")
 unittest
 {
-	doStrictEquality(RawValue("",ValueType.Object),RawValue("",ValueType.Object)).shouldThrow;
+	doStrictEquality(RawValue.from("",ValueType.Object),RawValue.from("",ValueType.Object)).shouldThrow;
 }
 
 bool doWeakEquality(RawValue a, RawValue b, bool invert)
@@ -559,17 +573,17 @@ bool doWeakEquality(RawValue a, RawValue b)
 @("Test WeakEquality with objects")
 unittest
 {
-	doWeakEquality(RawValue("{}",ValueType.Object),RawValue(`"str"`,ValueType.String)).shouldThrow;
-	doWeakEquality(RawValue(`"str"`,ValueType.String),RawValue("{}",ValueType.Object)).shouldThrow;
-	doWeakEquality(RawValue("{}",ValueType.Object),RawValue(`6`,ValueType.Numeric)).shouldThrow;
-	doWeakEquality(RawValue(`6`,ValueType.Numeric),RawValue("{}",ValueType.Object)).shouldThrow;
-	doWeakEquality(RawValue(`6`,ValueType.Numeric),RawValue("{}",ValueType.NotKnownAtCompileTime)).shouldEqual(false);
-	doWeakEquality(RawValue("{}",ValueType.NotKnownAtCompileTime),RawValue(`6`,ValueType.Numeric)).shouldEqual(false);
-	doWeakEquality(RawValue("-1",ValueType.Numeric),RawValue("-1",ValueType.String)).shouldEqual(true);
+	doWeakEquality(RawValue.from("{}",ValueType.Object),RawValue.from(`"str"`,ValueType.String)).shouldThrow;
+	doWeakEquality(RawValue.from(`"str"`,ValueType.String),RawValue.from("{}",ValueType.Object)).shouldThrow;
+	doWeakEquality(RawValue.from("{}",ValueType.Object),RawValue.from(`6`,ValueType.Numeric)).shouldThrow;
+	doWeakEquality(RawValue.from(`6`,ValueType.Numeric),RawValue.from("{}",ValueType.Object)).shouldThrow;
+	doWeakEquality(RawValue.from(`6`,ValueType.Numeric),RawValue.from("{}",ValueType.NotKnownAtCompileTime)).shouldEqual(false);
+	doWeakEquality(RawValue.from("{}",ValueType.NotKnownAtCompileTime),RawValue.from(`6`,ValueType.Numeric)).shouldEqual(false);
+	doWeakEquality(RawValue.from("-1",ValueType.Numeric),RawValue.from("-1",ValueType.String)).shouldEqual(true);
 }
 auto toRawValue(bool v)
 {
-	return v ? RawValue("true",ValueType.Bool) : RawValue("false",ValueType.Bool);
+	return v ? RawValue.from("true",ValueType.Bool) : RawValue.from("false",ValueType.Bool);
 }
 auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 {
@@ -583,7 +597,7 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 	{
 		case ExpressionOperator.InstanceOf:
 		case ExpressionOperator.In:
-			return RawValue("",ValueType.NotKnownAtCompileTime);
+			return RawValue.from("",ValueType.NotKnownAtCompileTime);
 		case ExpressionOperator.LogicalAnd:
 			if (a.coerceAsBoolean())
 				return b;
@@ -604,14 +618,14 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 			try
 			{
 				if (operator == ExpressionOperator.BitwiseOr)
-					return RawValue((a.value.to!int | b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int | b.to!int).to!string,ValueType.Numeric);
 				else if (operator == ExpressionOperator.BitwiseAnd)
-					return RawValue((a.value.to!int & b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int & b.to!int).to!string,ValueType.Numeric);
 				else
-					return RawValue((a.value.to!int ^ b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int ^ b.to!int).to!string,ValueType.Numeric);
 			} catch (Exception e)
 			{
-				return RawValue("NaN",ValueType.NaN);
+				return RawValue.from("NaN",ValueType.NaN);
 			}
 		case ExpressionOperator.StrictEqual:
 		case ExpressionOperator.Equal:
@@ -630,19 +644,19 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 			a = a.toNumber;
 			b = b.toNumber;
 			if (a.type == ValueType.NaN || b.type == ValueType.NaN)
-				return RawValue("false",ValueType.Bool);
+				return RawValue.from("false",ValueType.Bool);
 			try
 			{
 				if (operator == ExpressionOperator.LessThan)
-					return RawValue((a.value.to!int < b.value.to!int).to!string,ValueType.Bool);
+					return RawValue.from((a.to!int < b.to!int).to!string,ValueType.Bool);
 				if (operator == ExpressionOperator.LessOrEqual)
-					return RawValue((a.value.to!int <= b.value.to!int).to!string,ValueType.Bool);
+					return RawValue.from((a.to!int <= b.to!int).to!string,ValueType.Bool);
 				if (operator == ExpressionOperator.GreaterThan)
-					return RawValue((a.value.to!int > b.value.to!int).to!string,ValueType.Bool);
-				return RawValue((a.value.to!int >= b.value.to!int).to!string,ValueType.Bool);
+					return RawValue.from((a.to!int > b.to!int).to!string,ValueType.Bool);
+				return RawValue.from((a.to!int >= b.to!int).to!string,ValueType.Bool);
 			} catch (Exception e)
 			{
-				return RawValue("NaN",ValueType.NaN);
+				return RawValue.from("NaN",ValueType.NaN);
 			}
 		case ExpressionOperator.LeftShift:
 		case ExpressionOperator.TripleRightSift:
@@ -650,19 +664,19 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 			a = a.toNumber;
 			b = b.toNumber;
 			if (a.type == ValueType.NaN)
-				return RawValue("0",ValueType.Numeric);
+				return RawValue.from("0",ValueType.Numeric);
 			if (b.type == ValueType.NaN)
 				return a;
 			try
 			{
 				if (operator == ExpressionOperator.LeftShift)
 				{
-					return RawValue((a.value.to!int << b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int << b.to!int).to!string,ValueType.Numeric);
 				} else
-					return RawValue((a.value.to!int >> b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int >> b.to!int).to!string,ValueType.Numeric);
 			} catch (Exception e)
 			{
-				return RawValue("NaN",ValueType.NaN);
+				return RawValue.from("NaN",ValueType.NaN);
 			}
 		case ExpressionOperator.Add:
 			if (a.type == ValueType.String)
@@ -689,12 +703,12 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 			try
 			{
 				if (operator == ExpressionOperator.Add)
-					return RawValue((a.value.to!int + b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int + b.to!int).to!string,ValueType.Numeric);
 				else
-					return RawValue((a.value.to!int - b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int - b.to!int).to!string,ValueType.Numeric);
 			} catch (Exception e)
 			{
-				return RawValue("NaN",ValueType.NaN);
+				return RawValue.from("NaN",ValueType.NaN);
 			}
 		case ExpressionOperator.Multiply:
 		case ExpressionOperator.Division:
@@ -708,14 +722,14 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 			try
 			{
 				if (operator == ExpressionOperator.Multiply)
-					return RawValue((a.value.to!int * b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int * b.to!int).to!string,ValueType.Numeric);
 				else if (operator == ExpressionOperator.Mod)
-					return RawValue((a.value.to!int % b.value.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!int % b.to!int).to!string,ValueType.Numeric);
 				else
-					return RawValue((a.value.to!double / b.value.to!double).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!double / b.to!double).to!string,ValueType.Numeric);
 			} catch (Exception e)
 			{
-				return RawValue("NaN",ValueType.NaN);
+				return RawValue.from("NaN",ValueType.NaN);
 			}
 	}
 }
@@ -723,48 +737,48 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 unittest
 {
 	doOperator(
-		RawValue("A",ValueType.NotKnownAtCompileTime),RawValue("B",ValueType.NotKnownAtCompileTime),
+		RawValue.from("A",ValueType.NotKnownAtCompileTime),RawValue.from("B",ValueType.NotKnownAtCompileTime),
 		ExpressionOperator.NotEqual
-	).shouldEqual(RawValue("A",ValueType.NotKnownAtCompileTime));
+	).shouldEqual(RawValue.from("A",ValueType.NotKnownAtCompileTime));
 	doOperator(
-		RawValue("A",ValueType.Object),RawValue("B",ValueType.NotKnownAtCompileTime),
+		RawValue.from("A",ValueType.Object),RawValue.from("B",ValueType.NotKnownAtCompileTime),
 		ExpressionOperator.NotEqual
-	).shouldEqual(RawValue("B",ValueType.NotKnownAtCompileTime));
+	).shouldEqual(RawValue.from("B",ValueType.NotKnownAtCompileTime));
 
 	doOperator(
-		RawValue("A",ValueType.Numeric),RawValue("B",ValueType.Numeric),
+		RawValue.from("A",ValueType.Numeric),RawValue.from("B",ValueType.Numeric),
 		ExpressionOperator.BitwiseOr
-	).shouldEqual(RawValue("NaN",ValueType.NaN));
+	).shouldEqual(RawValue.from("NaN",ValueType.NaN));
 
 	doOperator(
-		RawValue("A",ValueType.Numeric),RawValue("B",ValueType.Numeric),
+		RawValue.from("A",ValueType.Numeric),RawValue.from("B",ValueType.Numeric),
 		ExpressionOperator.LeftShift
-	).shouldEqual(RawValue("NaN",ValueType.NaN));
+	).shouldEqual(RawValue.from("NaN",ValueType.NaN));
 
 	doOperator(
-		RawValue("A",ValueType.Numeric),RawValue("B",ValueType.Numeric),
+		RawValue.from("A",ValueType.Numeric),RawValue.from("B",ValueType.Numeric),
 		ExpressionOperator.InstanceOf
-	).shouldEqual(RawValue("",ValueType.NotKnownAtCompileTime));
+	).shouldEqual(RawValue.from("",ValueType.NotKnownAtCompileTime));
 
 	doOperator(
-		RawValue("A",ValueType.Numeric),RawValue("B",ValueType.Numeric),
+		RawValue.from("A",ValueType.Numeric),RawValue.from("B",ValueType.Numeric),
 		ExpressionOperator.LessOrEqual
-	).shouldEqual(RawValue("NaN",ValueType.NaN));
+	).shouldEqual(RawValue.from("NaN",ValueType.NaN));
 
 	doOperator(
-		RawValue("A",ValueType.Numeric),RawValue("B",ValueType.Numeric),
+		RawValue.from("A",ValueType.Numeric),RawValue.from("B",ValueType.Numeric),
 		ExpressionOperator.Add
-	).shouldEqual(RawValue("NaN",ValueType.NaN));
+	).shouldEqual(RawValue.from("NaN",ValueType.NaN));
 
 	doOperator(
-		RawValue("A",ValueType.Numeric),RawValue("B",ValueType.Numeric),
+		RawValue.from("A",ValueType.Numeric),RawValue.from("B",ValueType.Numeric),
 		ExpressionOperator.Multiply
-	).shouldEqual(RawValue("NaN",ValueType.NaN));
+	).shouldEqual(RawValue.from("NaN",ValueType.NaN));
 
 	doOperator(
-		RawValue("-1",ValueType.Numeric),RawValue(`-1`,ValueType.String),
+		RawValue.from("-1",ValueType.Numeric),RawValue.from(`-1`,ValueType.String),
 		ExpressionOperator.Equal
-	).shouldEqual(RawValue("true",ValueType.Bool));
+	).shouldEqual(RawValue.from("true",ValueType.Bool));
 
 }
 ptrdiff_t getExprOperatorPrecedence(ExpressionOperator operator)
@@ -1116,13 +1130,13 @@ auto toUnaryExpression(RawValue value)
 @("toUnaryExpression")
 unittest
 {
-	toUnaryExpression(RawValue("undefined",ValueType.Undefined)).as!(IdentifierReferenceNode).identifier.shouldEqual("undefined");
-	toUnaryExpression(RawValue("NaN",ValueType.NaN)).as!(IdentifierReferenceNode).identifier.shouldEqual("NaN");
-	toUnaryExpression(RawValue("Infinity",ValueType.Infinity)).as!(IdentifierReferenceNode).identifier.shouldEqual("Infinity");
-	toUnaryExpression(RawValue("Null",ValueType.Null)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
-	toUnaryExpression(RawValue("true",ValueType.Bool)).as!(BooleanNode).value.shouldEqual(true);
-	toUnaryExpression(RawValue("str",ValueType.String)).as!(StringLiteralNode).value.shouldEqual("str");
-	toUnaryExpression(RawValue("42",ValueType.Numeric)).as!(DecimalLiteralNode).value.shouldEqual("42");
-	toUnaryExpression(RawValue("",ValueType.Object)).shouldThrow();
-	toUnaryExpression(RawValue("",ValueType.NotKnownAtCompileTime)).shouldThrow();
+	toUnaryExpression(RawValue.from("undefined",ValueType.Undefined)).as!(IdentifierReferenceNode).identifier.shouldEqual("undefined");
+	toUnaryExpression(RawValue.from("NaN",ValueType.NaN)).as!(IdentifierReferenceNode).identifier.shouldEqual("NaN");
+	toUnaryExpression(RawValue.from("Infinity",ValueType.Infinity)).as!(IdentifierReferenceNode).identifier.shouldEqual("Infinity");
+	toUnaryExpression(RawValue.from("Null",ValueType.Null)).as!(KeywordNode).keyword.shouldEqual(Keyword.Null);
+	toUnaryExpression(RawValue.from("true",ValueType.Bool)).as!(BooleanNode).value.shouldEqual(true);
+	toUnaryExpression(RawValue.from("str",ValueType.String)).as!(StringLiteralNode).value.shouldEqual("str");
+	toUnaryExpression(RawValue.from("42",ValueType.Numeric)).as!(DecimalLiteralNode).value.shouldEqual("42");
+	toUnaryExpression(RawValue.from("",ValueType.Object)).shouldThrow();
+	toUnaryExpression(RawValue.from("",ValueType.NotKnownAtCompileTime)).shouldThrow();
 }

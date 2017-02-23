@@ -17,6 +17,8 @@
  */
 module es6.scopes;
 
+@safe:
+
 import es6.nodes;
 import es6.utils;
 import std.format : formattedWrite;
@@ -36,7 +38,7 @@ version (unittest)
 		else if (node.type == NodeType.IdentifierNameNode)
 			node.as!(IdentifierNameNode).identifier.shouldEqual(identifier,file,line);		
 	}
-	void assertGlobals(Scope s, string[] expecteds, in string file = __FILE__, in size_t line = __LINE__)
+	void assertGlobals(Scope s, string[] expecteds, in string file = __FILE__, in size_t line = __LINE__) @trusted
 	{
 		expecteds.length.shouldEqual(s.globals.length,file,line);
 		foreach(got, expected; lockstep(s.globals,expecteds))
@@ -263,7 +265,7 @@ class Branch
 		this.children ~= bs;
 		bs.each!(b => b.parent = this);
 	}
-	void toString(scope void delegate(const(char)[]) sink) const
+	void toString(scope void delegate(const(char)[]) @safe sink) const
 	{
 		prettyPrint(PrettyPrintSink(sink));
 	}
@@ -385,7 +387,7 @@ string generateIdentifier(int idx)
 {
 	import std.conv : to;
 	if (idx < 26)
-		return (cast(char)('a'+idx)).to!string;
+		return (cast(char)('a'+idx)).to!(string);
 	if (idx < 52)
 		return (cast(char)('A'+(idx-26))).to!string;
 	return generateIdentifier(cast(int)((idx / 52)-1))~generateIdentifier(idx % 52);
@@ -393,7 +395,7 @@ string generateIdentifier(int idx)
 bool isValidIdentifier(string id)
 {
 	import es6.lexer;
-	return !isReservedKeyword(id);
+	return !isReservedKeyword(cast(const(ubyte)[])id);
 }
 string generateValidIdentifier(int start)
 {

@@ -148,12 +148,12 @@ private bool combineStatementsIntoExpression(Node node, out Node replacedWith)
 		auto a = node.children[idx];
 		auto b = node.children[idx+1];
 
-		if (a.hints.has(Hint.NonExpression))
+		if (a.hints.has(Hint.NonExpression) || a.type == NodeType.EmptyStatementNode)
 		{
 			idx += 1;
 			continue;
 		}
-		if (b.hints.has(Hint.NonExpression))
+		if (b.hints.has(Hint.NonExpression) || b.type == NodeType.EmptyStatementNode)
 		{	
 			idx += 2;
 			continue;
@@ -193,6 +193,10 @@ unittest
 	assertCombineStatements(
 		`a();b();`,
 		`a(),b()`
+	);
+	assertCombineStatements(
+		`;;;`,
+		`;;;`
 	);
 	assertCombineStatements(
 		`a = 6; b = 7, c = 8;`,
@@ -278,13 +282,13 @@ bool shortenBooleanNodes(BooleanNode node, out Node replacedWith)
 	if (node.parent.type == NodeType.UnaryExpressionNode)
 	{
 		node.parent.as!(UnaryExpressionNode).prefixs ~= new PrefixExpressionNode(Prefix.Negation);
-		replacedWith = node.replaceWith(new DecimalLiteralNode(node.value ? "0" : "1"));
+		replacedWith = node.replaceWith(new DecimalLiteralNode(cast(const(ubyte)[])(node.value ? "0" : "1")));
 	} else
 	{
 		replacedWith = node.replaceWith(
 			new UnaryExpressionNode(
 				[new PrefixExpressionNode(Prefix.Negation)],
-				new DecimalLiteralNode(node.value ? "0" : "1")
+				new DecimalLiteralNode(cast(const(ubyte)[])(node.value ? "0" : "1"))
 			)
 		);
 	}

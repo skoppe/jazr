@@ -22,6 +22,7 @@ import es6.scopes;
 import es6.analyse;
 import es6.eval;
 import es6.transforms.expressions;
+import std.algorithm : each;
 
 version(unittest)
 {

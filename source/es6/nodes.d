@@ -17,6 +17,8 @@
  */
 module es6.nodes;
 
+@safe:
+
 import es6.tokens;
 import es6.scopes;
 import std.format : formattedWrite, format;
@@ -223,7 +225,7 @@ struct Hints
 	{
 		hs = h;
 	}
-	void toString(scope void delegate(const(char)[]) sink) const
+	void toString(scope void delegate(const(char)[]) @safe sink) const
 	{
 		import std.traits : EnumMembers;
 		import std.conv : to;
@@ -250,7 +252,7 @@ struct PrettyPrintSink
 	private void delegate(const(char)[]) sink;
 	private char[1] chr;
 	int prefixIndent = 0;
-	this(void delegate(const(char)[]) sink, int indent = 0)
+	this(void delegate(const(char)[]) @safe sink, int indent = 0)
 	{
 		this.sink = sink;
 		prefixIndent = indent;
@@ -285,7 +287,7 @@ class Node
 	Node[] children;
 	Node parent;
 	private NodeType _type;
-	@property NodeType type() const { return _type; }
+	@property NodeType type() pure const { return _type; }
 	private Hints _hints;
 	@property Hints hints() { return _hints; }
 	@property void hints(int hs) { _hints = Hints(hs); }
@@ -313,7 +315,7 @@ class Node
 		children = cs;
 		version(chatty) { writeln(t); }
 	}
-	void toString(scope void delegate(const(char)[]) sink) const
+	void toString(scope void delegate(const(char)[]) @safe sink) const
 	{
 		prettyPrint(PrettyPrintSink(sink));
 	}
@@ -360,7 +362,7 @@ class Node
 			return branch.scp.getRoot();
 		return this; // todo: could also return parent's getRoot but this is probably pointless...
 	}
-	Node replaceWith(Node other)
+	Node replaceWith(Node other) @trusted
 	{
 		if (other is this)
 			return other;
@@ -377,7 +379,7 @@ class Node
 		}
 		return other;
 	}
-	void replaceChild(Node child, Node other)
+	void replaceChild(Node child, Node other) @trusted
 	{
 		import std.algorithm : countUntil;
 		auto idx = children.countUntil!(c=>c is child);
@@ -523,11 +525,11 @@ class Node
 
 final class ErrorNode : Node
 {
-	string value;
+	const(char)[] value;
 	size_t line;
 	size_t column;
 	string debugMessage;
-	this(string v, size_t l, size_t c, string debugMsg = "", in string file = __FILE__, in size_t line2 = __LINE__)
+	this(const(char)[] v, size_t l, size_t c, string debugMsg = "", in string file = __FILE__, in size_t line2 = __LINE__)
 	{
 		version (chatty) { writefln("Error At %s@%s: %s@%s:%s",file,line2,v,l,c); }
 		value = v;
@@ -572,8 +574,8 @@ final class BooleanNode : Node
 }
 final class StringLiteralNode : Node
 {
-	string value; // all strings are normalized to single quoted string (meaning original double quoted strings are properly unescaped)
-	this(string v)
+	const(ubyte)[] value; // all strings are normalized to single quoted string (meaning original double quoted strings are properly unescaped)
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.StringLiteralNode);
@@ -581,7 +583,7 @@ final class StringLiteralNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s \"%s\"\n",_type,value);
+		sink.formattedWrite("%s \"%s\"\n",_type,cast(const(char)[])value);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
@@ -596,8 +598,8 @@ final class StringLiteralNode : Node
 }
 final class BinaryLiteralNode : Node
 {
-	string value;
-	this(string v)
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.BinaryLiteralNode);
@@ -614,8 +616,8 @@ final class BinaryLiteralNode : Node
 }
 final class OctalLiteralNode : Node
 {
-	string value;
-	this(string v)
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.OctalLiteralNode);
@@ -632,15 +634,15 @@ final class OctalLiteralNode : Node
 }
 final class DecimalLiteralNode : Node
 {
-	string value;
-	this(string v)
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.DecimalLiteralNode);
 	}
-	override string toString()
+	override string toString() @trusted
 	{
-		return "DecimalLiteralNode ("~value~")";
+		return "DecimalLiteralNode ("~cast(immutable(char)[])value~")";
 	}
 	override Diff diff(Node other)
 	{
@@ -654,8 +656,8 @@ final class DecimalLiteralNode : Node
 }
 final class HexLiteralNode : Node
 {
-	string value;
-	this(string v)
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.HexLiteralNode);
@@ -683,8 +685,8 @@ final class TemplateLiteralNode : Node
 }
 final class TemplateNode : Node
 {
-	string value;
-	this(string v)
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.TemplateNode);
@@ -692,7 +694,7 @@ final class TemplateNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,value);
+		sink.formattedWrite("%s %s\n",type,cast(const(char)[])value);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
@@ -707,8 +709,8 @@ final class TemplateNode : Node
 }
 final class RegexLiteralNode : Node
 {
-	string value;
-	this(string v)
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
 	{
 		value = v;
 		super(NodeType.RegexLiteralNode);
@@ -716,7 +718,7 @@ final class RegexLiteralNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,value);
+		sink.formattedWrite("%s %s\n",type,cast(const(char)[])value);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
@@ -749,8 +751,8 @@ final class KeywordNode : Node
 }
 class IdentifierNode : Node
 {
-	string identifier;
-	this(NodeType parentType, string i)
+	const(ubyte)[] identifier;
+	this(NodeType parentType, const(ubyte)[] i)
 	{
 		identifier = i;
 		super(parentType);		
@@ -758,7 +760,7 @@ class IdentifierNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,identifier);
+		sink.formattedWrite("%s %s\n",type,cast(const(char)[])identifier);
 	}
 	override Diff diff(Node other)
 	{
@@ -773,24 +775,24 @@ class IdentifierNode : Node
 
 final class IdentifierReferenceNode : IdentifierNode
 {
-	this(string identifier)
+	this(const(ubyte)[] identifier)
 	{
 		super(NodeType.IdentifierReferenceNode,identifier);
 	}
-	override string toString()
+	override string toString() @trusted
 	{
-		return "IdentifierReferenceNode (\""~identifier~"\")";
+		return "IdentifierReferenceNode (\""~cast(immutable(char)[])identifier~"\")";
 	}
 }
 final class IdentifierNameNode : IdentifierNode
 {
-	this(string identifier)
+	this(const(ubyte)[] identifier)
 	{
 		super(NodeType.IdentifierNameNode,identifier);
 	}
-	override string toString()
+	override string toString() @trusted
 	{
-		return "IdentifierNameNode (\""~identifier~"\")";
+		return "IdentifierNameNode (\""~cast(immutable(char)[])identifier~"\")";
 	}
 }
 final class ExpressionNode : Node
@@ -874,8 +876,8 @@ final class SuperPropertyNode : Node
 }
 final class AccessorNode : Node
 {
-	string identifier;
-	this(string i)
+	const(ubyte)[] identifier;
+	this(const(ubyte)[] i)
 	{
 		identifier = i;
 		super(NodeType.AccessorNode);
@@ -883,7 +885,7 @@ final class AccessorNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,identifier);
+		sink.formattedWrite("%s %s\n",type,cast(const(char)[])identifier);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
@@ -980,7 +982,7 @@ final class UnaryExpressionNode : Node
 		sink.print(prefixs,level+1);
 		sink.print(children,level+1);
 	}
-	override Diff diff(Node other)
+	override Diff diff(Node other) @trusted
 	{
 		if (other.type != type)
 			return Diff.Type;
@@ -1133,8 +1135,8 @@ final class EmptyStatementNode : Node
 }
 final class LabelledStatementNode : Node
 {
-	string label;
-	this(string l)
+	const(ubyte)[] label;
+	this(const(ubyte)[] l)
 	{
 		label = l;
 		super(NodeType.LabelledStatementNode);
@@ -1977,7 +1979,7 @@ version (unittest)
 		throw new UnitTestException([d.getDiffMessage()],file,line);
 	}	
 }
-void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __LINE__)
+void assertTreeInternals(Node a, in string file = __FILE__, in size_t line = __LINE__) @trusted
 {
 	void assertNodeInternals(Node a)
 	{
@@ -2055,7 +2057,7 @@ private DiffResult diffBranch(Branch a, Branch b, Node c, Node d)
 	return DiffResult(c,d,Diff.No);
 
 }
-DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = __LINE__)
+DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = __LINE__) @trusted
 {
 	import std.range : lockstep;
 	version (unittest)

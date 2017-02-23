@@ -17,7 +17,10 @@
  */
 module es6.emitter;
 
+@safe:
+
 import es6.nodes;
+import es6.lexer;
 import std.range : repeat;
 import std.algorithm : copy;
 
@@ -524,6 +527,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put(")");
 			return n.children[$-1].emit(sink);
 		case NodeType.WithStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("with(");
 			node.children[0].emit(sink);
 			sink.put(")");
@@ -537,10 +542,14 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put("finally");
 			return node.children[0].emit(sink);
 		case NodeType.TryStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("try");
 			node.children.emit(sink);
 			return Guide.EndOfStatement;
 		case NodeType.ThrowStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("throw");
 			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
@@ -829,6 +838,8 @@ unittest
 	assertEmitted("a=function fun(...rest){};");
 	assertEmitted("a=function fun(a,b,c){};");
 	assertEmitted("a=function fun(a,b,c,...rest){};");
+	assertEmitted(`(function(){})();`);
+	assertEmitted(`;(function(){})();`);
 }
 @("Array Literal")
 unittest
@@ -938,11 +949,11 @@ unittest
 @("Binary Expression")
 unittest
 {
-	//assertEmitted(`a instanceof b;`);
-	//assertEmitted(`a in b;`);
-	//assertEmitted(`'using'in options;`);
-	//assertEmitted(`'using'in{b,c,d}`);
-	//assertEmitted(`a&b|c&&d||e^f===g==h!==i!=j<=k<l>=m>n<<o>>>p>>q+r-s*t/u%v;`);
+	assertEmitted(`a instanceof b;`);
+	assertEmitted(`a in b;`);
+	assertEmitted(`'using'in options;`);
+	assertEmitted(`'using'in{b,c,d}`);
+	assertEmitted(`a&b|c&&d||e^f===g==h!==i!=j<=k<l>=m>n<<o>>>p>>q+r-s*t/u%v;`);
 	assertEmitted(`'O'+ ++h;`);
 	assertEmitted(`'O'-++h;`);
 	assertEmitted(`'O'+--h;`);
@@ -1055,6 +1066,7 @@ unittest
 {
 	assertEmitted(`throw new error;`);
 	assertEmitted(`throw'string';`);
+	assertEmitted(`if(a)d=4;else throw new Bla();`);
 }
 @("Try Statement")
 unittest

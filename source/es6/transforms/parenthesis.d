@@ -24,8 +24,8 @@ import es6.transforms.conditionals;
 import option;
 import es6.analyse;
 import es6.eval;
-import std.algorithm : map, min, max, any;
-import std.range : drop;
+import std.algorithm : map, min, max, any, reduce;
+import std.range : drop, take;
 
 version(unittest)
 {

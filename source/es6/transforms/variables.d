@@ -20,6 +20,8 @@ module es6.transforms.variables;
 import es6.nodes;
 import es6.scopes;
 import es6.analyse;
+import std.algorithm : map;
+import std.array : array;
 
 version(unittest)
 {
@@ -154,9 +156,9 @@ void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList()
 		);
 		string id = s.generateFreeIdentifier(idCounter);
 		counters[cast(void*)s] = idCounter;
-		node.identifier = id;
+		node.identifier = cast(const(ubyte)[])id;
 		foreach(n; v.references)
-			n.as!(IdentifierReferenceNode).identifier = id;
+			n.as!(IdentifierReferenceNode).identifier = cast(const(ubyte)[])id;
 	}
 }
 private string generateFreeIdentifier(Scope s, ref int idCounter)
