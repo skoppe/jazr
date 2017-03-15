@@ -24,6 +24,7 @@ import option;
 import es6.analyse;
 import es6.eval;
 import std.range : retro, enumerate;
+import std.algorithm : all, each, map, reduce, sum, any;
 
 version(unittest)
 {
@@ -279,6 +280,8 @@ unittest
 }
 bool shortenBooleanNodes(BooleanNode node, out Node replacedWith)
 {
+	if (node.parent.type == NodeType.CallExpressionNode)
+		return false;
 	if (node.parent.type == NodeType.UnaryExpressionNode)
 	{
 		node.parent.as!(UnaryExpressionNode).prefixs ~= new PrefixExpressionNode(Prefix.Negation);
@@ -318,6 +321,10 @@ unittest
 	assertShortenBooleanNodes(
 		`var b = !true`,
 		`var b = !!0`
+	);
+	assertShortenBooleanNodes(
+		`true.should.be.false;`,
+		`true.should.be.false;`
 	);
 }
 
@@ -383,6 +390,239 @@ unittest
 	assertMoveStringComparison(
 		`"abc" < "def" === true`,
 		`"abc" < "def" === true`
+	);
+}
+
+void convertHexToDecimalLiterals(HexLiteralNode node, out Node replacedWith)
+{
+	if (node.value.length > 8)
+		return;
+	uint dec = (cast(const(char)[])node.value).to!uint(16);
+	replacedWith = node.replaceWith(new DecimalLiteralNode(cast(const(ubyte)[])dec.to!string));
+}
+
+@("convertHexToDecimalLiterals")
+unittest
+{
+	alias assertHexDecLiterals = assertTransformations!(convertHexToDecimalLiterals);
+	assertHexDecLiterals(
+		`0x1;`,
+		`1;`
+	);
+	assertHexDecLiterals(
+		`0xFf;`,
+		`255;`
+	);
+}
+
+void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
+{
+	auto opNode = node.children[1].as!(ExpressionOperatorNode);
+	if (opNode.operator != ExpressionOperator.LogicalAnd && 
+		opNode.operator != ExpressionOperator.LogicalOr)
+		return;
+	if ((cast(Node)node).isPartOfConditionalExpressionCondition || (cast(Node)node).isPartOfBinaryExpression || (cast(Node)node).isPartOfIfStatementCondition)
+		return;
+
+	if (node.children[0].type == NodeType.UnaryExpressionNode)
+	{
+		if (node.parent.type == NodeType.ParenthesisNode)
+			return;
+		auto unary = node.children[0].as!UnaryExpressionNode;
+		if (unary.children[0].type == NodeType.ParenthesisNode)
+		{
+			if (unary.prefixs.length != 1)
+				return;
+			if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
+				return;
+
+			auto paren = unary.children[0].as!ParenthesisNode;
+			if (paren.children.length != 1)
+				return;
+			if (paren.children[0].type != NodeType.BinaryExpressionNode)
+				return;
+			auto innerBin = paren.children[0].as!BinaryExpressionNode;
+
+			auto heuristic = innerBin.nodes.map!((n){
+				if (n.type != NodeType.UnaryExpressionNode)
+					return -1;
+				auto un = n.as!UnaryExpressionNode;
+				if (un.prefixs.length != 1)
+					return -1;
+				if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
+					return -1;
+				return 1;
+			});
+			auto hasAnd = innerBin.getOperators.any!(o => o.operator == ExpressionOperator.LogicalAnd);
+			auto hasOr = innerBin.getOperators.any!(o => o.operator == ExpressionOperator.LogicalOr);
+
+			if (reduce!"a+b"(heuristic) >= 0 && !(hasAnd && hasOr))
+			{
+				foreach(n; innerBin.nodes)
+				{
+					if (n.type != NodeType.UnaryExpressionNode)
+						n.negateNode();
+					else
+					{
+						auto un = n.as!UnaryExpressionNode;
+						if (un.prefixs.length == 1)
+						{
+							auto pref = un.prefixs[0].as!PrefixExpressionNode;
+							if (pref.prefix == Prefix.Negation)
+							{
+								un.replaceWith(un.children[0]);
+							} else
+								un.prefixs = [cast(Node)new PrefixExpressionNode(Prefix.Negation)] ~ un.prefixs;
+						}
+					}
+				}
+				innerBin.getOperators.each!((o){ o.operator = o.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd; o.reanalyseHints(); });
+				node.replaceChildWith(unary,innerBin);
+				opNode.reanalyseHints();
+			} else
+			{
+				node.replaceChildWith(unary,innerBin);
+				opNode.operator = opNode.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd;
+				opNode.reanalyseHints();
+			}
+		} else
+		{
+			if (unary.prefixs.length != 1)
+				return;
+			if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
+				return;
+			unary.replaceWith(unary.children[0]);
+			opNode.operator = opNode.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd;
+			opNode.reanalyseHints();
+		}
+	} else if (node.children[0].type == NodeType.ParenthesisNode)
+	{
+		auto paren = node.children[0].as!ParenthesisNode;
+		if (paren.children.length != 1)
+			return;
+		if (paren.children[0].type != NodeType.BinaryExpressionNode)
+			return;
+		auto innerBin = paren.children[0].as!BinaryExpressionNode;
+
+		auto hasAnd = innerBin.getOperators.any!(o => o.operator == ExpressionOperator.LogicalAnd);
+		auto hasOr = innerBin.getOperators.any!(o => o.operator == ExpressionOperator.LogicalOr);
+		if (hasAnd && hasOr)
+			return;
+
+		foreach(n; innerBin.nodes)
+		{
+			if (n.type != NodeType.UnaryExpressionNode)
+				return;
+			auto un = n.as!UnaryExpressionNode;
+			if (un.prefixs.length != 1)
+				return;
+			if (un.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
+				return;
+		}
+		innerBin.nodes.each!(n => n.replaceWith(n.children[0]));
+		innerBin.getOperators.each!((o){ o.operator = o.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd; o.reanalyseHints(); });
+		node.replaceChildWith(paren,innerBin);
+		opNode.operator = opNode.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd;
+		opNode.reanalyseHints();
+	}
+}
+
+@("invertBinaryExpressions")
+unittest
+{
+	alias assertInvertBinExpr = assertTransformations!(invertBinaryExpressions);
+
+	assertInvertBinExpr(
+		`!a && b()`,
+		`a || b()`
+	);
+	assertInvertBinExpr(
+		`d && !a && b()`,
+		`d && !a && b()`
+	);
+	assertInvertBinExpr(
+		`d || !a && b()`,
+		`d || !a && b()`
+	);
+	assertInvertBinExpr(
+		`!a && b() && d`,
+		`a || b() && d`
+	);
+	assertInvertBinExpr(
+		`(!a || !b) && c()`,
+		`a && b || c()`
+	);
+	assertInvertBinExpr(
+		`(!a && !b) && c()`,
+		`a || b || c()`
+	);
+	assertInvertBinExpr(
+		`!(a && b) && c()`,
+		`a && b || c()`
+	);
+	assertInvertBinExpr(
+		`!(a && b) && c()`,
+		`a && b || c()`
+	);
+	assertInvertBinExpr(
+		`!(a || b) && c()`,
+		`a || b || c()`
+	);
+	assertInvertBinExpr(
+		`!(!a || b) && c()`,
+		`a && !b && c()`
+	);
+	assertInvertBinExpr(
+		`!(!a || b || d || e) && c()`,
+		`!a || b || d || e || c()`
+	);
+	assertInvertBinExpr(
+		`!(a || b || d) && c()`,
+		`a || b || d || c()`
+	);
+	assertInvertBinExpr(
+		`(!a && !b && !d) && c()`,
+		`a || b || d || c()`
+	);
+	assertInvertBinExpr(
+		`(!a || !b || !d) && c()`,
+		`a && b && d || c()`
+	);
+	assertInvertBinExpr(
+		`!(!a || !b || c) && b()`,
+		`a && b && !c && b()`
+	);
+	assertInvertBinExpr(
+		`!(!a || b || c) && b()`,
+		`!a || b || c || b()`
+	);
+	assertInvertBinExpr(
+		`!(!a && !e) && c()`,
+		`a || e && c()`
+	);
+	assertInvertBinExpr(
+		`!(!a && !e && !f) && c()`,
+		`a || e || f && c()`
+	);
+	assertInvertBinExpr(
+		`!(!a || !b || !d && !e) && c()`,
+		`!a || !b || !d && !e || c()` // TODO: this can be `a && b && (d || e) && c()`
+	);
+	assertInvertBinExpr(
+		`(!a || !b && !d) && c()`,
+		`(!a || !b && !d) && c()` // TODO: this can be `a && (b || d) || c()`
+	);
+	assertInvertBinExpr(
+		`(!a && !b || !d) && c()`,
+		`(!a && !b || !d) && c()` // TODO: this can be `(a || b) && d || c()`
+	);
+	assertInvertBinExpr(
+		`!(!a || !b && !c) && b()`,
+		`!a || !b && !c || b()` // TODO: this can be `a && (b || c) && b()`
+	);
+	assertInvertBinExpr(
+		`(c(), !a && !g) && b()`,
+		`(c(), !a && !g) && b()`
 	);
 }
 

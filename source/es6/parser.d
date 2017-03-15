@@ -111,12 +111,22 @@ final class Parser
 	private {
 		Lexer lexer;
 		Token token;
-		PointerBumpAllocator allocator;
+		ulong _nodeCnt;
+		version(customallocator)
+		{
+			PointerBumpAllocator allocator;
+		}
 		auto make(T, Args...)(auto ref Args args)
 		{
-			return allocator.make!(T)(args);
+			version(customallocator)
+			{
+				return allocator.make!(T)(args);
+			} else {
+				return new T(args);
+			}
 		}
 	}
+	@property ulong nodeCnt() { return _nodeCnt; }
 	this(const (ubyte)[] s)
 	{
 		lexer = Lexer(s);
@@ -559,9 +569,10 @@ final class Parser
 			auto expr = parseExpression(Attribute.In | attributes);
 			// TODO: do something with errornode here
 			children ~= expr;
-			if (token.type == Type.Error)
+			if (expr.type == NodeType.ErrorNode)
 			{
 				children ~= error(token.match);
+				scanAndSkipCommentsAndTerminators();
 				return make!(TemplateLiteralNode)(children);
 			}
 			children ~= make!(TemplateNode)(token.match);
@@ -981,6 +992,7 @@ final class Parser
 		doLHS:
 		attributes |= Attribute.NoRegex;
 		auto lhsexpr = parseLeftHandSideExpression(attributes);
+		// TODO: BUG: we cannot parse a Increment or Decrement if there is new line after the lhsexpr (even if that newline is part of a single or multi-line comment) 
 		if (token.type == Type.Increment)
 		{
 			auto node = make!(UnaryExpressionNode)(prefixExprs,lhsexpr);
@@ -1038,9 +1050,13 @@ final class Parser
 					switch (Keywords.get(token.match))
 					{
 						case Keyword.Super:
+							if (content !is null)
+								goto end;
 							content = parseSuperProperty(attributes);
 							break;
 						case Keyword.New:
+							if (content !is null)
+								goto end;
 							news++;
 							scanToken(attributes.toGoal);
 							break;
@@ -1251,8 +1267,26 @@ final class Parser
 					case Keyword.Do: node = parseDoWhileStatement(attributes); break;
 					case Keyword.While: node = parseWhileStatement(attributes); break;
 					case Keyword.For: node = parseForStatement(attributes); break;
-					case Keyword.Continue: scanToken(attributes.toGoal); node = make!(ContinueStatementNode)(); break;
-					case Keyword.Break: scanToken(attributes.toGoal); node = make!(BreakStatementNode)(); break;
+					case Keyword.Continue: 
+						scanToken(attributes.toGoal);
+						const(ubyte)[] label;
+						if (token.type == Type.Identifier)
+						{
+							label = token.match;
+							scanToken(attributes.toGoal);
+						}
+						node = make!(ContinueStatementNode)(label);
+						break;
+					case Keyword.Break: 
+						scanToken(attributes.toGoal);
+						const(ubyte)[] label;
+						if (token.type == Type.Identifier)
+						{
+							label = token.match;
+							scanToken(attributes.toGoal);
+						}
+						node = make!(BreakStatementNode)(label);
+						break;
 					case Keyword.With: node = parseWithStatement(attributes); break;
 					case Keyword.Throw: node = parseThrowStatement(attributes); break;
 					case Keyword.Try: node = parseTryStatement(attributes); break;
@@ -1869,7 +1903,7 @@ final class Parser
 			skipCommentsAndLineTerminators();
 			if (token.type != Type.Comma)
 				break;
-			scanToken(attributes.toGoal);
+			scanAndSkipCommentsAndTerminators(attributes.toGoal);
 		}
 		if (children.length == 0)
 			return error("Expected at least on lexical declaration");
@@ -2256,11 +2290,18 @@ final class Parser
 	}
 }
 
+auto parser(const(ubyte)[] i, bool hasSentinal = false)
+{
+	if (hasSentinal)
+		return new Parser(i);
+	static const(ubyte)[16] sentinal = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+	const(ubyte)[] input = i ~ sentinal;
+	return new Parser(input);
+}
+
 auto parser(string i)
 {
-	static const(ubyte)[4] sentinal = [0,0,0,0];
-	const(ubyte)[] input = (cast(const(ubyte)[])i) ~ sentinal;
-	return new Parser(input);
+	return parser(cast(const(ubyte)[])i, false);
 }
 
 @("parsePrimaryExpression")
@@ -2292,6 +2333,7 @@ unittest
 	assertNodeType!KeywordNode("null").keyword.shouldEqual(Keyword.Null);
 	assertNodeType!BooleanNode("true").value.shouldBeTrue();
 	assertNodeType!BooleanNode("false").value.shouldBeFalse();
+	assertNodeType!TemplateLiteralNode("`${double(2)} != null ? ${double(2)} : {}`");
 }
 @("parseUnaryExpression")
 unittest
@@ -2386,6 +2428,11 @@ unittest
 	assertNodeType!KeywordNode("null").keyword.shouldEqual(Keyword.Null);
 	assertNodeType!BooleanNode("true").value.shouldBeTrue();
 	assertNodeType!BooleanNode("false").value.shouldBeFalse();
+
+	auto parser = parser("noop\nnew ReaddirReq(path, cb)");
+	parser.scanToken();
+	auto n = parser.parseLeftHandSideExpression();
+	n.shouldBeOfType!IdentifierReferenceNode;
 }
 @("parseRightHandSideExpression")
 unittest
@@ -2543,6 +2590,8 @@ unittest
 	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n // \n;");
 	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n;");
 	parseStatement!(LabelledStatementNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n:");
+	parseStatement!(ContinueStatementNode)("continue label;").label.shouldEqual("label");
+	parseStatement!(BreakStatementNode)("break label;").label.shouldEqual("label");
 }
 @("parseVariableStatement")
 unittest
@@ -2552,10 +2601,25 @@ unittest
 	parseVariableStatement("var ").shouldThrow();
 	parseVariableStatement("var a").children[0].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("a");
 	parseVariableStatement("var a,b").children[1].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("b");
+	parseVariableStatement("var a,\nb").children[1].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("b");
 	parseVariableStatement("var a = 77").children[0].shouldBeOfType!(VariableDeclarationNode).children[1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("77");
 	parseVariableStatement("var a = b = 77").children[0].shouldBeOfType!(VariableDeclarationNode).children[1].shouldBeOfType!(AssignmentExpressionNode);
 	parseVariableStatement("var a = b = 77, c = 44").children[1].shouldBeOfType!(VariableDeclarationNode).children[1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("44");
 	parseVariableStatement("var /* multi \r\n line \n comment */ \r\n // \n \n a");
+}
+@("parseLexicalDeclaration")
+unittest
+{
+	alias parseLexicalDeclaration(Type = LexicalDeclarationNode) = parseNode!("parseLexicalDeclaration",Type);
+
+	parseLexicalDeclaration("let ").shouldThrow();
+	parseLexicalDeclaration("let a").children[0].shouldBeOfType!(LexicalDeclarationItemNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("a");
+	parseLexicalDeclaration("let a,b").children[1].shouldBeOfType!(LexicalDeclarationItemNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("b");
+	parseLexicalDeclaration("let a,\nb").children[1].shouldBeOfType!(LexicalDeclarationItemNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("b");
+	parseLexicalDeclaration("let a = 77").children[0].shouldBeOfType!(LexicalDeclarationItemNode).children[1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("77");
+	parseLexicalDeclaration("let a = b = 77").children[0].shouldBeOfType!(LexicalDeclarationItemNode).children[1].shouldBeOfType!(AssignmentExpressionNode);
+	parseLexicalDeclaration("let a = b = 77, c = 44").children[1].shouldBeOfType!(LexicalDeclarationItemNode).children[1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("44");
+	parseLexicalDeclaration("let /* multi \r\n line \n comment */ \r\n // \n \n a");
 }
 @("parseForStatement")
 unittest
@@ -2627,6 +2691,7 @@ unittest
 	parseObjectLiteral(`{"abc"}`).shouldThrowSaying("Error: Expected colon as part of PropertyDefinition");
 	//parseObjectLiteral(`{function}`).shouldThrowSaying("Error: Unexpected keyword function");
 	parseObjectLiteral(`{,}`).shouldThrowSaying("Error: Expected a PropertyDefinition");
+	parseObjectLiteral(`{}`).shouldThrowSaying("Here we test whether shouldThrowSaying fails when the expr doesn't throw").shouldThrow;
 
 }
 @("parseArrayLiteral")
@@ -2802,6 +2867,8 @@ unittest
 	parseModule(`a = 100 / b[4]
 /huphup/.match(b)
 `).findFirst(NodeType.RegexLiteralNode).shouldNotBeNull;
+	parseModule("id \n ++c").findFirst(NodeType.UnaryExpressionNode).as!(UnaryExpressionNode).children[0].as!(IdentifierReferenceNode).identifier.shouldEqual(cast(const(ubyte)[])"c");
+
 }
 @("parseImportDeclaration")
 unittest

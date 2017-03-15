@@ -94,6 +94,15 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out 
 		truthAssign.diff(falseAssign) != Diff.No)
 		return false;
 
+	auto truthAssignOp = truthAssignExpr.children[1].as!(AssignmentOperatorNode);
+	auto falseAssignOp = falseAssignExpr.children[1].as!(AssignmentOperatorNode);
+
+	Assignment newAssign = Assignment.Assignment;
+	if (truthAssignOp.assignment == falseAssignOp.assignment)
+		newAssign = truthAssignOp.assignment;
+	else if (truthAssignOp.assignment != falseAssignOp.assignment)
+		return false;
+
 	ifStmt.truthPath.branch.remove();
 	ifStmt.elsePath.branch.remove();
 
@@ -102,19 +111,23 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out 
 	truthAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
 	falseAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
 
-	Node oper = new AssignmentOperatorNode(Assignment.Assignment);
+	auto oper = new AssignmentOperatorNode(newAssign);
+
+	auto truthPath = ifStmt.truthPath.convertToAssignmentExpression;
+	auto elsePath = ifStmt.elsePath.convertToAssignmentExpression;
 	auto cond = new ConditionalExpressionNode(
 			condition,
-			ifStmt.truthPath.convertToAssignmentExpression,
-			ifStmt.elsePath.convertToAssignmentExpression
+			truthPath,
+			elsePath
 		);
+
 	Node r = new AssignmentExpressionNode([truthAssign,
 		oper,
 		cond
 	]);
+	r.reanalyseHints();
 	cond.reanalyseHints();
 	oper.reanalyseHints();
-	r.reanalyseHints();
 
 	if (condition.type == NodeType.ExpressionNode)
 	{
@@ -204,6 +217,30 @@ unittest
 		`if(y) ; else if(k) b=5; else b=7;`,
 		`if(y) ; else b = k ? 5 : 7;`
 	);
+	assertIfElseAssignmentToConditional(
+		`if(l) k += 5; else k += 3;`,
+		`k += l ? 5 : 3`
+	);
+	assertIfElseAssignmentToConditional(
+		`if(l) k += 5; else k = 3;`,
+		`if(l) k += 5; else k = 3;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if(l) k = 5; else k += 3;`,
+		`if(l) k = 5; else k += 3;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if(l) k -= 5; else k += 3;`,
+		`if(l) k -= 5; else k += 3;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if(l) k -= p ? 3 : 5; else k += 3;`,
+		`if(l) k -= p ? 3 : 5; else k += 3;`
+	);
+	assertIfElseAssignmentToConditional(
+		`if(l) { b(); k *= 5; } else k *= 3;`,
+		`k *= l ? (b(), 5) : 3`
+	);
 }
 void negateBinaryExpression(BinaryExpressionNode node)
 {
@@ -248,6 +285,12 @@ void negateCondition(IfStatementNode node)
 	if (unary.isDefined)
 	{
 		negateUnaryExpression(unary.get);
+		return;
+	}
+	auto expr = node.condition().opt!(ExpressionNode);
+	if (expr.isDefined)
+	{
+		negateNode(node.condition.children[$-1]);
 		return;
 	}
 	negateNode(node.condition());

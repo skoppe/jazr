@@ -21,7 +21,7 @@ module es6.reporter;
 
 import es6.nodes;
 
-string generateErrorMessage(ErrorNode error, string input, int around = 2)
+string generateErrorMessage(ErrorNode error, const(char)[] input, int around = 2)
 {
 	import std.string : lineSplitter;
 	import std.algorithm : joiner, max, map;
@@ -42,8 +42,8 @@ string generateErrorMessage(ErrorNode error, string input, int around = 2)
 	
 	return format("\n%s\n%s^ %s\n%s at %s:%s",lead.take(pre).joiner("\n"),s,cast(const(char)[])error.value,tail.drop(1).joiner("\n"),error.line,error.column);
 }
-void reportError(ErrorNode error, string input, int around = 2)
+void reportError(ErrorNode error, const(ubyte)[] input, int around = 2)
 {
 	import std.stdio : writeln;
-	writeln(generateErrorMessage(error,input,6));
+	writeln(generateErrorMessage(error,cast(const(char)[])input,6));
 }

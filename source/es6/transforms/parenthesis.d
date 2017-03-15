@@ -64,6 +64,10 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 	bool isFunctionExpr = node.children[0].type == NodeType.FunctionExpressionNode;
 	bool isCallExpr = node.children[0].type == NodeType.CallExpressionNode;
 	bool isPartOfVariableDecl = node.parent.type == NodeType.VariableDeclarationNode;
+	bool isPartOfPropertyDefinition = node.parent.type == NodeType.PropertyDefinitionNode;
+
+	if (isPartOfPropertyDefinition)
+		return false;
 
 	if (isPartOfVariableDecl)
 	{
@@ -512,5 +516,10 @@ unittest
 
 	assertRemoveParens(`!(1 - 2,b) - 3 + 4`, `1 - 2, !b - 3 + 4`);
 	assertRemoveParens(`a(), !(1 - 2,b) - 3 + 4`, `a(), 1 - 2, !b - 3 + 4`);
+
+	assertRemoveParens(
+		`var a = { body: (tmp = expression(true), semicolon(), tmp) };`,
+		`var a = { body: (tmp = expression(true), semicolon(), tmp) };`
+	);
 
 }

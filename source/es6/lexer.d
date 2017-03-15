@@ -34,6 +34,7 @@ version (unittest)
 {
 	import unit_threaded;
 	import std.stdio;
+	import std.algorithm : equal;
 }
 enum State
 {
@@ -154,7 +155,7 @@ public:
     }
 }
 
-bool isReservedKeyword(const(ubyte)[] keyword)
+bool isReservedKeyword(const(ubyte)[] keyword) nothrow
 {
 	if (keyword.length < 2 || keyword.length > 10)
 		return false;
@@ -165,7 +166,7 @@ bool isReservedKeyword(const(ubyte)[] keyword)
 		k != Keyword.Let &&
 		k != Keyword.Get;
 }
-bool isWhitespace(Char)(Char c)
+bool isWhitespace(Char)(Char c) nothrow
 {
 	if (c < '\u0021')
 		return c == '\u0009' || c == '\u000B' || c == '\u000C' || c == '\u0020';
@@ -175,7 +176,7 @@ bool isWhitespace(Char)(Char c)
 		return false;
 	return (c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
 }
-size_t getWhiteSpaceLength(Range)(Range r, size_t idx = 0)
+size_t getWhiteSpaceLength(Range)(Range r, size_t idx = 0) nothrow
 {
 	if (r[idx] < 0xc0) // 1 byte code point
 	{
@@ -200,13 +201,13 @@ unittest
 	assert("\x09\x0b\x0c\x20\u00a0\ufeff".all!isWhitespace);
 	assert(iota('\u02b0','\u02ff').all!isWhitespace);
 }
-auto next(Source)(ref Source s)
+auto next(Source)(ref Source s) nothrow
 {
 	auto chr = s.front();
 	s.popFront();
 	return chr;
 }
-bool popNextIf(Source, Elem)(ref Source s, Elem e, in string file = __FILE__, in size_t line = __LINE__)
+bool popNextIf(Source, Elem)(ref Source s, Elem e)
 {
 	//import std.format : format;
 	//assert(!s.empty,format("Invalid popNextIf from %s @ %s",file,line));
@@ -228,7 +229,7 @@ unittest
 //{
 //	return (s == 0x0a || s == 0x0d);// || s == '\u2028' || s == '\u2029');
 //}
-size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0)
+size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0) pure nothrow
 {
 	if (r[idx] <= 0x7f)
 	{
@@ -243,20 +244,17 @@ size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0)
 	{
 		auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
 		return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
-	} else if (r[idx] >= 0xc0) // 2 byte unicode
-	{
-		return 0;
 	}
-	assert(0);
+	return 0;
 }
-auto getLineTerminatorUnicodeLength(Range)(Range r)
+auto getLineTerminatorUnicodeLength(Range)(Range r) pure nothrow
 {
 	if (r[0] < 0xe0 && r[0] >= 0xf0)
 		return 0;
 	auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
 	return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
 }
-auto getRegexLength(Range)(Range r)
+auto getRegexLength(Range)(Range r) pure nothrow
 {
 	size_t idx = 1;
 	bool inOneOfExpr = false;
@@ -307,21 +305,42 @@ auto getRegexLength(Range)(Range r)
 		}
 	}
 }
-//@("isLineTerminator")
-//unittest
-//{
-//	import std.algorithm : all;
-//	"\u2028\u2029\u000A\u000D".all!(isLineTerminator).shouldBeTrue();
-//}
-//auto isStartIdentifier(Char)(Char chr)
-//{
-//	return chr == '$' || chr == '_' || (chr >= '\u0041' && chr <= '\u005a') || (chr >= '\u0061' && chr <= '\u007a') || chr == '\u00aa' ||
-//		chr == '\u00b5' || chr == '\u00ba' || (chr >= '\u00c0' && chr <= '\u00d6') || (chr >= '\u00d8' && chr <= '\u00f6') || chr == '\u2118' ||
-//		chr == '\u212e' || (chr >= '\u309b' && chr <= '\u309c');
-//}
-// returns the length of bytes of a start identifer in the range (if any)
-// TODO: there are more valid start identifiers... (look in old es6-grammer source, or in acorn)
-auto getStartIdentifierLength(Range)(Range r)
+
+bool isValid2ByteIdentifierStart(size_t cp) nothrow @nogc
+{
+	static const int[] cp2b = [0xaa,0xaa,0xb5,0xb5,0xba,0xba,0xc0,0xd6,0xd8,0xf6,0xf8,0x2c1,0x2c6,0x2d1,0x2e0,0x2e4,0x2ec,0x2ec,0x2ee,0x2ee,0x370,0x374,0x376,0x377,0x37a,0x37d,0x37f,0x37f,0x386,0x386,0x388,0x38a,0x38c,0x38c,0x38e,0x3a1,0x3a3,0x3f5,0x3f7,0x481,0x48a,0x52f,0x531,0x556,0x559,0x559,0x561,0x587,0x5d0,0x5ea,0x5f0,0x5f2,0x620,0x64a,0x66e,0x66f,0x671,0x6d3,0x6d5,0x6d5,0x6e5,0x6e6,0x6ee,0x6ef,0x6fa,0x6fc,0x6ff,0x6ff,0x710,0x710,0x712,0x72f,0x74d,0x7a5,0x7b1,0x7b1,0x7ca,0x7ea,0x7f4,0x7f5,0x7fa,0x7fa];
+	size_t len = cp2b.length / 2;
+	size_t idx = len / 2;
+	while (true)
+	{
+		if (cp2b[idx*2] > cp)
+		{
+			len /= 2;
+			if (len == 0)
+				return false;
+			idx -= (len / 2);
+		} else if (cp2b[idx*2] < cp)
+		{
+			if (cp2b[idx*2+1] >= cp)
+				return true;
+			len /= 2;
+			if (len == 0)
+				return false;
+			idx += (len / 2);
+		} else
+			return true;
+	}
+}
+@("isValid2ByteIdentifierStart")
+unittest
+{
+	isValid2ByteIdentifierStart(0xba).shouldBeTrue;
+	isValid2ByteIdentifierStart(0x2aa).shouldBeTrue;
+	isValid2ByteIdentifierStart(0xd7).shouldBeFalse;
+	isValid2ByteIdentifierStart(0x2c5).shouldBeFalse;
+}
+
+auto getStartIdentifierLength(Range)(Range r) nothrow
 	if (is (ElementType!Range : ubyte))
 {
 	ubyte first = r.front();
@@ -337,12 +356,13 @@ auto getStartIdentifierLength(Range)(Range r)
 	} else if (first >= 0xc0)
 	{
 		auto hex = r.decodeUnicodeCodePoint!2;	// 2 byte unicode
-		return (hex == 0xaa || hex == 0xb5 || hex == 0xba || (hex >= 0xc0 && hex <= 0xd6) || (hex >= 0xd8 && hex <= 0xf6)) ? 2 : 0;
+		return hex.isValid2ByteIdentifierStart ? 2 : 0;
+		//return (hex == 0xaa || hex == 0xb5 || hex == 0xba || (hex >= 0xc0 && hex <= 0xd6) || (hex >= 0xd8 && hex <= 0xf6)) ? 2 : 0;
 	}
 	return 0;
 }
 
-size_t decodeUnicodeCodePoint(size_t length, Range)(Range r, size_t idx = 0)
+size_t decodeUnicodeCodePoint(size_t length, Range)(Range r, size_t idx = 0) pure nothrow
 {
 	static if (length == 2)
 	{
@@ -364,7 +384,7 @@ unittest {
 	assert([0xE2,0x82,0xAC].decodeUnicodeCodePoint!(3) == 0x20AC);
 	assert([0xF0,0x90,0x8D,0x88].decodeUnicodeCodePoint!(4) == 0x10348);
 }
-size_t getUnicodeLength(Range)(Range r, size_t idx = 0)
+size_t getUnicodeLength(Range)(Range r, size_t idx = 0) pure nothrow @nogc
 {
 	if (r[idx] < 0xc0)
 		return 1;
@@ -386,6 +406,18 @@ template unicodeRepresentation(uint i) {
 		static assert("invalid unicode code point");
 	}
 }
+auto toUnicodeRepresentation(uint i) pure nothrow
+{
+	if (i < 0x800) {
+		return cast(ubyte[])[0xc0 | ((i >> 6) & 0x1f), 0x80 | (i & 0x3f)];
+	} else if (i < 0x10000) {
+		return cast(ubyte[])[0xe0 | ((i >> 12) & 0x0f), 0x80 | ((i >> 6) & 0x3f), 0x80 | (i & 0x3f)];
+	} else if (i < 0x110000) {
+		return cast(ubyte[])[0xf0 | ((i >> 18) & 0x07), 0x80 | ((i >> 12) & 0x3f), 0x80 | ((i >> 6) & 0x3f), 0x80 | (i & 0x3f)];
+	} else {
+		return cast(ubyte[])[];
+	}
+}
 //auto isTailIdentifier(Char)(Char chr)
 //{
 //	return 
@@ -400,7 +432,7 @@ template unicodeRepresentation(uint i) {
 //		);
 //}
 
-auto getTailIdentifierLength(Range)(Range r, size_t idx = 0)
+auto getTailIdentifierLength(Range)(Range r, size_t idx = 0) pure nothrow @nogc
 {
 	if (r[idx] < 0x80)
 		return ((r[idx] >= 0x61 && r[idx] <= 0x7a) || (r[idx] >= 0x41 && r[idx] <= 0x5a) || (r[idx] >= 0x30 && r[idx] <= 0x39) || r[idx] == '$' || r[idx] == '_' || r[idx] == 0x5f) ? 1 : 0;
@@ -418,15 +450,8 @@ auto getTailIdentifierLength(Range)(Range r, size_t idx = 0)
 	}
 	assert(0);
 }
-//to enable sse4.2 instructions and to get rid of auto-decoding we need to convert everything to a uchar type
-//instead of returning whether some char is a tail/start/whitespace/line we just ask how many ubyte the
-//whitespace/line/start/tail takes and return 0 if there is none
-//this way we combat the fact that stuff sometimes uses up 2, 3 or 4 ubyte\'s and returning a bool aint enough
-//on the other hand we might as well start at the multi line comments and incorperate the sse4.2 instructions there
-//and subsequently expand to other areas, and see how we need to adjust the is-line/tail/start/whitespace functions
-//as we go. (for one, isWhitespace is only being used in popWhitespace, which is easy to sse4.2-ize)
 
-auto coerceToSingleQuotedString(const ubyte[] str)
+auto coerceToSingleQuotedString(const ubyte[] str) pure nothrow
 {
 	import std.algorithm : max,min;
 	if (str.length == 0)
@@ -456,7 +481,7 @@ auto coerceToSingleQuotedString(const ubyte[] str)
 		sink.put('\\');
 	return sink.data;
 }
-auto coerceToSingleQuotedString(string str)
+auto coerceToSingleQuotedString(string str) pure nothrow
 {
 	return cast(const(char)[])coerceToSingleQuotedString(cast(const(ubyte)[])str);
 }
@@ -536,7 +561,6 @@ struct Lexer
 	size_t line;
 	size_t column;
 	private size_t tokenLength;
-	private bool newLine;
 	const (ubyte)[] s;
 	void pushState(State state) pure
 	{
@@ -557,7 +581,6 @@ struct Lexer
 		l.line = this.line;
 		l.column = this.column;
 		l.tokenLength = this.tokenLength;
-		l.newLine = this.newLine;
 		l.lexerState = appender!(State[])(this.lexerState.data.dup());
 		return l;
 	}
@@ -571,14 +594,7 @@ struct Lexer
 	{
 		auto scanToken(Goal goal = Goal.All, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
-			if (newLine)
-			{
-				line+=1;
-				column=0;
-				newLine = false;
-			} else{
-				column += tokenLength;
-			}
+			column += tokenLength;
 			tokenLength = 0;
 			token = lexToken(goal);
 			version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
@@ -588,26 +604,19 @@ struct Lexer
 	{
 		auto scanToken(Goal goal = Goal.All)
 		{
-			if (newLine)
-			{
-				line+=1;
-				column=0;
-				newLine = false;
-			} else{
-				column += tokenLength;
-			}
+			column += tokenLength;
 			tokenLength = 0;
 			token = lexToken(goal);
 			version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
 			return token;
 		}
 	}
-	private auto createTokenAndAdvance(Type tokenType, size_t len, const (ubyte)[] match)
+	private auto createTokenAndAdvance(Type tokenType, size_t len, const (ubyte)[] match) nothrow
 	{
 		s = s[len..$];
 		return Token(tokenType, match);
 	}
-	private auto createTokenAndAdvance(Type tokenType, size_t len, string match)
+	private auto createTokenAndAdvance(Type tokenType, size_t len, string match) nothrow
 	{
 		s = s[len..$];
 		return Token(tokenType, match);
@@ -896,7 +905,7 @@ struct Lexer
 					if (s[idx+1] == '{')
 					{
 						pushState(State.LexingTemplateLiteral);
-						return createTokenAndAdvance(Type.TemplateHead,idx+2,s[0..idx]);
+						return createTokenAndAdvance(t == Type.TemplateTail ? Type.TemplateMiddle : Type.TemplateHead,idx+2,s[0..idx]);
 					}
 					idx++;
 					break;
@@ -959,12 +968,9 @@ struct Lexer
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
 					continue;
-				foreach(t; Ts)
-				{
-					case t:
+				foreach(t; Ts) { case t:
 						return true;
 				}
-					//version(LDC) break;
 				default:
 					return false;
 			}
@@ -1021,36 +1027,34 @@ struct Lexer
 	Token lexSingleLineComment() @trusted
 	{
 		size_t idx = 0;
-		for (;;)
+		start:
+		version (iasm64NotWindows)
 		{
-			version (iasm64NotWindows)
-			{
-				//if (haveSSE42)
-				//{
-					immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
-					idx += i;
-					tokenLength += i;
-					if (i == 16)
-						continue;
-				//}
-			}
-			auto len = s.getLineTerminatorLength(idx);
-			if (len == 0 && s[idx] != 0)
-			{
-				len = s.getUnicodeLength(idx);
-				idx += len;
-				column ++;
-			} else
-			{
-				auto tok = Token(Type.SingleLineComment,s[0..idx]);
-				idx += len;
-				line += 1;
-				column = 0;
-				s = s[idx..$];
-				return tok;
-			}
+			//if (haveSSE42)
+			//{
+				immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
+				idx += i;
+				tokenLength += i;
+				if (i == 16)
+					goto start;
+			//}
 		}
-		assert(0);
+		auto len = s.getLineTerminatorLength(idx);
+		if (len == 0 && s[idx] != 0)
+		{
+			len = s.getUnicodeLength(idx);
+			idx += len;
+			column ++;
+		} else
+		{
+			auto tok = Token(Type.SingleLineComment,s[0..idx]);
+			idx += len;
+			line += 1;
+			column = 0;
+			s = s[idx..$];
+			return tok;
+		}
+		goto start;
 	}
 	Token lexToken(Goal goal = Goal.All)
 	{
@@ -1061,7 +1065,8 @@ struct Lexer
 		{
 			case 0x0a:
 			case 0x0d:
-				newLine=true;
+				line ++;
+				column = 0;
 				s.popFront();
 				if (chr == 0x0d)
 					s.popNextIf(0x0a);
@@ -1323,8 +1328,6 @@ struct Lexer
 				}
 				if (s.front() < '0' || s.front() > '9')
 					return Token(Type.DecimalLiteral,"0");
-				if (s.front() == 0)
-					return Token(Type.EndOfFile);
 				return Token(Type.Error,"Not expecting NumericLiteral to start with 0");
 			case '1': .. case '9':
 				return lexDecimalLiteral;
@@ -1340,7 +1343,8 @@ struct Lexer
 		auto len = s.getLineTerminatorUnicodeLength();
 		if (len != 0)
 		{
-			newLine = true;
+			line ++;
+			column = 0;
 			s = s[len..$];
 			return Token(Type.LineTerminator);
 		}		
@@ -1356,6 +1360,15 @@ auto createLexer(string s)
 {
 	return createLexer(cast(const(ubyte)[])s);
 }
+@("lineterminators")
+unittest
+{
+	auto lexer = createLexer("\n\r\n\u2028");
+	lexer.scanToken().shouldEqual(Token(Type.LineTerminator));
+	lexer.scanToken().shouldEqual(Token(Type.LineTerminator));
+	lexer.scanToken().shouldEqual(Token(Type.LineTerminator));
+	lexer.scanToken().shouldEqual(Token(Type.EndOfFile));
+}
 @("lexIdentifier")
 unittest
 {
@@ -1363,7 +1376,6 @@ unittest
 	auto lexer = createLexer("abcde");
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"abcde"));
 	lexer = createLexer("π");
-	lexer.lexIdentifier();//.shouldEqual(Token(Type.Identifier,"π"));
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"π"));
 }
 @("popWhitespace")
@@ -1472,6 +1484,8 @@ unittest
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"1."));
 	lexer = createLexer("15 ");
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"15"));
+	lexer = createLexer("0123");
+	lexer.scanToken().shouldEqual(Token(Type.Error,"Not expecting NumericLiteral to start with 0"));
 }
 @("lexHexLiteral")
 unittest
@@ -1480,6 +1494,34 @@ unittest
 	lexer.lexHexLiteral().shouldEqual(Token(Type.HexLiteral,"04af"));
 	lexer = createLexer("04afg");
 	lexer.lexHexLiteral().shouldEqual(Token(Type.Error,"Invalid char (g) in NumericLiteral"));
+}
+auto tokens(ref Lexer lexer)
+{
+	struct Range
+	{
+		private {
+			Lexer lexer;
+			Token tok;
+		}
+		this(ref Lexer lexer)
+		{
+			this.lexer = lexer;
+			tok = this.lexer.lexToken;
+		}
+		Token front()
+		{
+			return tok;
+		}
+		bool empty()
+		{
+			return tok.type == Type.EndOfFile;
+		}
+		void popFront()
+		{
+			tok = lexer.lexToken;
+		}
+	}
+	return Range(lexer);
 }
 @("lexTemplateLiteral")
 unittest
@@ -1494,6 +1536,21 @@ unittest
 	lexer.lexToken().shouldEqual(Token(Type.TemplateHead,"some\n$template\\\u0060\nstring"));
 	lexer.lexToken().shouldEqual(Token(Type.Identifier,"identifier"));
 	lexer.lexToken().shouldEqual(Token(Type.TemplateTail,""));
+
+	lexer = createLexer("`${double(2)} != null ? ${double(2)} : {}`");
+	assert(lexer.tokens.equal([
+		Token(Type.TemplateHead),
+		Token(Type.Identifier,"double"),
+		Token(Type.OpenParenthesis),
+		Token(Type.DecimalLiteral,"2"),
+		Token(Type.CloseParenthesis),
+		Token(Type.TemplateMiddle," != null ? "),
+		Token(Type.Identifier,"double"),
+		Token(Type.OpenParenthesis),
+		Token(Type.DecimalLiteral,"2"),
+		Token(Type.CloseParenthesis),
+		Token(Type.TemplateTail," : {}")
+	]));
 }
 @("comments")
 unittest
@@ -1519,6 +1576,16 @@ unittest
 	
 	lexer = createLexer("//\n");
 	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,""));
+	lexer.s[0].shouldEqual('\u0000');
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
+	lexer = createLexer("//01234567890123456789\n");
+	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,"01234567890123456789"));
+	lexer.s[0].shouldEqual('\u0000');
+	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
+
+	lexer = createLexer("//\u2022\n");
+	lexer.lexToken.shouldEqual(Token(Type.SingleLineComment,"•"));
 	lexer.s[0].shouldEqual('\u0000');
 	lexer.lexToken.shouldEqual(Token(Type.EndOfFile));
 
@@ -1605,4 +1672,6 @@ unittest
 {
 	auto lexer = createLexer(".5");
 	lexer.scanToken().shouldEqual(Token(Type.DecimalLiteral,".5"));
+	lexer = createLexer("..");
+	lexer.scanToken().shouldEqual(Token(Type.Error,"One dot too few or too less"));
 }

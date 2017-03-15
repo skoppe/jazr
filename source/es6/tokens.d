@@ -28,6 +28,7 @@ enum Type {
 	DecimalLiteral,
 	HexLiteral,
 	TemplateHead,
+	TemplateMiddle,
 	Template,
 	TemplateTail,
 	EndOfFile,
@@ -96,15 +97,15 @@ struct Token
 {
 	Type type;
 	const (ubyte)[] match;
-	this(Type type)
+	this(Type type) nothrow @nogc
 	{
 		this.type = type;
 	}
-	this(Type type, string match)
+	this(Type type, string match) nothrow @nogc
 	{
 		this(type, cast(const(ubyte)[])match);
 	}
-	this(Type type, const (ubyte)[] match)
+	this(Type type, const (ubyte)[] match) nothrow @nogc
 	{
 		this.type = type;
 		this.match = cast(const(ubyte)[])match;

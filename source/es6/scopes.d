@@ -61,7 +61,7 @@ struct Variable
 	this(IdentifierNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.format;
-		assert(t != IdentifierType.Identifier,format("At %s:%s",file,line));
+		assert(t != IdentifierType.Identifier,format("At %s:%s, %s, got %s",file,line,n));
 		type = t;
 		node = n;
 	}
@@ -74,8 +74,13 @@ struct Identifier
 	{
 		node = n;
 	}
+	this(IdentifierNode n, Node def)
+	{
+		node = n;
+		definition = def;
+	}
 }
-private void linkToDefinition(Scope s, ref Identifier i)
+void linkToDefinition(Scope s, ref Identifier i)
 {
 	auto idx = s.variables.countUntil!(v => v.node.identifier == i.node.identifier);
 	if (idx == -1)
@@ -94,6 +99,8 @@ class Scope
 	Scope[] children;
 	Branch branch;
 	Node entry;
+	bool strictMode = false;
+	bool isModule = false;
 	/*private*/ Variable[] variables;
 	/*private*/ Identifier[] identifiers;
 	private Identifier[] globals;
@@ -103,6 +110,8 @@ class Scope
 		parent = p;
 		entry = e;
 		branch = new Branch(this,null,e);
+		if (parent)
+			strictMode = parent.strictMode;
 	}
 	Node getRoot()
 	{

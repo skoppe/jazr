@@ -43,12 +43,19 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 		root.assertTreeInternals();
 	}
 	root.runTransform!(
+		removeFunctionExpressionUnusedName,
+		invertBinaryExpressions,
+		convertHexToDecimalLiterals,
+		removeUseStrict,
+		mergeDuplicateVariableDeclarations,
+		convertEscapedUnicodeToUnicode,
+		mergeNeighbouringVariableDeclarationStatements,
 		mergeVariableDeclarationStatements,
 		moveStringComparisonToLeftOperand,
 		hoistFunctions,
-		removeRedundantBlockStatements,
 		shortenLiteralPropertyNames,
 		combineBlockStatementIntoExpression,
+		removeRedundantBlockStatements,
 		combineFunctionBodyIntoExpression,
 		combineModuleIntoExpression,
 		simplifyBinaryExpressions,
@@ -110,7 +117,7 @@ unittest
 	//);
 	assertMinifier(
 		"function handly(event) { if (a) return; b = 4; d = 6;}",
-		"function handly(){!a&&(b=4,d=6)}"
+		"function handly(){a||(b=4,d=6)}"
 	);
 	assertMinifier(
 		"function a() { if (a) if (c) return bla; if (b) if (d) return alb; }",
@@ -429,7 +436,7 @@ unittest
 		/// ditto
 		assertMinifier(
 			`if (!a) if (!b) d = 5;`,
-			"!a && !b && (d = 5)"
+			"a || b || (d = 5)"
 		);
 		/// ditto
 		assertMinifier(
@@ -441,7 +448,7 @@ unittest
 		// Note: Need to test that we don't apply this optimisation if the `if (c) return;` is nested in a if-statement
 		assertMinifier(
 			`function a() { if (a) return; a = 5; }`,
-			`function a() { !a && (a = 5) }`
+			`function a() { a || (a = 5) }`
 		);
 		/// ditto
 		assertMinifier(
@@ -466,22 +473,22 @@ unittest
 		/// ditto
 		assertMinifier(
 			`function a() { if (e) if (b) if (c) return; d = 5; }`,
-			`function a() { !(e && b && c) && (d = 5) }`
+			`function a() { e && b && c || (d = 5) }`
 		);
 		/// ditto
 		assertMinifier(
 			`function a() { if (b) return; else d = 4; }`,
-			`function a() { !b && (d = 4) }`
+			`function a() { b || (d = 4) }`
 		);
 		/// ditto
 		assertMinifier(
 			`function a() { if (b) return; else d = 4; f = 5;}`,
-			`function a() { !b && (d = 4,f = 5) }`
+			`function a() { b || (d = 4,f = 5) }`
 		);
 		/// ditto
 		assertMinifier(
 			`function a() { if (b) { return; } else { d = 4; } f = 5;}`,
-			`function a() { !b && (d = 4,f = 5) }`
+			`function a() { b || (d = 4,f = 5) }`
 		);
 		/// ditto
 		assertMinifier(
@@ -506,12 +513,12 @@ unittest
 		/// ditto
 		assertMinifier(
 			`function b(z) { if (z.p !== 'value') return; if (z.q === k) return; k = z.v; }`,
-			"function b(a) { !('value' != a.p) && !(a.q === k) && (k = a.v) }"
+			"function b(a) { 'value' != a.p || a.q === k || (k = a.v) }"
 		);
 		/// ditto
 		assertMinifier(
 			`function b(z) { if (z.p !== 'value') { return; } if (z.q === k) { return; } k = z.v; }`,
-			"function b(a) { !('value' != a.p) && !(a.q === k) && (k = a.v) }"
+			"function b(a) { 'value' != a.p || a.q === k || (k = a.v) }"
 		);
 		/// ditto
 		assertMinifier(
@@ -702,13 +709,13 @@ unittest
 	//	`function abc() { for (var propKey in props) { k = props[propKey]; } if (b) { return ret + '>'; } for (var i in p) k = p[i]; if (c) return ret + ' ' + markupForID + '>'; if (k) return 77; }`,
 	//	`function abc() { var propKey, i; for(propKey in props){ k = props[ propKey ] }; if (b) { return ret + '>' } else { for(i in p)k = p[ i ]; return c ? ret + ' ' + markupForID + '>' : k ? 77 : void 0 } }`
 	//);
-	//assertMinifier(
-	//	`function t(){c.width=w=1920;π=Math.PI/2;λ=0;r=w/4;for(φ=-π;φ<π;φ+=1/r){λ+=.1;x.lineTo(C(φ)*S(λ-t)*r+w/2,(C(t)*S(φ)-S(t)*C(φ)*C(λ-t))*r+r)}x.stroke()}`,
-	//	`function t(){c.width=w=1920;π=Math.PI/2;λ=0;r=w/4;for(φ=-π;φ<π;φ+=1/r){λ+=.1;x.lineTo(C(φ)*S(λ-t)*r+w/2,(C(t)*S(φ)-S(t)*C(φ)*C(λ-t))*r+r)}x.stroke()}`
-	//);
+	assertMinifier(
+		`function t(){c.width=w=1920;π=Math.PI/2;λ=0;r=w/4;for(φ=-π;φ<π;φ+=1/r){λ+=.1;x.lineTo(C(φ)*S(λ-t)*r+w/2,(C(t)*S(φ)-S(t)*C(φ)*C(λ-t))*r+r)}x.stroke()}`,
+		`function t(){c.width=w=1920,π=Math.PI/2,λ=0,r=w/4;for(φ=-π;φ<π;φ+=1/r)λ+=.1,x.lineTo(C(φ)*S(λ-t)*r+w/2,(C(t)*S(φ)-S(t)*C(φ)*C(λ-t))*r+r);x.stroke()}`
+	);
 	assertMinifier(
 		`(function b(a,b,c){return 7})({1:[function(_dereq_,module,exports){ somethingSomething() }]})`,
-		`(function b(){ return 7 })({ 1: [ function (){ somethingSomething() } ] })`
+		`(function(){ return 7 })({ 1: [ function (){ somethingSomething() } ] })`
 	);
 	assertMinifier(
 		`if (a) {  } else {  }`,
@@ -731,6 +738,66 @@ unittest
 		`function k() { if (d) { if (c) return; return a; } else { return b; } }`,
 		`function k() { return d ? c ? void 0 : a : b }`
 	);
+	assertMinifier(
+		`function fun(){ switch(a){ case 5: var node = getNode(); node.something(); case 6: var node = getNode(); node.somethingElse();} }`,
+		`function fun(){switch(a){case 5:var b=getNode();b.something();case 6:b=getNode();b.somethingElse()}}`
+	);
+	assertMinifier(
+		`function finishNodeAt(node, type, pos, loc) { node.type = type; if (this.options.locations) node.loc.end = loc; if (this.options.ranges) node.range[1] = pos; return node }`,
+    	`function finishNodeAt(a,b,c,d){return a.type=b,this.options.locations&&(a.loc.end=d),this.options.ranges&&(a.range[1]=c),a}`
+    );
+    assertMinifier(
+    	`function bla() { if (!declaration) this.unexpected(); return this.parseClass(node, true) }`,
+    	`function bla(){return declaration||this.unexpected(),this.parseClass(node,!0)}`
+    );
+    assertMinifier(
+    	`function bls(node) { if (a) { this.checkPatternErrors(refDestructuringErrors, true); this.toAssignable(init); this.checkLVal(init); return this.parseForIn(node, init) } else { this.checkExpressionErrors(refDestructuringErrors, true) } return this.parseFor(node, init) }`,
+    	`function bls(b){return a?(this.checkPatternErrors(refDestructuringErrors,!0),this.toAssignable(init),this.checkLVal(init),this.parseForIn(b,init)):(this.checkExpressionErrors(refDestructuringErrors,!0),this.parseFor(b,init))}`
+    );
+    assertMinifier(
+    	`function bla(noIn, refDestructuringErrors) { var this$1 = this; var startPos = this.start, startLoc = this.startLoc; var expr = this.parseMaybeAssign(noIn, refDestructuringErrors) if (this.type === tt.comma) { var node = this.startNodeAt(startPos, startLoc); node.expressions = [expr]; while (this.eat(tt.comma)) node.expressions.push(this$1.parseMaybeAssign(noIn, refDestructuringErrors)); return this.finishNode(node, "SequenceExpression"); } return expr }`,
+    	`function bla(b,c){var e=this,f=this.start,g=this.startLoc,d=this.parseMaybeAssign(b,c),a;if(this.type===tt.comma){a=this.startNodeAt(f,g),a.expressions=[d];while(this.eat(tt.comma))a.expressions.push(e.parseMaybeAssign(b,c));return this.finishNode(a,'SequenceExpression')}return d}`
+    );
+    assertMinifier(
+    	`var a; if (b) { var c = 5; doBla(); }`,
+    	`var a,c;b&&(c=5,doBla());`
+    );
+    assertMinifier(
+    	`function bk(z) { if (n) { e(); } else if (l) { if (z) { var w = h; a(); } else { b(); } } else if (k) { var q = i; c(); } return z; };`,
+    	`function bk(d){if(n)e();else if(l)if(d){var g=h,f;a()}else b();else k&&(f=i,c());return d}`
+    );
+    assertMinifier(
+		`for (var i;;) { var c = 5; b(); }`,
+		`for (var i,c;;) c = 5, b();`
+	);
+	assertMinifier(
+		`function a() { if (a) { c = 4; if (b) return 5; return 6; } return 7; }`,
+		`function a(){return a?(c=4,b)?5:6:7}`
+  	);
+  	assertMinifier(
+  		`if (d) { if (!a && (b || c) && d) k(); f = 6; }`,
+  		`d&&(a||(b||c)&&d&&k(),f=6);`
+  	);
+  	assertMinifier(
+  		`if (d) e() else if (!h || j === 1) b(); else if (q) s(); else k = 5;`,
+    	`d?e():!h||j===1?b():q?s():k=5;` // TODO: can be shorter by rewriting conditional expressions into h&&j!==1?q?...:b() (thus swapping conditional branches)
+  	);
+  	assertMinifier(
+  		`function bas() { var l, k; if (q) { return function(obj) { var key = keys[i]; var desc = Object.d(obj, key, key,key); obj = es5.w(obj); }; } else { var hasProp = {}; return function(obj) { }; } }`,
+		`function bas(){var b,c,a;return q?function(a){var b=keys[i],c=Object.d(a,b,b,b);a=es5.w(a)}:(a={},function(){})}`
+  	);
+  	assertMinifier(
+  		`var a = 9; export function parse(input, options) {};`,
+  		`export function parse() {}; var a = 9;`
+  	);
+  	assertMinifier(
+  		`var a = 9; export default function () {};`,
+  		`export default function () {}; var a = 9;`
+  	);
+  	assertMinifier(
+  		"noop\nnew ReaddirReq(path, cb)",
+		`noop, new ReaddirReq(path, cb);`
+  	);
 }
 
 

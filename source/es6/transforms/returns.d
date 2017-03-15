@@ -217,6 +217,10 @@ unittest
 		`function b() { if (a) { for(;;)return; } op() }`,
 		`function b() { if (a) { for(;;)return }; op() }`
 	);
+	assertReturnIfNegation(
+		`function b() { if (d(), a) return; op() }`,
+		`function b() { if (d(), !a) { op() } }`
+	);
 }
 
 void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)
@@ -284,6 +288,14 @@ unittest
 		`function bla(s) { switch (s) { case 5: if (c) return a; else return b } }`,
 		`function bla(s) { switch (s) { case 5: if (c) return a; return b}}`
 	);
+	assertRedundantElse(
+		`function bla(s) { switch (s) { default: if (c) return a; else if (d) return b; else return e } }`,
+		`function bla(s) { switch (s) { default: if (c) return a; if (d) return b; return e}}`
+	);
+	assertRedundantElse(
+		`function bla(s) { switch (s) { case 5: if (c) return a; else if (d) return b; else return e } }`,
+		`function bla(s) { switch (s) { case 5: if (c) return a; if (d) return b; return e}}`
+	);
 }
 
 Node createVoid0Node()
@@ -334,14 +346,15 @@ void combineReturnStatements(Scope scp)
 		}
 		else {
 			// else we take only those nodes and branches starting from idx from the back
-			if (!branch.entry.children[$-idx].type == NodeType.IfStatementNode)
+			if (branch.entry.children[$-idx].type != NodeType.IfStatementNode)
 				return;
 
 			validNodes = branch.entry.children[$-idx..$];
 
 			auto startingBranch = validNodes[0].as!(IfStatementNode).truthPath.branch;
 			startingBranchIdx = branch.children.countUntil!(c => c is startingBranch);
-			assert(startingBranchIdx != -1);
+			if (startingBranchIdx == -1)
+				return;
 			validBranches = branch.children[startingBranchIdx..$];
 		}
 
@@ -404,7 +417,7 @@ void combineReturnStatements(Scope scp)
 
 		// zip everything together to a (nested) conditionalstatement
 		auto condition = conditions.zip(returnValues).retro.fold!((acc,b){
-			return new ConditionalExpressionNode(b[0],b[1],acc);
+			return new ConditionalExpressionNode(parenthesizeIfNecessary(b[0]),parenthesizeIfNecessary(b[1]),acc);
 		})(lastValue);
 
 		auto returnNode = new ReturnStatementNode(condition);
@@ -502,6 +515,10 @@ unittest
 	assertCombineReturn(
 		`function bla(s) { switch (s) { case 5: if (c) return a; return b; case 6: if (d) return 5; return 7; }}`,
 		`function bla(s) { switch (s) { case 5: return c ? a : b; case 6: return d ? 5 : 7 } }`,
+	);
+	assertCombineReturn(
+		`function a(){ if (a) { if (c=4,b) return 5; return 6 } return 7 }`,
+		`function a(){ return a ? (c=4,b) ? 5 : 6 : 7 }`,
 	);
 	assertCombineReturn(
 		`function a(){

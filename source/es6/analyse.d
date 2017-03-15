@@ -320,7 +320,14 @@ private void analyseObjectBindingPatternNode(Node node, Scope s, Branch b, Ident
 				break;
 			case NodeType.IdentifierNameNode:
 			case NodeType.IdentifierReferenceNode:
-				s.addVariable(Variable(item.as!IdentifierNode,v));
+				switch(v)
+				{
+					case IdentifierType.Identifier:
+						v = IdentifierType.Variable;
+						goto default;
+					default:
+						s.addVariable(Variable(item.as!IdentifierNode,v));
+				}
 				break;
 			default: break;
 		}
@@ -641,6 +648,9 @@ void assignBranch(Node n, Branch b)
 		case NodeType.FunctionExpressionNode:
 		case NodeType.GeneratorDeclarationNode:
 		case NodeType.GeneratorExpressionNode:
+			if (n.children.length == 3)
+				n.children[0].assignBranch(b);
+			return;
 		case NodeType.ClassGetterNode:
 			n.children[0].assignBranch(b);
 			return;
@@ -680,6 +690,27 @@ T withBranch(T : Node)(T n, Branch b)
 	n.assignBranch(b);
 	return n;
 }
+void handleUseStrict(Scope scp, Node node)
+{
+	switch(node.type)
+	{
+		case NodeType.FunctionBodyNode:
+		case NodeType.ModuleNode:
+			if (node.children.length == 0)
+				return;
+			if (node.children[0].type != NodeType.StringLiteralNode)
+				return;
+			auto strLit = node.children[0].as!StringLiteralNode;
+			if (cast(const(char)[])strLit.value != "use strict")
+				return;
+			scp.strictMode = true;
+			node.children = node.children[1..$];
+			return;
+		default:
+			return;
+	}
+}			
+
 private int analyse(Node node, Scope s = null, Branch b = null)
 {
 	if (s is null)
@@ -727,6 +758,8 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			node.children[0].branch = b;
 			auto funcBody = node.children[1];
 			auto newScope = s.newScope(funcBody);
+			if (node.parent.type == NodeType.ClassDeclarationNode)
+				newScope.strictMode = true;
 			analyse(funcBody,newScope);
 			break;
 		case NodeType.ClassMethodNode: 
@@ -734,6 +767,8 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			node.children[1].branch = b;
 			auto funcBody = node.children[2];
 			auto newScope = s.newScope(funcBody);
+			if (node.parent.type == NodeType.ClassDeclarationNode)
+				newScope.strictMode = true;
 			analyseFormalParameterList(node.children[0],newScope);
 			analyse(funcBody,newScope);
 			break;
@@ -742,7 +777,8 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			node.children[1].branch = b;
 			auto funcBody = node.children[2];
 			auto newScope = s.newScope(funcBody);
-
+			if (node.parent.type == NodeType.ClassDeclarationNode)
+				newScope.strictMode = true;
 			analyseClassSetterParam(node.children[1],newScope);
 			analyse(funcBody,newScope);
 			break;
@@ -814,6 +850,10 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			b.addHint(node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
 			hints |= analyseChildren(node.children,s,b);
 			break;
+		case NodeType.FunctionBodyNode:
+		case NodeType.ModuleNode:
+			s.handleUseStrict(node);
+			goto default;
 		default:
 			hints |= analyseChildren(node.children,s,b);
 			break;
@@ -993,6 +1033,7 @@ unittest
 	getScope(`var a,b=c,[d]=e,[f,g]=h,[i=j]=k,[[l]]=m,[{n}]=o,[{p}=q]=r,[[s]=t]=u,[,,[v]=w,,x]=y,{aa},{ab}=ac,{ad=ae}=af,{ag:ah=ai}=aj,{ak:{al}}=am,{an:[ao]}=ap,{aq:{ar}=as}=at,{au:[av]=aw}=ax;`)
 		.assertVariables!(IdentifierType.Variable)([`a`,`b`,`d`,`f`,`g`,`i`,`l`,`n`,`p`,`s`,`v`,`x`,`aa`,`ab`,`ad`,`ah`,`al`,`ao`,`ar`,`av`])
 		.assertIdentifiers(["c","e","h","j","k","m","o","q","r","t","u","w","y","ac","ae","af","ai","aj","am","ap","as","at","aw","ax"]);
+	// TODO: this stuff should also work on let and consts
 }
 @("ObjectLiteral")
 unittest

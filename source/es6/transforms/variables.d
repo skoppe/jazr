@@ -131,9 +131,14 @@ unittest
 	foreach (s; scp.children)
 		walkScope(s, list);
 }*/
+struct VariableAlloc
+{
+	int counter;
+	int[] freeList;
+}
 void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList())
 {
-	import std.algorithm : map, canFind, sort, max, reduce;
+	import std.algorithm : map, canFind, sort, reduce, max;
 	import std.array : appender;
 	auto vars = appender!(Variable[]);
 	void collectVars(Scope s)
@@ -145,31 +150,56 @@ void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList()
 	foreach(c; scp.children)
 		collectVars(c);
 	auto sortedVars = vars.data.sort!((a,b) => b.references.length < a.references.length);
-	int[void*] counters;
+	struct VariableAlloc
+	{
+		int counter;
+		int[] freeList;
+	}
+	VariableAlloc[void*] counters;
 	foreach(v; sortedVars)
 	{
 		auto node = v.node;
 		Scope s = node.branch.scp;
-		int idCounter = max(
-			counters.get(cast(void*)s,0),
-			reduce!(max)(0,v.references.map!(r => counters.get(cast(void*)r.branch.scp,0)))
-		);
-		string id = s.generateFreeIdentifier(idCounter);
-		counters[cast(void*)s] = idCounter;
+		VariableAlloc scopeAllocations = counters.get(cast(void*)s,VariableAlloc.init);
+		int nestedCounter = reduce!(max)(0,v.references.map!(r => counters.get(cast(void*)r.branch.scp,VariableAlloc.init).counter));
+		string id = s.generateFreeIdentifier(nestedCounter, scopeAllocations);
+		counters[cast(void*)s] = scopeAllocations;
 		node.identifier = cast(const(ubyte)[])id;
 		foreach(n; v.references)
 			n.as!(IdentifierReferenceNode).identifier = cast(const(ubyte)[])id;
 	}
 }
-private string generateFreeIdentifier(Scope s, ref int idCounter)
+private string generateFreeIdentifier(VAlloc)(Scope s, int nestedCounter, ref VAlloc varAlloc)
 {
-	import std.algorithm : canFind;
+	import std.algorithm : canFind, max, filter, remove;
+	import std.range : chain, iota, enumerate;
 	string id;
+	int cnt;
 	auto globals = s.getGlobals().map!(g => g.node.identifier).array;
-	do
+	auto frees = varAlloc.freeList.enumerate.filter!(i => i.value >= nestedCounter).array;
+	foreach(freeItem; frees)
 	{
-		id = generateValidIdentifier(idCounter++);
-	} while(globals.canFind(id));
+		id = generateValidIdentifier(freeItem.value);
+		if (!globals.canFind(id))
+		{
+			varAlloc.freeList = varAlloc.freeList.remove(freeItem.index);
+			return id;
+		}
+	}
+	cnt = max(nestedCounter, varAlloc.counter);
+	if (varAlloc.counter != cnt)
+	{
+		if (varAlloc.freeList.length > 0)
+			assert(varAlloc.counter > varAlloc.freeList[$-1]);
+		varAlloc.freeList = chain(varAlloc.freeList,iota(varAlloc.counter, cnt)).array();
+	}
+	for(;;)
+	{
+		id = generateValidIdentifier(cnt++);
+		if (!globals.canFind(id))
+			break;
+	}
+	varAlloc.counter = cnt;
 	return id;
 }
 @("shortenVariables")
@@ -214,7 +244,7 @@ unittest
 	);
 	assertVariableRenaming(
 		`function bla(x){function w(p){return x*p*y*p*b}var y,z}`,
-		`function bla(c){function e(a){return c*a*d*a*b}var d,f}`
+		`function bla(c){function a(a){return c*a*d*a*b}var d,e}`
 	);
 	assertVariableRenaming(
 		`function bla(c,b,a){function w(p){function k(p){return p*2}return a.a*b*f*e*p}function r(h,i,j){return h*i*j*g*e*d}var f,e,d}`,
@@ -224,6 +254,15 @@ unittest
 		`function s(o,u){var a=c;t(function(e){var n=t[o][e]})}`,
 		`function s(a,b){var d=c;t(function(b){var c=t[a][b]})}`
 	);
+	assertVariableRenaming(
+		`function s(){var x,y,z=function(t){return t*t*t*t*x*x*x}}`,
+		`function s(){var b,a,c=function(a){return a*a*a*a*b*b*b}}`,
+	);
+	assertVariableRenaming(
+		`function a(){var a,b,c,d,e,f,g,h,i;return function(){var d,e,f; return d*d*d*d*e*e*f*a*a*a*b*c}}`,
+		`function a(){var e,g,h,a,b,c,d,f,i;return function(){var d,f,i;return d*d*d*d*f*f*i*e*e*e*g*h}}` //TODO: d should be a, e -> b, f -> c, etc. This doens't happen because a is considered a global inside the inner function, and therefor the next free one is d.
+	);
+	// TODO: All this stuff should also work on let and consts
 }
 void removeUnusedParameters(Scope scp)
 {
@@ -262,7 +301,7 @@ unittest
 	);
 }
 
-void mergeVariableDeclarationStatements(VariableStatementNode stmt, out Node replacedWith)
+void mergeNeighbouringVariableDeclarationStatements(VariableStatementNode stmt, out Node replacedWith)
 {
 	auto idx = stmt.parent.getIndexOfChild(stmt);
 	if (idx == 0)
@@ -275,10 +314,24 @@ void mergeVariableDeclarationStatements(VariableStatementNode stmt, out Node rep
 	stmt.detach();
 	replacedWith = sibling;
 }
-@("mergeVariableDeclarationStatements")
+void mergeNeighbouringLexicalDeclarationStatements(LexicalDeclarationNode stmt, out Node replacedWith)
+{
+	auto idx = stmt.parent.getIndexOfChild(stmt);
+	if (idx == 0)
+		return;
+	if (stmt.parent.children[idx-1].type != NodeType.LexicalDeclarationNode)
+		return;
+	auto sibling = stmt.parent.children[idx-1].as!LexicalDeclarationNode;
+
+	sibling.addChildren(stmt.children);
+	stmt.detach();
+	replacedWith = sibling;
+}
+
+@("mergeNeighbouringVariableDeclarationStatements")
 unittest
 {
-	alias assertMergeVars = assertTransformations!(mergeVariableDeclarationStatements);
+	alias assertMergeVars = assertTransformations!(mergeNeighbouringVariableDeclarationStatements, mergeNeighbouringLexicalDeclarationStatements);
 	assertMergeVars(
 		`var a; var b;`,
 		`var a, b;`
@@ -295,7 +348,235 @@ unittest
 		`var a = 1; bla(); var b; var c = 3;`,
 		`var a = 1; bla(); var b, c = 3;`
 	);
+	assertMergeVars(
+		`let a; let b;`,
+		`let a, b;`
+	);
+	// TODO: All this stuff should also work on let and consts
 }
 
+bool mergeVariableDeclarationStatements(Scope scp)
+{
+	import std.algorithm : filter;
+	import std.array : array;
+	bool doneWork = false;
+	auto vars = scp.variables.filter!(v => v.type == IdentifierType.Variable).array;
+	if (vars.length < 2)
+		return doneWork;
+	auto firstStmt = vars[0].node.parent.parent;
+	foreach(v; vars[1..$])
+	{
+		auto stmt = v.node.parent.parent;
+		if (stmt is firstStmt)
+			continue;
+		auto varDecl = v.node.parent;
+		// either when variable is only child of stmt
+		if (stmt.children.length == 1)
+		{
+			doneWork = true;
+			varDecl.detach();
+			if (varDecl.children.length == 2)
+			{
+				auto rhs = varDecl.children[1];
+				varDecl.children = varDecl.children[0..1];
+				auto lhs = new IdentifierReferenceNode(varDecl.children[0].as!(IdentifierReferenceNode).identifier);
+				auto assignOp = new AssignmentOperatorNode(Assignment.Assignment);
+				auto assignExpr = new AssignmentExpressionNode([lhs,assignOp,rhs]);
+				auto iden = Identifier(lhs,v.node);
+				scp.addIdentifier(iden);
+				scp.linkToDefinition(iden);
+				stmt.replaceWith(assignExpr);
+				assignOp.reanalyseHints();
+			} else
+				stmt.detach();
+			firstStmt.addChild(varDecl);
+		// or if variables has no initializer
+		} else if (varDecl.children.length == 1)
+		{
+			doneWork = true;
+			varDecl.detach();
+			firstStmt.addChild(varDecl);
+		}
+	}
+	return doneWork;
+}
+
+@("mergeVariableDeclarationStatements")
+unittest
+{
+	alias assertMergeVars = assertTransformations!(mergeVariableDeclarationStatements);
+
+	assertMergeVars(
+		`var a; c(); var b;`,
+		`var a, b; c();`
+	);
+	assertMergeVars(
+		`var a; c(); var b, d, e;`,
+		`var a, b, d, e; c();`
+	);
+	assertMergeVars(
+		`var a; c(); var b = 6;`,
+		`var a, b; c(); b = 6;`
+	);
+	assertMergeVars(
+		`var a; if (b) { var c = 5; doBla(); }`,
+		`var a, c; if (b) { c = 5; doBla(); }`
+	);
+	// TODO: All this stuff should also work on let and consts
+}
+
+void mergeDuplicateVariableDeclarations(Scope scp)
+{
+	import std.typecons : tuple;
+	import std.algorithm : sort, group, filter, remove, each, find, SwapStrategy;
+	import std.range : drop, take;
+	auto duplicateVars = scp.variables
+		.filter!(v => v.type == IdentifierType.Variable || v.type == IdentifierType.Parameter)
+		.map!(v => tuple!("name","node","variable")(v.node.identifier, v.node, v))
+		.array
+		.sort!((a,b) => a.name < b.name, SwapStrategy.stable)
+		.groupBy;
+	foreach(duplicateVar; duplicateVars)
+	{
+		auto firstDecl = duplicateVar.front;
+		foreach(duplicate; duplicateVar.drop(1))
+		{
+			auto varDecl = duplicate.node.parent;
+			auto varStmt = varDecl.parent;
+			// if the variable declaration item has no initializer
+			if (varDecl.children.length == 1)
+			{
+				if (varStmt.children.length == 1)
+				{
+					auto parent = varStmt.parent;
+					varStmt.detach();
+					parent.reanalyseHints();
+				}
+				else
+				{
+					auto parent = varDecl.parent;
+					varDecl.detach();
+					parent.reanalyseHints();
+				}
+			} else
+			{
+				auto rhs = varDecl.children[1];
+				auto assignOp = new AssignmentOperatorNode(Assignment.Assignment);
+				Node[] children = [duplicate.node,assignOp];
+				scp.addIdentifier(Identifier(duplicate.node,firstDecl.node));
+				scp.variables.find!((ref v){return v.node is firstDecl.node;}).take(1).each!((ref v){v.references ~= duplicate.node;});
+				//firstDecl.variable.references ~= duplicate.node;
+				if (rhs.type == NodeType.AssignmentExpressionNode)
+					children ~= rhs.children;
+				else
+					children ~= rhs;
+				auto assignExpr = new AssignmentExpressionNode(children);
+				// if the variable declaration item is only child of the variable statement
+				if (varStmt.children.length == 1)
+				{
+					varDecl.parent.replaceWith(assignExpr);
+				} else
+				{
+					auto idx = varStmt.getIndexOfChild(varDecl);
+					// if the variable declaration is the first child of the variable statement
+					if (idx == 0)
+					{
+						varDecl.detach();
+						varStmt.insertBefore(assignExpr);
+					// if the variable declaration is the middle child of the variable statement
+					} else if (idx == varStmt.children.length - 1)
+					{
+						varDecl.detach();
+						varStmt.insertAfter(assignExpr);
+					// if the variable declaration is the last child of the variable statement
+					} else
+					{
+						auto transfers = varStmt.children[idx+1..$];
+						varStmt.children = varStmt.children[0..idx];
+						auto varStmtTail = new VariableStatementNode(transfers);
+						varStmt.insertAfter(varStmtTail);
+						varStmt.insertAfter(assignExpr);
+						varStmtTail.reanalyseHints();
+					}
+				}
+				assignOp.reanalyseHints();
+			}
+			// update variables state in scope
+			foreach(reference; duplicate.variable.references)
+			{
+				// find identifier, update definition
+				auto scp2 = reference.branch.scp;
+				auto idx = scp2.identifiers.countUntil!(i => i.node is reference);
+				assert(idx != -1);
+				scp2.identifiers[idx].definition = firstDecl.node;
+
+			}
+			scp.variables = scp.variables.remove!(v => v.node is duplicate.node);
+		}
+	}
+}
+
+@("mergeDuplicateVariableDeclarations")
+unittest
+{
+	alias assertMergeDuplicateVars = assertTransformations!(mergeDuplicateVariableDeclarations);
+	assertMergeDuplicateVars(
+		`var a = 6; var a;`,
+		`var a = 6;`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; var a = 7;`,
+		`var a = 6; a = 7;`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; var a = b = 88;`,
+		`var a = 6; a = b = 88;`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; var a = b = 88, d;`,
+		`var a = 6; a = b = 88; var d;`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; if (t) var a = b = 88, d;`,
+		`var a = 6; if (t) { a = b = 88; var d; }`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; var b = d(), a = b ? 0 : 1, d;`,
+		`var a = 6; var b = d(); a = b ? 0 : 1; var d;`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; if (t) var b = d(), a = b ? 0 : 1, d;`,
+		`var a = 6; if (t) { var b = d(); a = b ? 0 : 1; var d; }`
+	);
+	assertMergeDuplicateVars(
+		`var a = 6; var b = d(), a = b ? 0 : 1;`,
+		`var a = 6; var b = d(); a = b ? 0 : 1;`
+	);
+	assertMergeDuplicateVars(
+		`function bla(a) { var a = 6; }`,
+		`function bla(a) { a = 6; }`
+	);
+	assertMergeDuplicateVars(
+		`function bla(a) { var a; }`,
+		`function bla(a) { }`
+	);
+	assertMergeDuplicateVars(
+		`function bla(a) { var b = 5, a, d = 6; }`,
+		`function bla(a) { var b = 5, d = 6; }`
+	);
+	assertMergeDuplicateVars(
+		`function bla(a) { var b = 5, a = 3, d = 6; }`,
+		`function bla(a) { var b = 5; a = 3; var d = 6; }`
+	);
+	assertMergeDuplicateVars(
+		`function bla(a) { var b = 5, a = 3; }`,
+		`function bla(a) { var b = 5; a = 3; }`
+	);
+	assertMergeDuplicateVars(
+		`function bla(a) { var a = 3, b = 5; }`,
+		`function bla(a) { a = 3; var b = 5; }`
+	);
+	// TODO: All this stuff should also work on let and consts
+}
 
 

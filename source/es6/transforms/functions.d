@@ -23,6 +23,9 @@ import es6.transforms.conditionals;
 import option;
 import es6.analyse;
 import es6.eval;
+import std.range : enumerate, tee;
+import std.algorithm : filter, each, remove;
+import std.array : array;
 
 version(unittest)
 {
@@ -48,6 +51,15 @@ void hoistFunctions(Scope scp)
 		{
 			switch(child.type)
 			{
+				case NodeType.ExportDeclarationNode:
+				case NodeType.ExportDefaultDeclarationNode:
+					if (child.children[0].type == NodeType.FunctionDeclarationNode ||
+						child.children[0].type == NodeType.GeneratorDeclarationNode)
+					{
+						hoistFunction(child);
+						break;
+					}
+					goto default;
 				case NodeType.GeneratorDeclarationNode:
 				case NodeType.FunctionDeclarationNode:
 					hoistFunction(child);
@@ -100,4 +112,38 @@ unittest
 	);
 }
 
+void removeFunctionExpressionUnusedName(Scope scp)
+{
+	size_t popped = 0;
+	auto funcs = scp.variables
+		.enumerate
+		.filter!(v => v.value.type == IdentifierType.Function)
+		.filter!(v => v.value.references.length == 0)
+		.filter!(v => v.value.node.parent.type == NodeType.FunctionExpressionNode)
+		.array();
+	foreach(fun; funcs)
+	{
+			auto func = fun.value.node.parent.as!FunctionExpressionNode;
+			func.children = func.children[1..$];
+			scp.variables = scp.variables.remove(fun.index - popped++);
+	}
+}
 
+@("removeFunctionExpressionUnusedName")
+unittest
+{
+	alias assertRemoveFuncExprName = assertTransformations!(removeFunctionExpressionUnusedName);
+
+	assertRemoveFuncExprName(
+		`a = function bla() { };`,
+		`a = function() { };`
+	);
+	assertRemoveFuncExprName(
+		`a = function bla() { }; c = bla;`,
+		`a = function bla() { }; c = bla;`
+	);
+	assertRemoveFuncExprName(
+		`a = function bla() { }; c = function hup() { return bla()*2 };`,
+		`a = function bla() { }; c = function() { return bla()*2 };`
+	);
+}

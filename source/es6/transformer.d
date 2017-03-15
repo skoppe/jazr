@@ -231,7 +231,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 	{
 		assert(node !is null);
 		Node replacedWith;
-		foreach(c; node.children)
+		foreach(c; node.children.dup)
 		{
 			if (c.startsNewScope)
 				continue;
@@ -275,13 +275,3 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 	}
 	transformScope(node.branch.scp);
 }
-
-
-
-
-	// we start at each leaf
-	// we run all transforms on each node
-	// we collect the replacedWith, and if it has
-	// 	we run all transforms on that node
-	// only when we are the first/last child do we process the parent
-	// 

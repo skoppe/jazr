@@ -32,14 +32,52 @@ version(unittest)
 	import std.stdio;
 }
 
+bool hasNestedEndingSingleIfStatment(Node node)
+{
+	switch (node.type)
+	{
+		case NodeType.IfStatementNode:
+			auto ifStmt = node.as!IfStatementNode;
+			if (!ifStmt.hasElsePath)
+				return true;
+			if (ifStmt.elsePath.type == NodeType.BlockStatementNode)
+				return false;
+			return ifStmt.elsePath.node.hasNestedEndingSingleIfStatment;
+		case NodeType.WhileStatementNode:
+		case NodeType.ForStatementNode:
+		case NodeType.WithStatementNode:
+		case NodeType.LabelledStatementNode:
+			assert(node.children.length > 0);
+			return node.children[$-1].hasNestedEndingSingleIfStatment;
+		default:
+			return false;
+	}
+}
+
+bool isChildOfIfStatmentTruthPathWithoutBlockStatement(Node node)
+{
+	if (node.parent is null)
+		return false;
+
+	if (node.parent.type == NodeType.IfStatementNode &&
+		node.parent.getIndexOfChild(node) == 1 &&
+		node.parent.as!(IfStatementNode).hasElsePath)
+		return true;
+
+	if (node.parent.type == NodeType.BlockStatementNode)
+		return false;
+
+	return node.parent.isChildOfIfStatmentTruthPathWithoutBlockStatement();
+}
+
 void removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWith)
 {
 	if (node.children.length == 1)
 	{
-		if (node.parent.type == NodeType.IfStatementNode &&
-			node.parent.getIndexOfChild(node) == 1 &&
-			node.parent.as!(IfStatementNode).hasElsePath)
+		if (node.children[$-1].hasNestedEndingSingleIfStatment() && 
+			node.isChildOfIfStatmentTruthPathWithoutBlockStatement)
 			return;
+
 		if (node.parent.type == NodeType.TryStatementNode ||
 			node.parent.type == NodeType.CatchStatementNode ||
 			node.parent.type == NodeType.FinallyStatementNode)
@@ -88,8 +126,12 @@ unittest
 		`for (c in a)
 		    b = a[c], S(b) ? this[c] = b : this['_' + c] = b`
 	);
+	assertRemoveRedundantBlockStatements(
+		`if (a) for (;;) { if (b) bla(); } else doo();`,
+		`if (a) for (;;) { if (b) bla(); } else doo();`
+	);
 	// TODO: these dont work yet due to low ROI
-	/*assertRemoveRedundantBlockStatements(
+	assertRemoveRedundantBlockStatements(
 		`if (a) { if (b) { if (c) for(;;); } else i = 7; } else d = 6;`,
 		`if (a) if (b) { if (c) for(;;); } else i = 7; else d = 6;`
 	);
@@ -100,5 +142,5 @@ unittest
 	assertRemoveRedundantBlockStatements(
 		`if (a) { if (b) { if (c) for(;;); } else for(;;); if (b) k = 7; } else d = 6;`,
 		`if (a) { if (b) { if (c) for(;;); } else for(;;); if (b) k = 7; } else d = 6;`
-	);*/
+	);
 }

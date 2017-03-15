@@ -442,14 +442,22 @@ class Node
 		// TODO: Test this
 		if (this.parent.type == NodeType.CaseBodyNode)
 		{
-			this.parent.as!(CaseBodyNode).insertAfter(this,[node]);
+			if (node.type == NodeType.BlockStatementNode)
+				this.parent.as!(CaseBodyNode).insertAfter(this,node.children);
+			else
+				this.parent.as!(CaseBodyNode).insertAfter(this,[node]);
 		} else if (this.parent.type == NodeType.FunctionBodyNode)
 		{
 			if (node.type == NodeType.BlockStatementNode)
 				this.parent.as!(FunctionBodyNode).insertAfter(this, node.children);
 			else
 				this.parent.as!(FunctionBodyNode).insertAfter(this, [node]);
-		} else
+		} else if (this.parent.type == NodeType.ModuleNode)
+			if (node.type == NodeType.BlockStatementNode)
+				this.parent.as!(ModuleNode).insertAfter(this, node.children);
+			else
+				this.parent.as!(ModuleNode).insertAfter(this, [node]);
+		else
 		{
 			if (this.parent.type != NodeType.BlockStatementNode)
 			{
@@ -1114,16 +1122,20 @@ final class AssignmentOperatorNode : Node
 }
 final class ContinueStatementNode : Node
 {
-	this()
+	const(ubyte)[] label;
+	this(const(ubyte)[] label = null)
 	{
 		super(NodeType.ContinueStatementNode);
+		this.label = label;
 	}
 }
 final class BreakStatementNode : Node
 {
-	this()
+	const(ubyte)[] label;
+	this(const(ubyte)[] label = null)
 	{
 		super(NodeType.BreakStatementNode);
+		this.label = label;
 	}
 }
 final class EmptyStatementNode : Node
@@ -1901,6 +1913,14 @@ final class ModuleNode : Node
 		this.children.insertInPlace(idx, children);
 		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
 	}
+	void insertAfter(Node sibling, Node[] children)
+	{
+		import std.algorithm : countUntil, each;
+		auto idx = this.children.countUntil!(c=>c is sibling);
+		assert(idx != -1);
+		this.children.insertInPlace(idx+1, children);
+		children.each!((c){c.parent = this; c.assignBranch(this.branch);});
+	}
 }
 final class SemicolonNode : Node
 {
@@ -1961,7 +1981,7 @@ string getDiffMessage(DiffResult d)
 		case Diff.Content:
 			return format("Node a doesn't have the same content as node b");
 		case Diff.BranchChildren:
-			return format("Branch a has %s children, but branch b has %s\n%s%sFrom nodes\n%s%s",d.a.branch.children.length,d.b.branch.children.length,d.a.branch,d.b.branch,d.a,d.b);
+			return format("Branch a has %s children, but branch b has %s\na: %s\bb: %sFrom nodes\n%s%s\nRoot %s\n%s",d.a.branch.children.length,d.b.branch.children.length,d.a.branch,d.b.branch,d.a,d.b,d.a.getRoot,d.b.getRoot);
 		case Diff.BranchEntryTypes:
 			return format("Branch a has entry\n%swhile branch b has\n%s--%s++%s",d.a,d.b,d.a.branch,d.b.branch);
 		case Diff.BranchHints:
@@ -2178,6 +2198,80 @@ bool startsNewScope(Node node)
 	}
 }
 
+bool isStatementLike(Node node)
+{
+	switch(node.type)
+	{
+		case NodeType.ArgumentsNode:
+		case NodeType.ArrowFunctionNode:
+		case NodeType.ContinueStatementNode:
+		case NodeType.BreakStatementNode:
+		case NodeType.EmptyStatementNode:
+		case NodeType.LabelledStatementNode:
+		case NodeType.VariableStatementNode:
+		case NodeType.ReturnStatementNode:
+		case NodeType.BlockStatementNode:
+		case NodeType.IfStatementNode:
+		case NodeType.SwitchStatementNode:
+		case NodeType.DoWhileStatementNode:
+		case NodeType.WhileStatementNode:
+		case NodeType.CaseBodyNode:
+		case NodeType.ForStatementNode:
+		case NodeType.WithStatementNode:
+		case NodeType.CatchStatementNode:
+		case NodeType.FinallyStatementNode:
+		case NodeType.TryStatementNode:
+		case NodeType.ThrowStatementNode:
+		case NodeType.DebuggerStatementNode:
+		case NodeType.FunctionBodyNode:
+		case NodeType.ModuleNode:
+			return true;
+		default:
+			return false;
+	}
+}
+
+bool isPartOfConditionalExpressionCondition(Node node)
+{
+	if (node.parent is null)
+		return false;
+	if (node.parent.type == NodeType.ConditionalExpressionNode)
+	{
+		if (node.parent.as!(ConditionalExpressionNode).condition is node)
+			return true;
+	}
+	if (node.parent.isStatementLike)
+		return false;
+	return node.parent.isPartOfConditionalExpressionCondition();
+}
+
+bool isPartOfIfStatementCondition(Node node)
+{
+	if (node.parent is null)
+		return false;
+	if (node.parent.type == NodeType.IfStatementNode)
+	{
+		if (node.parent.as!(IfStatementNode).condition is node)
+			return true;
+	}
+	if (node.parent.isStatementLike)
+		return false;
+	return node.parent.isPartOfIfStatementCondition();
+}
+
+bool isPartOfBinaryExpression(Node node)
+{
+	if (node.parent is null)
+		return false;
+	if (node.parent.type == NodeType.BinaryExpressionNode)
+	{
+		return true;
+	}
+	if (node.parent.isStatementLike)
+		return false;
+	return node.parent.isPartOfBinaryExpression();
+}
+
 template getNodeType(AstNode : Node)
 {
 	mixin("alias getNodeType = NodeType."~AstNode.stringof~";");
@@ -2199,4 +2293,22 @@ unittest
 	assert(is(getAstNodeType!(NodeType.IfStatementNode) : IfStatementNode));
 }
 
+auto assignmentToExpressionOperator(Assignment a)
+{
+	final switch (a)
+	{
+	case Assignment.LeftShiftAssignment: return ExpressionOperator.LeftShift;
+	case Assignment.TripleRightShiftAssignment: return ExpressionOperator.TripleRightSift;
+	case Assignment.RightShiftAssignment: return ExpressionOperator.RightShift;
+	case Assignment.Assignment: assert(false);
+	case Assignment.AdditiveAssignment: return ExpressionOperator.Add;
+	case Assignment.DecrementalAssignment: return ExpressionOperator.Minus;
+	case Assignment.MultiplicativeAssignment: return ExpressionOperator.Multiply;
+	case Assignment.DivisionAssignment: return ExpressionOperator.Division;
+	case Assignment.ModAssignment: return ExpressionOperator.Mod;
+	case Assignment.BitwiseAndAssignment: return ExpressionOperator.BitwiseAnd;
+	case Assignment.BitwiseOrAssignment: return ExpressionOperator.BitwiseOr;
+	case Assignment.BitwiseXorAssignment: return ExpressionOperator.BitwiseXor;
+	}
+}
 

@@ -62,23 +62,33 @@ int main(string[] args)
 	StopWatch sw;
 	string[] timing;
 	Node node;
-	string input;
+	const(ubyte)[] input;
 	if (fileIn.length > 0)
 	{
 		if (!exists(fileIn))
 		{
 			writeln("File `",fileIn,"` doesn't exist.");
-			assert(false);
+			return 1;
 		}
-		input = readText(fileIn);
+		auto f = File(fileIn, "r");
+		auto fileSize = f.size();
+		if (fileSize == 0)
+		{
+			writeln("File `",fileIn,"` is empty.");
+			return 1;
+		}
+		ubyte[] buffer = new ubyte[fileSize+16];
+		buffer[fileSize..$] = 0;
+		f.rawRead(buffer[0..fileSize]);
+		input = buffer;
 		sw.start();
-		auto parser = parser(input);
+		auto parser = parser(input,true);
 		parser.scanToken();
 		node = parser.parseModule();
 	}
 	else
 	{
-		input = stdin.byChunk(4096).map!(c=>cast(char[])c).joiner.to!string;
+		input = cast(const(ubyte)[])stdin.byChunk(4096).map!(c=>cast(char[])c).joiner.to!string;
 		sw.start();
 		auto parser = parser(input);
 		parser.scanToken();

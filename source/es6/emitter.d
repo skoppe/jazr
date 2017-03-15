@@ -29,6 +29,7 @@ version (unittest)
 	import unit_threaded;
 	import es6.parser;
 	import std.stdio;
+	import es6.analyse;
 	void assertEmitted(string input, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		parse(input).shouldEqual(input,file,line);
@@ -46,6 +47,7 @@ version (unittest)
 		auto parser = parser(input);
 		parser.scanToken();
 		auto root = parser.parseModule();
+		root.analyseNode();
 		return Result(root.emit());
 	}
 }
@@ -59,7 +61,8 @@ enum Guide
 	RequiresWhitespaceBeforeIdentifier = 1 << 5,
 	EndOfList = 1 << 6,
 	PlusRequiresWhitespace = 1 << 7,
-	MinusRequiresWhitespace = 1 << 8
+	MinusRequiresWhitespace = 1 << 8,
+	SkipDelimiter = 1 << 9
 }
 Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide = Guide.None)
 {
@@ -71,7 +74,7 @@ Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide =
 		auto r = c.emit(sink,g);
 		if (r & Guide.RequiresSemicolon)
 			sink.put(";");
-		else if (!(r & Guide.EndOfStatement) || delimiter != ";")
+		else if (!(r & Guide.SkipDelimiter) && (!(r & Guide.EndOfStatement) || delimiter != ";"))
 			sink.put(delimiter);
 		//if (r & Guide.RequiresWhitespaceBeforeIdentifier)
 			//guide |= Guide.RequiresWhitespaceBeforeIdentifier;
@@ -108,7 +111,16 @@ string emit(Node node)
 	node.emit(app);
 	return app.data;
 }
-Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
+bool entersStrictMode(Node node)
+{
+	if (node.branch is null)
+		return false;
+	auto scp = node.branch.scp;
+	if (scp.parent is null)
+		return scp.strictMode;
+	return scp.strictMode && !scp.parent.strictMode;
+}
+Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 {
 	switch(node.type)
 	{
@@ -238,6 +250,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			}
 			return Guide.None;
 		case NodeType.SuperPropertyNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			auto n = node.as!SuperPropertyNode;
 			sink.put("super");
 			if (n.children[0].type == NodeType.IdentifierNameNode)
@@ -250,6 +264,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put(n.identifier);
 			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
 		case NodeType.NewTargetNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("new.target");
 			return Guide.RequiresDelimiter;
 		case NodeType.SpreadOperatorNode:
@@ -373,9 +389,23 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put("continue");
+			auto cntStmt = node.as!ContinueStatementNode;
+			if (cntStmt.label)
+			{
+				sink.put(" ");
+				sink.put(cast(const(char)[])cntStmt.label);
+			}
 			return Guide.RequiresSemicolon;
 		case NodeType.BreakStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("break");
+			auto brkStmt = node.as!BreakStatementNode;
+			if (brkStmt.label)
+			{
+				sink.put(" ");
+				sink.put(cast(const(char)[])brkStmt.label);
+			}
 			return Guide.RequiresSemicolon;
 		case NodeType.EmptyStatementNode:
 			sink.put(";");
@@ -384,7 +414,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			auto n = node.as!LabelledStatementNode;
 			sink.put(n.label);
 			sink.put(":");
-			return Guide.RequiresSemicolon;
+			return Guide.SkipDelimiter;
 		case NodeType.VariableStatementNode:
 			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
@@ -404,7 +434,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 				sink.put(" ");
 			sink.put("return");
 			if (node.children.length == 1)
-				return node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
+				return node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier) | Guide.RequiresSemicolon;
 			return Guide.RequiresSemicolon;
 		case NodeType.BlockStatementNode:
 			sink.put("{");
@@ -554,6 +584,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
 		case NodeType.DebuggerStatementNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("debugger");
 			return Guide.RequiresSemicolon;
 		case NodeType.ClassDeclarationNode:
@@ -672,6 +704,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			return Guide.None;
 		case NodeType.FunctionBodyNode:
 			sink.put("{");
+			if (node.entersStrictMode && (node.parent.parent is null || node.parent.parent.type != NodeType.ClassDeclarationNode))
+				sink.put(`"use strict";`);
 			node.children.emitDelimited(sink,";");
 			sink.put("}");
 			return Guide.EndOfStatement;
@@ -714,6 +748,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			sink.put("}");
 			return Guide.EndOfStatement;
 		case NodeType.ExportDeclarationNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("export");
 			auto r = node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (node.children.length == 2)
@@ -725,6 +761,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			}
 			return Guide.RequiresSemicolon;
 		case NodeType.ExportDefaultDeclarationNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("export default");
 			node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			return Guide.RequiresSemicolon;
@@ -737,6 +775,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			node.children.emitDelimited(sink,",",guide);
 			return Guide.None;
 		case NodeType.ImportDeclarationNode:
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
 			sink.put("import");
 			auto r = node.children[0].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
 			if (node.children.length == 2)
@@ -762,6 +802,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None)
 			node.children[0].emit(sink);
 			return Guide.None;
 		case NodeType.ModuleNode:
+			if (node.entersStrictMode)
+				sink.put(`"use strict";`);
 			auto r = node.children.emitDelimited(sink,";");
 			if (r & Guide.RequiresSemicolon || r & Guide.RequiresDelimiter)
 				sink.put(";");
@@ -810,15 +852,15 @@ unittest
 	assertEmitted(`export default class{};`);
 	assertEmitted(`export default{a,b,c};`);
 	assertEmitted(`export var a=6,{b,c}=d,e;`);
-	assertEmitted(`export var a=6,[b,c]=d,e;`);
+	assertEmitted(`export var a=6,[f,c]=d,e;`);
 	assertEmitted(`export function bla(){};`);
 	assertEmitted(`export function(){};`);
 	assertEmitted(`export function*bla(){};`);
 	assertEmitted(`export function*(){};`);
 	assertEmitted(`export class b{};`);
 	assertEmitted(`export class{};`);
-	assertEmitted(`export let x=6,{b,c}=d;`);
-	assertEmitted(`export const x=6,{b,c}=d;`);
+	assertEmitted(`export let x=6,{g,c}=d;`);
+	assertEmitted(`export const x=6,{h,c}=d;`);
 }
 @("Return Statement")
 unittest
@@ -828,6 +870,7 @@ unittest
 	assertEmitted(`function a(){return typeof a}`);
 	assertEmitted(`function a(){return+a}`);
 	assertEmitted(`function cd(){if(a)if(b)return 4;else return 5;else return 6}`);
+	assertEmitted(`function cd(){if(a)return function(){bla()};var a=6;return a}`);
 }
 @("Function Expression")
 unittest
@@ -895,6 +938,7 @@ unittest
 	assertEmitted("`template literal`");
 	assertEmitted("`template literal ${b=5} ending`");
 	assertEmitted("/regex/g;");
+	assertEmitted("`${double(2)} != null ? ${double(2)} : {}`");
 }
 @("Lexical Declaration")
 unittest
@@ -1054,6 +1098,7 @@ unittest
 	assertEmitted(`for({a,c}in'b'){}`);
 	assertEmitted(`for({a,c}of'b'){}`);
 	assertEmitted(`if(b)bla();else for({a,c}of'b'){}`);
+	assertEmitted(`for(;;){if(a)continue;else break}`);
 }
 @("With Statement")
 unittest
@@ -1128,6 +1173,18 @@ unittest
 	assertEmitted(`!bla;`);
 	assertEmitted(`bla<=ops;`);
 	assertEmitted(`bla>-1;`);
+}
+@("Labelled Breaks and Continues")
+unittest
+{
+	assertEmitted(`label:for(;;)if(a)break label;`);
+	assertEmitted(`label:for(;;)if(a)continue label;`);
+}
+@("use strict")
+unittest
+{
+	assertEmitted(`"use strict";var a=5;`);
+	assertEmitted(`function bla(){"use strict";var a=5}`);
 }
 @("Module")
 unittest

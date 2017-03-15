@@ -58,4 +58,15 @@ version(unittest)
 		}
 		throw new UnitTestException([format("Expected exception with message `%s`",msg)],file,line);
 	}
+	unittest
+	{
+		class A {}
+		class B {}
+		auto a = new A();
+		auto a2 = new A();
+		a.shouldBeObject(a);
+		a.shouldBeObject(a2).shouldThrow();
+		(new Node(NodeType.ErrorNode)).shouldBeOfType!A.shouldThrow();
+		(){throw new UnitTestException(["bla"]);}().shouldThrowSaying("not bla").shouldThrow();
+	}
 }
