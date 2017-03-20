@@ -316,10 +316,9 @@ void findGlobals(Scope scp)
 	{
 		s.findGlobals();
 		s.globals
-			.filter!(id=>!scp.variables.canFind!"a.node.identifier == b"(id.node.identifier))
 			.each!(id=>scp.globals ~= id);
 	}
-	foreach(g; scp.identifiers.filter!(a=>!scp.variables.canFind!"a.node.identifier == b"(a.node.identifier)))
+	foreach(g; scp.identifiers.filter!(i=>i.definition is null))
 		scp.globals ~= g;
 }
 @("findGlobals")
