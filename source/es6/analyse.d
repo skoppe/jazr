@@ -20,6 +20,7 @@ module es6.analyse;
 @safe:
 
 import std.algorithm : each;
+import es6.bench;
 
 version (unittest)
 {
@@ -868,8 +869,8 @@ AnalysisResult analyseNode(Node root)
 	Branch b = s.branch;
 	Scope all = s;
 	Branch trunk = b;
-	analyse(root,s,b);
-	s.linkIdentifierToDefinitions();
+	measure!("Analysing",() => analyse(root,s,b));
+	measure!("Variable Linking", () => s.linkIdentifierToDefinitions());
 	findGlobals(s);
 	auto ar = AnalysisResult(all,trunk);
 	//ar.fetchUnresolvedIdentifiers();

@@ -28,6 +28,7 @@ import es6.analyse;
 import es6.transformer;
 import es6.transforms;
 import es6.nodes;
+import es6.bench;
 
 version(unittest)
 {
@@ -42,42 +43,44 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 	debug {
 		root.assertTreeInternals();
 	}
-	root.runTransform!(
-		removeFunctionExpressionUnusedName,
-		invertBinaryExpressions,
-		convertHexToDecimalLiterals,
-		removeUseStrict,
-		mergeDuplicateVariableDeclarations,
-		convertEscapedUnicodeToUnicode,
-		mergeNeighbouringVariableDeclarationStatements,
-		mergeVariableDeclarationStatements,
-		moveStringComparisonToLeftOperand,
-		hoistFunctions,
-		shortenLiteralPropertyNames,
-		combineBlockStatementIntoExpression,
-		removeRedundantBlockStatements,
-		combineFunctionBodyIntoExpression,
-		combineModuleIntoExpression,
-		simplifyBinaryExpressions,
-		simplifyStaticIfStatement,
-		simplifyStaticConditional,
-		removeUnnecessaryParenthesis,
-		removeUnusedParameters,
-		shortenBooleanNodes,
-		simplifyRedundantAssignmentExpressions,
-		moveExpressionsIntoIfCond,
-		moveExpressionsIntoReturn,
-		negateReturningIf,
-		convertIfElseAssignmentToConditionalExpression,
-		combineNestedIfs,
-		convertIfsToExpressionStatements,
-		convertIfElseToConditionalExpression,
-		negateReturningIf,
-		removeRedundantElse,
-		combineReturnStatements
-	)(file,line);
+	measure!("Transform", (){
+		root.runTransform!(
+			removeFunctionExpressionUnusedName,
+			invertBinaryExpressions,
+			convertHexToDecimalLiterals,
+			removeUseStrict,
+			mergeDuplicateVariableDeclarations,
+			convertEscapedUnicodeToUnicode,
+			mergeNeighbouringVariableDeclarationStatements,
+			mergeVariableDeclarationStatements,
+			moveStringComparisonToLeftOperand,
+			hoistFunctions,
+			shortenLiteralPropertyNames,
+			combineBlockStatementIntoExpression,
+			removeRedundantBlockStatements,
+			combineFunctionBodyIntoExpression,
+			combineModuleIntoExpression,
+			simplifyBinaryExpressions,
+			simplifyStaticIfStatement,
+			simplifyStaticConditional,
+			removeUnnecessaryParenthesis,
+			removeUnusedParameters,
+			shortenBooleanNodes,
+			simplifyRedundantAssignmentExpressions,
+			moveExpressionsIntoIfCond,
+			moveExpressionsIntoReturn,
+			negateReturningIf,
+			convertIfElseAssignmentToConditionalExpression,
+			combineNestedIfs,
+			convertIfsToExpressionStatements,
+			convertIfElseToConditionalExpression,
+			negateReturningIf,
+			removeRedundantElse,
+			combineReturnStatements
+		)(file,line);
+	});
 
-	root.branch.scp.shortenVariables();
+	measure!("Shorten Variables",(){root.branch.scp.shortenVariables();});
 }
 
 @("minify")

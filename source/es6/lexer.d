@@ -24,6 +24,7 @@ import std.array : Appender, appender;
 import std.traits : Unqual;
 import es6.tokens;
 import core.cpuid : sse42;
+import es6.bench;
 
 version (D_InlineAsm_X86_64)
 {
@@ -143,16 +144,34 @@ public:
             	return _words[h];
         }
     }
-    static Keyword get()(const(ubyte)[] word)
+    static Keyword get()(const(ubyte)[] word) nothrow @nogc
     {
-        const ushort h = hash(word);
-        if (!_filled[h])
-        	return Keyword.Unknown;
-        auto type = _map[h];
-        if (type == Keyword.Unknown || _words[h].length != word.length || _words[h] != word)
-        	return Keyword.Unknown;
-        return type;
+    	//return measure!("Keywords.get",(){
+	        const ushort h = hash(word);
+	        if (!_filled[h])
+	        	return Keyword.Unknown;
+	        auto type = _map[h];
+	        if (type == Keyword.Unknown || _words[h].length != word.length || _words[h] != word)
+	        	return Keyword.Unknown;
+	        return type;
+    	//});
     }
+}
+
+Keyword matchKeyword(const(ubyte)[] keyword) nothrow
+{
+	if (keyword.length < 2 || keyword.length > 10)
+		return Keyword.Unknown;
+	return Keywords.get(keyword);
+}
+
+bool isReservedKeyword(Keyword keyword) nothrow pure @nogc
+{
+	return keyword != Keyword.Unknown &&
+		keyword != Keyword.Static &&
+		keyword != Keyword.Set &&
+		keyword != Keyword.Let &&
+		keyword != Keyword.Get;
 }
 
 bool isReservedKeyword(const(ubyte)[] keyword) nothrow
@@ -160,11 +179,7 @@ bool isReservedKeyword(const(ubyte)[] keyword) nothrow
 	if (keyword.length < 2 || keyword.length > 10)
 		return false;
 	auto k = Keywords.get(keyword);
-	return k != Keyword.Unknown &&
-		k != Keyword.Static &&
-		k != Keyword.Set &&
-		k != Keyword.Let &&
-		k != Keyword.Get;
+	return k.isReservedKeyword();
 }
 bool isWhitespace(Char)(Char c) nothrow
 {
@@ -176,6 +191,7 @@ bool isWhitespace(Char)(Char c) nothrow
 		return false;
 	return (c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
 }
+// TODO: can we make this into a index computation and switch (1,2,3)?
 size_t getWhiteSpaceLength(Range)(Range r, size_t idx = 0) nothrow
 {
 	if (r[idx] < 0xc0) // 1 byte code point
@@ -229,6 +245,7 @@ unittest
 //{
 //	return (s == 0x0a || s == 0x0d);// || s == '\u2028' || s == '\u2029');
 //}
+// TODO: can we make this into a index computation and switch (1,2,3)?
 size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0) pure nothrow
 {
 	if (r[idx] <= 0x7f)
@@ -384,6 +401,7 @@ unittest {
 	assert([0xE2,0x82,0xAC].decodeUnicodeCodePoint!(3) == 0x20AC);
 	assert([0xF0,0x90,0x8D,0x88].decodeUnicodeCodePoint!(4) == 0x10348);
 }
+// TODO: can we make this into a index computation and switch (1,2,3)?
 size_t getUnicodeLength(Range)(Range r, size_t idx = 0) pure nothrow @nogc
 {
 	if (r[idx] < 0xc0)
@@ -594,21 +612,25 @@ struct Lexer
 	{
 		auto scanToken(Goal goal = Goal.All, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
-			column += tokenLength;
-			tokenLength = 0;
-			token = lexToken(goal);
-			version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
-			return token;
+			//return measure!("Scantoken",(){
+				column += tokenLength;
+				tokenLength = 0;
+				token = lexToken(goal);
+				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
+				return token;
+			//});
 		}
 	} else
 	{
 		auto scanToken(Goal goal = Goal.All)
 		{
-			column += tokenLength;
-			tokenLength = 0;
-			token = lexToken(goal);
-			version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
-			return token;
+			//return measure!("Scantoken",(){
+				column += tokenLength;
+				tokenLength = 0;
+				token = lexToken(goal);
+				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
+				return token;
+			//});
 		}
 	}
 	private auto createTokenAndAdvance(Type tokenType, size_t len, const (ubyte)[] match) nothrow

@@ -21,6 +21,7 @@ import es6.nodes;
 import es6.reporter;
 import es6.minifier;
 import es6.analyse;
+import es6.bench;
 
 import std.getopt;
 import std.stdio;
@@ -39,120 +40,105 @@ int main(string[] args)
 	bool time;
 	bool forceStdin;
 	bool doMinify;
+	bool bench;
 	string fileIn;
 	string fileOut;
 
-	StopWatch swTotal;
-	swTotal.start();
+	size_t size;
+	auto result = measure!("Total",(){
 
-	auto helpInformation = getopt(
-		args,
-		"time", "Show timing information", &time,
-		"i|input", "Input file (defaults to stdin)", &fileIn,
-		"o|output", "Output file (defaults to stdout)", &fileOut,
-		"minify", "Minify js before outputting (default to false)", &doMinify
-	);
+		auto helpInformation = getopt(
+			args,
+			"time", "Show timing information", &time,
+			"i|input", "Input file (defaults to stdin)", &fileIn,
+			"o|output", "Output file (defaults to stdout)", &fileOut,
+			"b|bench", "Lowlevel timings", &bench,
+			"minify", "Minify js before outputting (default to false)", &doMinify
+		);
 
-	if (helpInformation.helpWanted)
-	{
-		defaultGetoptPrinter("ECMAScript Tool.\n\nUsage:\t"~baseName(args[0])~" [OPTIONS]\n\nOptions:\n", helpInformation.options);
-		return 1;
-	}
-
-	StopWatch sw;
-	string[] timing;
-	Node node;
-	const(ubyte)[] input;
-	if (fileIn.length > 0)
-	{
-		if (!exists(fileIn))
+		if (helpInformation.helpWanted)
 		{
-			writeln("File `",fileIn,"` doesn't exist.");
+			defaultGetoptPrinter("ECMAScript Tool.\n\nUsage:\t"~baseName(args[0])~" [OPTIONS]\n\nOptions:\n", helpInformation.options);
 			return 1;
 		}
-		auto f = File(fileIn, "r");
-		auto fileSize = f.size();
-		if (fileSize == 0)
+
+		string[] timing;
+		Node node;
+		const(ubyte)[] input;
+		if (fileIn.length > 0)
 		{
-			writeln("File `",fileIn,"` is empty.");
+			if (!exists(fileIn))
+			{
+				writeln("File `",fileIn,"` doesn't exist.");
+				return 1;
+			}
+			auto f = File(fileIn, "r");
+			auto fileSize = f.size();
+			if (fileSize == 0)
+			{
+				writeln("File `",fileIn,"` is empty.");
+				return 1;
+			}
+			ubyte[] buffer = new ubyte[fileSize+16];
+			buffer[fileSize..$] = 0;
+			measure!("Read File", (){
+				f.rawRead(buffer[0..fileSize]);
+			});
+			input = buffer;
+			auto parser = parser(input,true);
+			parser.scanToken();
+			node = measure!("Parsing", () => parser.parseModule());
+		}
+		else
+		{
+			input = cast(const(ubyte)[])stdin.byChunk(4096).map!(c=>cast(char[])c).joiner.to!string;
+			auto parser = parser(input);
+			parser.scanToken();
+			node = measure!("Parsing", () => parser.parseModule());
+		}
+
+		size = input.length;
+		auto errors = measure!("Collect Errors", (){
+			return node.collectErrors();
+		});
+		if (errors.length > 0)
+		{
+			reportError(errors[0].as!ErrorNode,input,0);
 			return 1;
 		}
-		ubyte[] buffer = new ubyte[fileSize+16];
-		buffer[fileSize..$] = 0;
-		f.rawRead(buffer[0..fileSize]);
-		input = buffer;
-		sw.start();
-		auto parser = parser(input,true);
-		parser.scanToken();
-		node = parser.parseModule();
-	}
-	else
+
+		if (doMinify)
+		{
+			node.analyseNode();
+			measure!("Minifying",(){node.minify();});
+		}
+
+		auto min = measure!("Emitting",()=> emit(node));
+
+		if (fileOut.length > 0)
+		{
+			if (fileOut != "/dev/null")
+				write(fileOut,min);
+		}
+		else 
+			writeln(min);
+		return 0;
+	});
+	if (result != 0)
+		return result;
+
+	if (bench)
+		dumpMeasures();
+	else if (time)
 	{
-		input = cast(const(ubyte)[])stdin.byChunk(4096).map!(c=>cast(char[])c).joiner.to!string;
-		sw.start();
-		auto parser = parser(input);
-		parser.scanToken();
-		node = parser.parseModule();
-	}
-	sw.stop();
-	size_t size = input.length;
-
-	if (time)
-		timing ~= format("Parsing: "~sw.peek().msecs.to!string~"ms");
-	sw.reset();
-
-	auto errors = node.collectErrors();
-	if (errors.length > 0)
-	{
-		reportError(errors[0].as!ErrorNode,input,0);
-		if (time)
-			writeln(timing);
-		return 1;
-	}
-
-	if (doMinify)
-	{
-		sw.start();
-		node.analyseNode();
-		sw.stop();
-		if (time)
-			timing ~= format("Analysing: "~sw.peek().msecs.to!string~"ms");
-		sw.reset();
-
-		sw.start();
-		node.minify();
-		sw.stop();
-		if (time)
-			timing ~= format("Minifying: "~sw.peek().msecs.to!string~"ms");
-		sw.reset();
-	}
-
-	sw.start();
-	auto min = emit(node);
-	sw.stop();
-	if (time)
-		timing ~= format("Emitting: "~sw.peek().msecs.to!string~"ms");
-	sw.reset();
-
-	if (fileOut.length > 0)
-	{
-		if (fileOut != "/dev/null")
-			write(fileOut,min);
-	}
-	else 
-		writeln(min);
-
-	if (time)
-	{
-		timing ~= format("Total: "~swTotal.peek().msecs.to!string~"ms");
+		auto timing = formatMeasures(["Parsing","Analysing","Minifying","Emitting","Total"]);
 		timing ~= format("Size: %d", size);
-		auto mbPerSec = 0.9536 * (cast(double)size)/swTotal.peek().usecs;
+		auto total = getMeasure("Total");
+		auto mbPerSec = 0.9536 * (cast(double)size)/total.usecs;
 		import std.array : insertInPlace;
 		timing.insertInPlace(0,format("Mb/s: "~mbPerSec.to!string));
+		writeln(timing);
 	}
 
-
-	if (time)
-		writeln(timing);
 	return 0;
 }
