@@ -415,13 +415,36 @@ unittest
 	);
 }
 
+bool isExpressionStatement(Node node)
+{
+	switch (node.parent.type)
+	{
+		case NodeType.BlockStatementNode:
+		case NodeType.ModuleNode:
+		case NodeType.FunctionBodyNode:
+		case NodeType.CaseBodyNode:
+		case NodeType.WithStatementNode:
+			return true;
+		case NodeType.IfStatementNode:
+			return node.parent.as!IfStatementNode.condition !is node;
+		case NodeType.DoWhileStatementNode:
+			return node.parent.getIndexOfChild(node) == 0;
+		case NodeType.WhileStatementNode:
+		case NodeType.ForStatementNode:
+			return node.parent.children[$-1] is node;
+		default:
+			return false;
+	}
+}
+
 void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 {
 	auto opNode = node.children[1].as!(ExpressionOperatorNode);
 	if (opNode.operator != ExpressionOperator.LogicalAnd && 
 		opNode.operator != ExpressionOperator.LogicalOr)
 		return;
-	if ((cast(Node)node).isPartOfConditionalExpressionCondition || (cast(Node)node).isPartOfBinaryExpression || (cast(Node)node).isPartOfIfStatementCondition)
+
+	if (!node.isExpressionStatement)
 		return;
 
 	if (node.children[0].type == NodeType.UnaryExpressionNode)
@@ -624,8 +647,45 @@ unittest
 		`(c(), !a && !g) && b()`,
 		`(c(), !a && !g) && b()`
 	);
+	assertInvertBinExpr(
+		`if(!a && b) bla();`,
+		`if(!a && b) bla();`
+	);
+	assertInvertBinExpr(
+		`!a && b ? 5 : 6;`,
+		`!a && b ? 5 : 6;`
+	);
+	assertInvertBinExpr(
+		`c && (!a && b);`,
+		`c && (!a && b);`
+	);
+	assertInvertBinExpr(
+		`while (!a && b) doBla();`,
+		`while (!a && b) doBla();`
+	);
+	assertInvertBinExpr(
+		`a = !b && c;`,
+		`a = !b && c;`
+	);
+	assertInvertBinExpr(
+		`fun(!b && c);`,
+		`fun(!b && c);`
+	);
+	assertInvertBinExpr(
+		`for(var b;!b && c;d++);`,
+		`for(var b;!b && c;d++);`
+	);
 }
 
 
+// TODO: create minifier for inverting equality binary expressions:
+// 	assertInvertEqualityBinExpr(
+	//	`!(a == 9)`,
+	//	`a != 9`
+	//);
+	//assertInvertEqualityBinExpr(
+	//	`d(), !(a == 9)`,
+	//	`d(), a != 9`
+	//);
 
 
