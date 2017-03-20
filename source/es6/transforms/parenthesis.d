@@ -210,7 +210,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 	{
 		node.insertBefore(node.children[0].children);
 		node.detach();
-	} else if (isPartOfConditionalExpr && !isLeftChild && hasAssignment)
+	} else if (isPartOfConditionalExpr && isLeftChild && hasAssignment)
 	{
 		return false;
 	} else if (node.children.length == 1)
@@ -362,7 +362,7 @@ unittest
 	);
 	assertRemoveParens(
 		`inst.refs === emptyObject ? (inst.refs = {}) : inst.refs`,
-		"inst.refs === emptyObject ? (inst.refs = {}) : inst.refs"
+		"inst.refs === emptyObject ? inst.refs = {} : inst.refs"
 	);
 	assertRemoveParens(
 		`a = (b && g in window)`,
@@ -520,6 +520,11 @@ unittest
 	assertRemoveParens(
 		`var a = { body: (tmp = expression(true), semicolon(), tmp) };`,
 		`var a = { body: (tmp = expression(true), semicolon(), tmp) };`
+	);
+
+	assertRemoveParens(
+		`function doOption() { (a = 7) ? b = a : t && blo() }`,
+		`function doOption() { (a = 7) ? b = a : t && blo() }`
 	);
 
 }

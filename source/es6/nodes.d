@@ -2231,47 +2231,6 @@ bool isStatementLike(Node node)
 	}
 }
 
-bool isPartOfConditionalExpressionCondition(Node node)
-{
-	if (node.parent is null)
-		return false;
-	if (node.parent.type == NodeType.ConditionalExpressionNode)
-	{
-		if (node.parent.as!(ConditionalExpressionNode).condition is node)
-			return true;
-	}
-	if (node.parent.isStatementLike)
-		return false;
-	return node.parent.isPartOfConditionalExpressionCondition();
-}
-
-bool isPartOfIfStatementCondition(Node node)
-{
-	if (node.parent is null)
-		return false;
-	if (node.parent.type == NodeType.IfStatementNode)
-	{
-		if (node.parent.as!(IfStatementNode).condition is node)
-			return true;
-	}
-	if (node.parent.isStatementLike)
-		return false;
-	return node.parent.isPartOfIfStatementCondition();
-}
-
-bool isPartOfBinaryExpression(Node node)
-{
-	if (node.parent is null)
-		return false;
-	if (node.parent.type == NodeType.BinaryExpressionNode)
-	{
-		return true;
-	}
-	if (node.parent.isStatementLike)
-		return false;
-	return node.parent.isPartOfBinaryExpression();
-}
-
 template getNodeType(AstNode : Node)
 {
 	mixin("alias getNodeType = NodeType."~AstNode.stringof~";");

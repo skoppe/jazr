@@ -221,6 +221,10 @@ unittest
 		`function b() { if (d(), a) return; op() }`,
 		`function b() { if (d(), !a) { op() } }`
 	);
+	assertReturnIfNegation(
+		`function b() { if (d(), a == 9) return; op() }`,
+		`function b() { if (d(), !(a == 9)) { op() } }`
+	);
 }
 
 void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)

@@ -267,6 +267,10 @@ void negateUnaryExpression(UnaryExpressionNode node)
 }
 void negateNode(Node node)
 {
+	if (node.type == NodeType.BinaryExpressionNode)
+		return negateBinaryExpression(node.as!BinaryExpressionNode);
+	if (node.type == NodeType.UnaryExpressionNode)
+		return negateUnaryExpression(node.as!UnaryExpressionNode);
 	if (node.hints.has(Hint.HasAssignment))
 		node = node.parenthesizeExpression();
 	auto unary = new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Negation)]).withBranch(node.branch);
