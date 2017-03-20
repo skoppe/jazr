@@ -22,6 +22,7 @@ import es6.scopes;
 import es6.analyse;
 import std.algorithm : map;
 import std.array : array;
+import es6.bench;
 
 version(unittest)
 {
@@ -131,15 +132,67 @@ unittest
 	foreach (s; scp.children)
 		walkScope(s, list);
 }*/
+
+auto findUnusedItem(Range)(Range ranges)
+	if (is(ElementType!(Range) : int[]))
+{
+	import std.range : chain, iota, only, enumerate, empty, front;
+	import std.algorithm : map, canFind, sort, reduce, max, filter;
+	auto lists = ranges.array;
+	foreach(i; iota(0,int.max))
+	{
+		auto itemInLists = lists.map!(l => !l.empty && l.front == i).enumerate.filter!(a => a.value);
+		if (itemInLists.empty) {
+			return i;
+		} else {
+			foreach(list; itemInLists) {
+				lists[list.index] = lists[list.index][1..$];
+			}
+		}
+
+	}
+	assert(0);
+}
+@("findUnusedItem")
+unittest
+{
+	auto rr = [[0,1,2,3,4,8,9,11],[0,2,5,6],[7],[]];
+	assert(findUnusedItem(rr) == 10);
+	assert(findUnusedItem(rr[1..$]) == 1);
+	assert(findUnusedItem(rr[2..$]) == 0);
+}
+// range has to be sorted, very simple impl. can do better (but only if need be)
+auto insertItem(ref int[] range, int item)
+{
+	import std.array : insertInPlace;
+	auto idx = range.countUntil!(i => i > item);
+	if (idx == -1)
+		idx = range.length;
+	range.insertInPlace(idx, item);
+}
+@("insertItem")
+unittest
+{
+	auto rr = [[0,1,2,3,4,8,9,11],[0,2,5,6],[7],[]];
+	rr[0].insertItem(10);
+	assert(rr[0] == [0,1,2,3,4,8,9,10,11]);
+	rr[1].insertItem(10);
+	assert(rr[1] == [0,2,5,6,10]);
+	rr[2].insertItem(10);
+	assert(rr[2] == [7,10]);
+	rr[3].insertItem(10);
+	assert(rr[3] == [10]);
+}
+
 struct VariableAlloc
 {
-	int counter;
-	int[] freeList;
+	int[] usedList;
 }
 void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList())
 {
-	import std.algorithm : map, canFind, sort, reduce, max;
-	import std.array : appender;
+	import std.algorithm : map, canFind, sort, reduce, max, filter, any, uniq;
+	import std.array : appender, Appender;
+	import std.range : chain, iota, only, zip;
 	auto vars = appender!(Variable[]);
 	void collectVars(Scope s)
 	{
@@ -150,57 +203,55 @@ void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList()
 	foreach(c; scp.children)
 		collectVars(c);
 	auto sortedVars = vars.data.sort!((a,b) => b.references.length < a.references.length);
-	struct VariableAlloc
-	{
-		int counter;
-		int[] freeList;
-	}
 	VariableAlloc[void*] counters;
+	auto scopeSink = appender!(Scope[]);
 	foreach(v; sortedVars)
 	{
 		auto node = v.node;
-		Scope s = node.branch.scp;
-		VariableAlloc scopeAllocations = counters.get(cast(void*)s,VariableAlloc.init);
-		int nestedCounter = reduce!(max)(0,v.references.map!(r => counters.get(cast(void*)r.branch.scp,VariableAlloc.init).counter));
-		string id = s.generateFreeIdentifier(nestedCounter, scopeAllocations);
-		counters[cast(void*)s] = scopeAllocations;
+		Scope startingScope = node.branch.scp;
+		
+		auto referencedScopes = v.references.map!(r => r.branch.scp).uniq;
+
+		alias pluckParent = s => s.parent;
+		void getIntermediateScopes(Scopes)(Scopes ss, ref Appender!(Scope[]) sink)
+		{
+			auto startIdx = sink.data.length;
+			foreach(s; ss.filter!(s => !sink.data.canFind(s) && s !is startingScope))
+				sink.put(s);
+			auto endIdx = sink.data.length;
+			if (endIdx == startIdx)
+				return;
+			getIntermediateScopes(sink.data[startIdx..endIdx].map!pluckParent, sink);
+		}
+
+		scopeSink.put(startingScope);
+		getIntermediateScopes(referencedScopes, scopeSink);
+
+		auto scopes = scopeSink.data;
+		auto allocs = scopes.map!(s => counters.get(cast(void*)s,VariableAlloc.init)).array();
+
+		int item;
+		string id;
+
+		do {
+			item = allocs.map!(s => s.usedList).findUnusedItem();
+			id = generateValidIdentifier(item);
+
+			foreach(ref a; allocs)
+				a.usedList.insertItem(item);
+			
+		} while(startingScope.getGlobals.map!(g => g.node.identifier).any!(i => i == id));
+
+		allocs.zip(scopes).each!((z){
+			counters[cast(void*)(z[1])] = z[0];
+		});
+
 		node.identifier = cast(const(ubyte)[])id;
 		foreach(n; v.references)
 			n.as!(IdentifierReferenceNode).identifier = cast(const(ubyte)[])id;
+
+		scopeSink.clear();
 	}
-}
-private string generateFreeIdentifier(VAlloc)(Scope s, int nestedCounter, ref VAlloc varAlloc)
-{
-	import std.algorithm : canFind, max, filter, remove;
-	import std.range : chain, iota, enumerate;
-	string id;
-	int cnt;
-	auto globals = s.getGlobals().map!(g => g.node.identifier).array;
-	auto frees = varAlloc.freeList.enumerate.filter!(i => i.value >= nestedCounter).array;
-	foreach(freeItem; frees)
-	{
-		id = generateValidIdentifier(freeItem.value);
-		if (!globals.canFind(id))
-		{
-			varAlloc.freeList = varAlloc.freeList.remove(freeItem.index);
-			return id;
-		}
-	}
-	cnt = max(nestedCounter, varAlloc.counter);
-	if (varAlloc.counter != cnt)
-	{
-		if (varAlloc.freeList.length > 0)
-			assert(varAlloc.counter > varAlloc.freeList[$-1]);
-		varAlloc.freeList = chain(varAlloc.freeList,iota(varAlloc.counter, cnt)).array();
-	}
-	for(;;)
-	{
-		id = generateValidIdentifier(cnt++);
-		if (!globals.canFind(id))
-			break;
-	}
-	varAlloc.counter = cnt;
-	return id;
 }
 @("shortenVariables")
 unittest
@@ -259,8 +310,20 @@ unittest
 		`function s(){var b,a,c=function(a){return a*a*a*a*b*b*b}}`,
 	);
 	assertVariableRenaming(
-		`function a(){var a,b,c,d,e,f,g,h,i;return function(){var d,e,f; return d*d*d*d*e*e*f*a*a*a*b*c}}`,
-		`function a(){var e,g,h,a,b,c,d,f,i;return function(){var d,f,i;return d*d*d*d*f*f*i*e*e*e*g*h}}` //TODO: d should be a, e -> b, f -> c, etc. This doens't happen because a is considered a global inside the inner function, and therefor the next free one is d.
+		`function a(){var a,b,c,d,e,f,g,h,i;return function(){var d,e,f;return d*d*d*d*e*e*f*a*a*a*b*c}}`,
+		`function a(){var b,d,e,a,c,f,g,h,i;return function(){var a,c,f;return a*a*a*a*c*c*f*b*b*b*d*e}}`
+	);
+	assertVariableRenaming(
+		`function bla(s){ var w = [s]; w.on('pre-require', function(x){ x.a = function(){ w[0](x, w, x, x) } }) }`,
+		`function bla(a){var b=[a];b.on('pre-require',function(a){a.a=function(){b[0](a,b,a,a)}})}`
+	);
+	assertVariableRenaming(
+		`function bla(suite){ var suites = [suite]; suite.on(function(context){ context.w = function(){ suites[0].c(suites, suites); }; }); };`,
+		`function bla(b){var a=[b];b.on(function(b){b.w=function(){a[0].c(a,a)}})}`
+	);
+	assertVariableRenaming(
+		`function bla(suite){ var suites = [suite]; suite.on(function(context){ context.p = context.g; context.s(); context.w = function(){ suites[0].c(suites, suites); }; }); };`,
+		`function bla(a){var b=[a];a.on(function(a){a.p=a.g;a.s();a.w=function(){b[0].c(b,b)}})}`
 	);
 	// TODO: All this stuff should also work on let and consts
 }
