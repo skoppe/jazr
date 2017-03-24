@@ -424,6 +424,7 @@ bool isExpressionStatement(Node node)
 		case NodeType.FunctionBodyNode:
 		case NodeType.CaseBodyNode:
 		case NodeType.WithStatementNode:
+		case NodeType.ReturnStatementNode:
 			return true;
 		case NodeType.IfStatementNode:
 			return node.parent.as!IfStatementNode.condition !is node;

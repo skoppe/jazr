@@ -192,6 +192,8 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 		auto condExpr = node.parent.as!(ConditionalExpressionNode);
 		if (condExpr.condition !is node)
 			return false;
+		if (!isExpressionStatement(node.parent))
+			return false;
 		auto transfers = node.children[0].children[0..$-1];
 		auto cond = node.children[0].children[$-1];
 		if (cond.type == NodeType.ConditionalExpressionNode)
@@ -527,4 +529,8 @@ unittest
 		`function doOption() { (a = 7) ? b = a : t && blo() }`
 	);
 
+	assertRemoveParens(
+		`function m(){var k,expr;switch(l){default:expr=o();return w?(p(),r)?4:2:5}}`,
+		`function m(){var k,expr;switch(l){default:expr=o();return w?(p(),r)?4:2:5}}`
+	);
 }
