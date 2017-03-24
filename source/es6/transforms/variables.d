@@ -506,11 +506,15 @@ void mergeDuplicateVariableDeclarations(Scope scp)
 		{
 			auto varDecl = duplicate.node.parent;
 			auto varStmt = varDecl.parent;
+			if (varStmt.parent.type == NodeType.ForStatementNode && varStmt.children.length > 1)
+				continue;
 			// if the variable declaration item has no initializer
 			if (varDecl.children.length == 1)
 			{
 				if (varStmt.children.length == 1)
 				{
+					if (varStmt.parent.type == NodeType.ForStatementNode)
+						varStmt.parent.as!(ForStatementNode).loopType = ForLoop.ExprCStyle;
 					auto parent = varStmt.parent;
 					varStmt.detach();
 					parent.reanalyseHints();
@@ -537,6 +541,8 @@ void mergeDuplicateVariableDeclarations(Scope scp)
 				// if the variable declaration item is only child of the variable statement
 				if (varStmt.children.length == 1)
 				{
+					if (varStmt.parent.type == NodeType.ForStatementNode)
+						varStmt.parent.as!(ForStatementNode).loopType = ForLoop.ExprCStyle;
 					varDecl.parent.replaceWith(assignExpr);
 				} else
 				{
@@ -638,6 +644,18 @@ unittest
 	assertMergeDuplicateVars(
 		`function bla(a) { var a = 3, b = 5; }`,
 		`function bla(a) { a = 3; var b = 5; }`
+	);
+	assertMergeDuplicateVars(
+		`var n; for (var n = 1, r = arguments, a = r.length;;) i(o);`,
+        `var n; for (var n = 1, r = arguments, a = r.length;;) i(o);`
+	);
+	assertMergeDuplicateVars(
+		`var n; for (var n = 1;;) i(o);`,
+        `var n; for (n = 1;;) i(o);`
+	);
+	assertMergeDuplicateVars(
+		`var n; for (var n;;) i(o);`,
+        `var n; for (;;) i(o);`
 	);
 	// TODO: All this stuff should also work on let and consts
 }
