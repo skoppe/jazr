@@ -86,6 +86,7 @@ enum ExpressionOperator {
 enum NodeType {
 	ErrorNode,
 	BooleanNode,
+	SheBangNode,
 	StringLiteralNode,
 	BinaryLiteralNode,
 	OctalLiteralNode,
@@ -294,7 +295,6 @@ class Node
 	this(NodeType t)
 	{
 		_type = t;
-		version(chatty) { writeln(t); }
 	}
 	this(NodeType t, Node n)
 	{
@@ -304,7 +304,6 @@ class Node
 			n.parent = this;
 			children = [n];
 		}
-		version(chatty) { writeln(t); }
 	}
 	this(NodeType t, Node[] cs)
 	{
@@ -313,7 +312,6 @@ class Node
 		foreach(c;cs)
 			c.parent = this;
 		children = cs;
-		version(chatty) { writeln(t); }
 	}
 	void toString(scope void delegate(const(char)[]) @safe sink) const
 	{
@@ -569,6 +567,30 @@ final class BooleanNode : Node
 	{
 		value = v;
 		super(NodeType.BooleanNode);
+	}
+	override Diff diff(Node other)
+	{
+		if (other.type != type)
+			return Diff.Type;
+		if (other.hints != hints)
+			return Diff.Hints;
+		auto o = other.as!(typeof(this));
+		return o.value == value ? Diff.No : Diff.Content;
+	}
+}
+final class SheBangNode : Node
+{
+	const(ubyte)[] value;
+	this(const(ubyte)[] v)
+	{
+		value = v;
+		super(NodeType.SheBangNode);
+	}
+	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
+	{
+		sink.indent(level);
+		sink.formattedWrite("%s \"%s\"\n",_type,cast(const(char)[])value);
+		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
@@ -1942,11 +1964,10 @@ ErrorNode[] collectErrors(Node root)
 	auto a = appender!(ErrorNode[]);
 	void walk(Node root, Appender!(ErrorNode[]) a)
 	{
+		foreach(c; root.children)
+			walk(c,a);
 		if (root.type == NodeType.ErrorNode)
 			a.put(root.as!ErrorNode);
-		else
-			foreach(c; root.children)
-				walk(c,a);
 	}
 	walk(root,a);
 	return a.data;
@@ -1979,7 +2000,7 @@ string getDiffMessage(DiffResult d)
 		case Diff.Children:
 			return format("Node a has the following children\n%sYet node b has\n%s",d.a,d.b);
 		case Diff.Content:
-			return format("Node a doesn't have the same content as node b");
+			return format("Node a (of type %s) doesn't have the same content as node b (%s)",d.a.type,d.b);
 		case Diff.BranchChildren:
 			return format("Branch a has %s children, but branch b has %s\na: %s\bb: %sFrom nodes\n%s%s\nRoot %s\n%s",d.a.branch.children.length,d.b.branch.children.length,d.a.branch,d.b.branch,d.a,d.b,d.a.getRoot,d.b.getRoot);
 		case Diff.BranchEntryTypes:

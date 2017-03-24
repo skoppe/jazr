@@ -42,8 +42,8 @@ string generateErrorMessage(ErrorNode error, const(char)[] input, int around = 2
 	
 	return format("\n%s\n%s^ %s\n%s at %s:%s",lead.take(pre).joiner("\n"),s,cast(const(char)[])error.value,tail.drop(1).joiner("\n"),error.line,error.column);
 }
-void reportError(ErrorNode error, const(ubyte)[] input, int around = 2)
+void reportError(ErrorNode error, const(ubyte)[] input, int around = 2, string prefix = "")
 {
 	import std.stdio : writeln;
-	writeln(generateErrorMessage(error,cast(const(char)[])input,6));
+	writeln(prefix,generateErrorMessage(error,cast(const(char)[])input,6));
 }

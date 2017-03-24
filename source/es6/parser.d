@@ -31,7 +31,9 @@ import es6.bench;
 
 version(chatty)
 {
+	version = tracing;
 	import std.stdio;
+	import std.datetime : StopWatch;
 }
 version (unittest)
 {
@@ -120,6 +122,13 @@ final class Parser
 		}
 		auto make(T, Args...)(auto ref Args args)
 		{
+			version (chatty) {
+				static if (is(T : ErrorNode))
+				{
+					writefln("%sError: %s",traceIndent, args[0]);
+				} else
+					writefln("%sCreate %s",traceIndent, T.stringof);
+			}
 			//return measure!("Construct Node",(){
 				version(customallocator)
 				{
@@ -130,6 +139,39 @@ final class Parser
 			//});
 		}
 	}
+	version (tracing) {
+		size_t traceDepth;
+		string traceIndent() {
+			import std.range : repeat;
+			import std.conv : to;
+			import std.array : array;
+			return ' '.repeat(traceDepth*2).array.to!string;
+		}
+		void traceEnter(string fun)
+		{
+			version (chatty) { writeln(traceIndent,fun); }
+			traceDepth++;
+		}
+		void traceExit(string fun, TickDuration a)
+		{
+			timingCounter(fun, a);
+			version (chatty) { writefln("%s%s: (%susecs)",traceIndent,fun,a.usecs); }
+			traceDepth--;
+		}
+	}
+    template traceFunction(string fun)
+    {
+    	version (tracing) {
+        	enum traceFunction = 
+				`traceEnter("` ~ fun ~ `");
+				auto sw = StopWatch();
+				sw.start();
+				scope(exit) {
+					traceExit("`~fun~`",sw.peek);
+				}`;    		
+    	} else enum traceFunction = "";
+        ;
+    }
 	@property ulong nodeCnt() { return _nodeCnt; }
 	this(const (ubyte)[] s)
 	{
@@ -149,13 +191,24 @@ final class Parser
 		}
 		return make!(ErrorNode)(message,lexer.line,lexer.column,debugMessage,__FILE__,at);
 	}
+	Node error(Node[] children, const(char)[] message, in size_t at = __LINE__)
+	{
+		string debugMessage;
+		version(unittest)
+		{
+			debugMessage = format("in parser.d @ %s",at);
+		}
+		auto err = make!(ErrorNode)(message,lexer.line,lexer.column,debugMessage,__FILE__,at);
+		err.children = children;
+		return err;
+	}
 	Node error(const(ubyte)[] message, in size_t at = __LINE__) @trusted
 	{
 		return error(cast(const(char)[])message,at);
 	}
 	Node parseModule()
 	{
-		version(chatty) { writeln("parseModule"); }
+		mixin(traceFunction!(__FUNCTION__));
 		auto children = appender!(Node[]);
 		while(token.type != Type.EndOfFile)
 		{
@@ -174,6 +227,17 @@ final class Parser
 				case Type.LineTerminator:
 					scanAndSkipCommentsAndTerminators();
 					break;
+				case Type.SheBang:
+					if (children.data.length == 0)
+					{
+						children.put(new SheBangNode(token.match));
+					}
+					else
+					{
+						children.put(error("SheBang line can only be at the first line"));
+					}
+					scanToken();
+					break;
 				default:
 					children.put(parseStatementListItem());
 					break;
@@ -183,7 +247,7 @@ final class Parser
 	}
 	Node parseImportDeclaration()
 	{
-		version(chatty) { writeln("parseImportDeclaration"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.matches(Type.Identifier,"import"));
 		scanAndSkipCommentsAndTerminators();
 		Node decl;
@@ -234,7 +298,7 @@ final class Parser
 	}
 	Node parseNameSpaceImport()
 	{
-		version(chatty) { writeln("parseNameSpaceImport"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Multiply);
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.Identifier || token.match != "as")
@@ -244,7 +308,7 @@ final class Parser
 	}
 	Node parseNamedImports()
 	{
-		version(chatty) { writeln("parseNamedImports"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenCurlyBrace);
 		scanAndSkipCommentsAndTerminators();
 		Node[] imports;
@@ -274,7 +338,7 @@ final class Parser
 	}
 	Node parseExportDeclaration()
 	{
-		version(chatty) { writeln("parseExportDeclaration"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "export");
 		scanAndSkipCommentsAndTerminators();
 		Node decl;
@@ -344,7 +408,7 @@ final class Parser
 	}
 	Node parseExportClause()
 	{
-		version(chatty) { writeln("parseExportClause"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenCurlyBrace);
 		scanAndSkipCommentsAndTerminators();
 		if (token.type == Type.CloseCurlyBrace)
@@ -374,7 +438,7 @@ final class Parser
     }
 	Node parseFunctionExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseFunctionExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "function");
 		scanAndSkipCommentsAndTerminators();
 		bool generator = false;
@@ -411,12 +475,12 @@ final class Parser
 	}
 	Node parseClassExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseClassExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		return parseClassDeclaration(attributes);
 	}
 	Node parseArrayLiteral(int attributes = 0)
 	{
-		version(chatty) { writeln("parseArrayLiteral"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenSquareBrackets);
 		Node[] children;
 		scanAndSkipCommentsAndTerminators();
@@ -461,7 +525,7 @@ final class Parser
 	}
 	Node parseElision()
 	{
-		version(chatty) { writeln("parseElision"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Comma);
 		int cnt = 0;
 		while(token.type == Type.Comma)
@@ -473,7 +537,7 @@ final class Parser
 	}
 	Node parseObjectLiteral(int attributes = 0)
 	{
-		version(chatty) { writeln("parseObjectLiteral"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenCurlyBrace);
 		scanAndSkipCommentsAndTerminators();
 		if (token.type == Type.CloseCurlyBrace)
@@ -564,7 +628,7 @@ final class Parser
 	}
 	Node parseTemplateTail(int attributes = 0)
 	{
-		version(chatty) { writeln("parseTemplateTail"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node[] children = [make!(TemplateNode)(token.match)];
 				scanAndSkipCommentsAndTerminators();
 
@@ -590,7 +654,7 @@ final class Parser
 	}
 	Node parseParenthesisExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseParenthesisExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenParenthesis);
 		scanToken(attributes.filter!(Attribute.NoRegex).toGoal);
 		if (token.type == Type.CloseParenthesis)
@@ -671,7 +735,7 @@ final class Parser
 	// TODO: this can actually be inlined in the parseLeftHandSideExpression
 	Node parsePrimaryExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parsePrimaryExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		attributes = attributes.mask!(Attribute.Yield | Attribute.NoRegex);
 		switch (token.type)
 		{
@@ -720,7 +784,7 @@ final class Parser
 	}
 	Node parseExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		attributes = attributes.mask!(Attribute.Yield,Attribute.In);
 		bool comma = true;
 		Node[] children;
@@ -769,7 +833,7 @@ final class Parser
 	}
 	Node parseArrowFunctionBody(int attributes = 0)
 	{
-		version(chatty) { writeln("parseArrowFunctionBody"); }
+		mixin(traceFunction!(__FUNCTION__));
 		if (token.type == Type.OpenCurlyBrace)
 		{
 			scanToken(attributes.toGoal);
@@ -783,7 +847,7 @@ final class Parser
 	}
 	Node parseAssignmentExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseAssignmentExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node cond = parseConditionalExpression(attributes);
 		if (cond.type == NodeType.ErrorNode)
 			return cond;
@@ -796,7 +860,6 @@ final class Parser
 			scanAndSkipCommentsAndTerminators();
 			return make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
 		}
-		skipCommentsAndLineTerminators();
 		if (cond.type == NodeType.ParenthesisNode && token.type == Type.Arrow)
 		{
 			scanAndSkipCommentsAndTerminators();
@@ -807,30 +870,37 @@ final class Parser
 
 		if (lexer.empty)
 			return cond;
+
 		Node[] children;
-		children.reserve(3);
-		children ~= cond;
 		while (!lexer.empty) // TODO: this one might loop forever with invalid input, not sure, need to check
 		{
+			Node child;
 			switch (token.type)
 			{
-				case Type.LeftShiftAssignment: 			scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.LeftShiftAssignment); break;
-				case Type.TripleRightShiftAssignment: 	scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.TripleRightShiftAssignment); break;
-				case Type.RightShiftAssignment: 		scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.RightShiftAssignment); break;
-				case Type.Assignment: 					scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.Assignment); break;
-				case Type.AdditiveAssignment: 			scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.AdditiveAssignment); break;
-				case Type.DecrementalAssignment: 		scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.DecrementalAssignment); break;
-				case Type.MultiplicativeAssignment: 	scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.MultiplicativeAssignment); break;
-				case Type.DivisionAssignment: 			scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.DivisionAssignment); break;
-				case Type.ModAssignment: 				scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.ModAssignment); break;
-				case Type.BitwiseAndAssignment: 		scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.BitwiseAndAssignment); break;
-				case Type.BitwiseOrAssignment: 			scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.BitwiseOrAssignment); break;
-				case Type.BitwiseXorAssignment: 		scanToken(attributes.toGoal); children ~= make!(AssignmentOperatorNode)(Assignment.BitwiseXorAssignment); break;
+				case Type.LeftShiftAssignment: 			child = make!(AssignmentOperatorNode)(Assignment.LeftShiftAssignment); break;
+				case Type.TripleRightShiftAssignment: 	child = make!(AssignmentOperatorNode)(Assignment.TripleRightShiftAssignment); break;
+				case Type.RightShiftAssignment: 		child = make!(AssignmentOperatorNode)(Assignment.RightShiftAssignment); break;
+				case Type.Assignment: 					child = make!(AssignmentOperatorNode)(Assignment.Assignment); break;
+				case Type.AdditiveAssignment: 			child = make!(AssignmentOperatorNode)(Assignment.AdditiveAssignment); break;
+				case Type.DecrementalAssignment: 		child = make!(AssignmentOperatorNode)(Assignment.DecrementalAssignment); break;
+				case Type.MultiplicativeAssignment: 	child = make!(AssignmentOperatorNode)(Assignment.MultiplicativeAssignment); break;
+				case Type.DivisionAssignment: 			child = make!(AssignmentOperatorNode)(Assignment.DivisionAssignment); break;
+				case Type.ModAssignment: 				child = make!(AssignmentOperatorNode)(Assignment.ModAssignment); break;
+				case Type.BitwiseAndAssignment: 		child = make!(AssignmentOperatorNode)(Assignment.BitwiseAndAssignment); break;
+				case Type.BitwiseOrAssignment: 			child = make!(AssignmentOperatorNode)(Assignment.BitwiseOrAssignment); break;
+				case Type.BitwiseXorAssignment: 		child = make!(AssignmentOperatorNode)(Assignment.BitwiseXorAssignment); break;
 				default:
-					if (children.length == 1)
-						return children[0];
+					if (children.length == 0)
+						return cond;
 					return make!(AssignmentExpressionNode)(children);
 			}
+			if (children.length == 0)
+			{
+				children.reserve(3);
+				children ~= cond;
+			}
+			children ~= child;
+			scanToken(attributes.toGoal);
 			cond = parseConditionalExpression(attributes);
 			if (cond.type == NodeType.ConditionalExpressionNode)
 			{
@@ -858,7 +928,7 @@ final class Parser
 	}
 	Node parseConditionalExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseConditionalExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		auto rhs = parseRightHandSideExpression(attributes);
 		if (token.type != Type.QuestionMark)
 			return rhs;
@@ -867,7 +937,7 @@ final class Parser
 			return error(format("Expected AssignmentExpression as part of an ConditionalExpression before eof"));
 		auto yeah = parseAssignmentExpression(Attribute.In | attributes);
 		if (token.type != Type.Colon)
-			return error(format("Expected colon as part of ConditionalExpression, instead got %s token %s",token.type,cast(const(ubyte)[])token.match));
+			return error([rhs,yeah],format("Expected colon as part of ConditionalExpression, instead got %s token %s",token.type,cast(const(ubyte)[])token.match));
 		scanToken(attributes.toGoal);
 		if (lexer.empty)
 			return error(format("Expected AssignmentExpression as part of an ConditionalExpression before eof"));
@@ -876,68 +946,76 @@ final class Parser
 	}
 	Node parseRightHandSideExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseRightHandSideExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node[] children;
 		while (1) // this loop won't run forever
 		{
-			children ~= parseUnaryExpression(attributes.mask!(Attribute.Yield | Attribute.NoRegex));
+			Node unary = parseUnaryExpression(attributes.mask!(Attribute.Yield | Attribute.NoRegex));
+			Node child;
 			switch (token.type)
 			{
 				case Type.Identifier:
 					switch (Keywords.get(token.match))
 					{
 						case Keyword.Instanceof:
-							children ~= make!(ExpressionOperatorNode)(ExpressionOperator.InstanceOf);
+							child = make!(ExpressionOperatorNode)(ExpressionOperator.InstanceOf);
 							break;
 						case Keyword.In:
 							if (!attributes.has!(Attribute.In))
 							{
-								if (children.length == 1)
-									return children[0];
+								if (children.length == 0)
+									return unary;
+								children ~= unary;
 								return make!(BinaryExpressionNode)(children);
 							}
-							children ~= make!(ExpressionOperatorNode)(ExpressionOperator.In);
+							child = make!(ExpressionOperatorNode)(ExpressionOperator.In);
 							break;
 						default:
-							if (children.length == 1)
-								return children[0];
+							if (children.length == 0)
+								return unary;
+							children ~= unary;
 							return make!(BinaryExpressionNode)(children);
 					}
+					children ~= unary;
+					children ~= child;
 					scanToken(attributes.toGoal);
 					continue;
-				case Type.LogicalAnd: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.LogicalAnd); break;
-				case Type.LogicalOr: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.LogicalOr); break;
-				case Type.BitwiseAnd: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseAnd); break;
-				case Type.BitwiseOr: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseOr); break;
-				case Type.BitwiseXor: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseXor); break;
-				case Type.StrictEqual: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.StrictEqual); break;
-				case Type.Equal: 			children ~= make!(ExpressionOperatorNode)(ExpressionOperator.Equal); break;
-				case Type.StrictNotEqual: 	children ~= make!(ExpressionOperatorNode)(ExpressionOperator.StrictNotEqual); break;
-				case Type.NotEqual: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.NotEqual); break;
-				case Type.LessOrEqual: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.LessOrEqual); break;
-				case Type.LessThan: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.LessThan); break;
-				case Type.GreaterOrEqual: 	children ~= make!(ExpressionOperatorNode)(ExpressionOperator.GreaterOrEqual); break;
-				case Type.GreaterThan: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.GreaterThan); break;
-				case Type.LeftShift: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.LeftShift); break;
-				case Type.TripleRightSift: 	children ~= make!(ExpressionOperatorNode)(ExpressionOperator.TripleRightSift); break;
-				case Type.RightShift: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.RightShift); break;
-				case Type.Add:		 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.Add); break;
-				case Type.Minus: 			children ~= make!(ExpressionOperatorNode)(ExpressionOperator.Minus); break;
-				case Type.Multiply: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.Multiply); break;
-				case Type.Division: 		children ~= make!(ExpressionOperatorNode)(ExpressionOperator.Division); break;
-				case Type.Mod: 				children ~= make!(ExpressionOperatorNode)(ExpressionOperator.Mod); break;
+				case Type.LogicalAnd: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalAnd); break;
+				case Type.LogicalOr: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalOr); break;
+				case Type.BitwiseAnd: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseAnd); break;
+				case Type.BitwiseOr: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseOr); break;
+				case Type.BitwiseXor: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseXor); break;
+				case Type.StrictEqual: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.StrictEqual); break;
+				case Type.Equal: 			child = make!(ExpressionOperatorNode)(ExpressionOperator.Equal); break;
+				case Type.StrictNotEqual: 	child = make!(ExpressionOperatorNode)(ExpressionOperator.StrictNotEqual); break;
+				case Type.NotEqual: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.NotEqual); break;
+				case Type.LessOrEqual: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LessOrEqual); break;
+				case Type.LessThan: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LessThan); break;
+				case Type.GreaterOrEqual: 	child = make!(ExpressionOperatorNode)(ExpressionOperator.GreaterOrEqual); break;
+				case Type.GreaterThan: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.GreaterThan); break;
+				case Type.LeftShift: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LeftShift); break;
+				case Type.TripleRightSift: 	child = make!(ExpressionOperatorNode)(ExpressionOperator.TripleRightSift); break;
+				case Type.RightShift: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.RightShift); break;
+				case Type.Add:		 		child = make!(ExpressionOperatorNode)(ExpressionOperator.Add); break;
+				case Type.Minus: 			child = make!(ExpressionOperatorNode)(ExpressionOperator.Minus); break;
+				case Type.Multiply: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.Multiply); break;
+				case Type.Division: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.Division); break;
+				case Type.Mod: 				child = make!(ExpressionOperatorNode)(ExpressionOperator.Mod); break;
 				default:
-					if (children.length == 1)
-						return children[0];
+					if (children.length == 0)
+						return unary;
+					children ~= unary;
 					return make!(BinaryExpressionNode)(children);
 			}
+			children ~= unary;
+			children ~= child;
 			attributes &= ~Attribute.NoRegex;
 			scanToken(attributes.toGoal);
 		}
 	}
 	Node parseUnaryExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseUnaryExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node[] prefixExprs;
 		while(token.type != Type.EndOfFile)
 		{
@@ -946,51 +1024,27 @@ final class Parser
 				case Type.Identifier:
 					switch (Keywords.get(token.match))
 					{
-						case Keyword.Delete: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Delete);
-							scanToken(attributes.toGoal);
-							break;
-						case Keyword.Void: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Void);
-							scanToken(attributes.toGoal);
-							break;
-						case Keyword.Typeof: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Typeof);
-							scanToken(attributes.toGoal);
-							break;
+						case Keyword.Delete: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Delete); break;
+						case Keyword.Void: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Void); break;
+						case Keyword.Typeof: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Typeof); break;
 						default:
 							goto doLHS;
 					}
 					break;
-				case Type.Increment:
-					prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Increment);
-					scanToken(attributes.toGoal);
-					break;
-				case Type.Decrement:
-					prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Decrement);
-					scanToken(attributes.toGoal);
-					break;
-				case Type.Add:
-					prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Positive);
-					scanToken(attributes.toGoal);
-					break;
-				case Type.Minus:
-					prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Negative);
-					scanToken(attributes.toGoal);
-					break;
-				case Type.Tilde:
-					prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Tilde);
-					scanToken(attributes.toGoal);
-					break;
-				case Type.Negation:
-					prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Negation);
-					scanToken(attributes.toGoal);
-					break;
+				case Type.Increment: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Increment); break;
+				case Type.Decrement: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Decrement); break;
+				case Type.Add: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Positive); break;
+				case Type.Minus: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Negative); break;
+				case Type.Tilde: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Tilde); break;
+				case Type.Negation: prefixExprs ~= make!(PrefixExpressionNode)(Prefix.Negation); break;
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
 				case Type.LineTerminator:
-					scanToken(attributes.toGoal);
 					break;
 				default:
 					goto doLHS;
 			}
+			scanToken(attributes.toGoal);			
 		}
 		return error("Found end of file before parsing UnaryExpression");
 		doLHS:
@@ -1015,7 +1069,7 @@ final class Parser
 	}
 	Node parseAccessor(int attributes = 0)
 	{
-		version(chatty) { writeln("parseAccessor"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Dot);
 		scanToken(attributes.toGoal);
 
@@ -1042,10 +1096,10 @@ final class Parser
 	}
 	Node parseLeftHandSideExpression(int attributes = 0)
 	{
-		version(chatty) { writeln("parseLeftHandSideExpression"); }
+		mixin(traceFunction!(__FUNCTION__));
 		size_t news = 0, args = 0;
 		Node content;
-		Node[] calls = [content];
+		Node[] calls;
 		while (1)  // TODO: this one might loop forever with invalid input, not sure, need to check
 		{
 			switch (token.type)
@@ -1075,6 +1129,8 @@ final class Parser
 					if (content !is null)
 					{
 						args++;
+						if (calls.length == 0)
+							calls ~= content;
 						calls ~= parseAccessor();
 						break;
 					}
@@ -1090,6 +1146,8 @@ final class Parser
 					if (content is null)
 						goto default;
 					args++;
+					if (calls.length == 0)
+						calls ~= content;
 					auto tmplNode = make!(TemplateNode)(token.match);
 					calls ~= make!(TemplateLiteralNode)(tmplNode);
 					scanToken(attributes.toGoal);
@@ -1098,6 +1156,8 @@ final class Parser
 					if (content is null)
 						goto default;
 					args++;
+					if (calls.length == 0)
+						calls ~= content;
 					calls ~= parseTemplateTail(attributes);
 					break;
 				case Type.LineTerminator:
@@ -1109,12 +1169,16 @@ final class Parser
 					if (content is null)
 						goto default;
 					args++;
+					if (calls.length == 0)
+						calls ~= content;
 					calls ~= parseArguments(attributes.mask!(~Attribute.NoRegex));
 					break;
 				case Type.OpenSquareBrackets:
 					if (content is null)
 						goto default;
 					args++;
+					if (calls.length == 0)
+						calls ~= content;
 					calls ~= parseArrayIndexing(Attribute.In | attributes);
 					break;
 				case Type.EndOfFile:
@@ -1128,15 +1192,18 @@ final class Parser
 					break;
 			}
 		}
-		end: calls[0] = content;
+		end: if (news == 0 && args == 0)
+			return content;
+		if (calls.length == 0)
+			calls ~= content;
+		else
+			calls[0] = content;
 		if (news > 0 && news > args)
 		{
 			return make!(NewExpressionNode)(news,calls);
-		} else if (args > 0)
-		{
-			return make!(CallExpressionNode)(news,calls);
 		}
-		return content;
+		assert(args > 0);
+		return make!(CallExpressionNode)(news,calls);
 	}
 	bool isIdentifierReservedKeyword(const(ubyte)[] identifier)
 	{
@@ -1151,7 +1218,7 @@ final class Parser
 	}
 	Node parseIdentifier(int attributes = 0)
 	{
-		version(chatty) { writeln("parseIdentifier"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier);
 
 		IdentifierReferenceNode n = make!(IdentifierReferenceNode)(token.match);
@@ -1169,7 +1236,7 @@ final class Parser
 	}
 	Node parseIdentifierName()
 	{
-		version(chatty) { writeln("parseIdentifierName"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier);
 		auto n = make!(IdentifierNameNode)(token.match);
 		scanAndSkipCommentsAndTerminators();
@@ -1177,7 +1244,7 @@ final class Parser
 	}
 	Node parseSuperProperty(int attributes = 0)
 	{
-		version(chatty) { writeln("parseSuperProperty"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "super");
 		scanToken(attributes.toGoal);
 
@@ -1195,7 +1262,7 @@ final class Parser
 	}
 	Node parseArguments(int attributes = 0)
 	{
-		version(chatty) { writeln("parseArguments"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenParenthesis);
 		scanToken(attributes.toGoal);
 
@@ -1244,7 +1311,7 @@ final class Parser
 	}
 	Node parseArrayIndexing(int attributes = 0)
 	{
-		version(chatty) { writeln("parseArrayIndexing"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenSquareBrackets);
 		scanAndSkipCommentsAndTerminators();
 
@@ -1257,7 +1324,7 @@ final class Parser
 	}
 	Node parseStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node node;
 		switch (token.type)
 		{
@@ -1351,7 +1418,7 @@ final class Parser
 	}
 	Node parseReturnStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseReturnStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.match == "return");
 		scanToken();
 		if (token.type == Type.LineTerminator || isEndOfExpression)
@@ -1361,7 +1428,7 @@ final class Parser
 	}
 	Node parseBlockStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseBlockStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenCurlyBrace);
 		scanAndSkipCommentsAndTerminators();
 		Node[] children = parseStatementList(attributes);
@@ -1393,7 +1460,7 @@ final class Parser
 	}
 	Node parseStatementListItem(int attributes = 0)
 	{
-		version(chatty) { writeln("parseStatementListItem"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node node;
 		if (token.type == Type.Identifier)
 		{
@@ -1431,14 +1498,14 @@ final class Parser
 	}
 	Node parseVariableStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseVariableStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "var");
 		scanAndSkipCommentsAndTerminators();
 		return parseVariableDeclarationList(Attribute.In | attributes);
 	}
 	Node parseVariableDeclarationList(int attributes = 0)
 	{
-		version(chatty) { writeln("parseVariableDeclarationList"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node[] children;
 		while (!isEndOfExpression) // this while loop can't run forever
 		{
@@ -1470,7 +1537,7 @@ final class Parser
 	}
 	Node parseArrayBindingPattern(int attributes = 0)
 	{
-		version(chatty) { writeln("parseArrayBindingPattern"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenSquareBrackets);
 		scanAndSkipCommentsAndTerminators();
 		Node[] children;
@@ -1511,7 +1578,7 @@ final class Parser
 	}
 	Node parseObjectBindingPattern(int attributes = 0)
 	{
-		version(chatty) { writeln("parseObjectBindingPattern"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenCurlyBrace);
 		scanAndSkipCommentsAndTerminators();
 		if (token.type == Type.CloseCurlyBrace)
@@ -1558,7 +1625,7 @@ final class Parser
 	}
 	Node parseIfStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseIfStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "if");
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.OpenParenthesis)
@@ -1579,7 +1646,7 @@ final class Parser
 	}
 	Node parseSwitchStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseSwitchStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "switch");
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.OpenParenthesis)
@@ -1635,13 +1702,13 @@ final class Parser
 					scanToken(attributes.toGoal);
 					return make!(SwitchStatementNode)(children);
 				default:
-					return error(format("Unexpected token %s as part of SwitchStatement",token.type));
+					return error(children,format("Unexpected token %s as part of SwitchStatement",token.type));
 			}
 		}
 	}
 	Node parseDoWhileStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseDoWhileStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "do");
 		scanAndSkipCommentsAndTerminators();
 		Node[] children = [parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return))];
@@ -1661,7 +1728,7 @@ final class Parser
 	}
 	Node parseWhileStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseWhileStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "while");
 		// todo eat lineterminators/comments
 		scanToken(attributes.toGoal);
@@ -1672,7 +1739,7 @@ final class Parser
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of DoWhileStatement");
 
-		scanToken(attributes.toGoal);
+		scanAndSkipCommentsAndTerminators(attributes.toGoal);
 		Node stmt = parseStatement(attributes);
 
 		if (token.type == Type.Semicolon)
@@ -1681,7 +1748,7 @@ final class Parser
 	}
 	Node parseForStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseForStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node parseOldSchoolForStatement(Node firstExpr, int attributes = 0)
 		{
 			Node[] children;
@@ -1871,7 +1938,7 @@ final class Parser
 	}
 	Node parseLexicalDeclaration(int attributes = 0)
 	{
-		version(chatty) { writeln("parseLexicalDeclaration"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier);
 		LexicalDeclaration decl;
 		if (token.match == "let")
@@ -1917,7 +1984,7 @@ final class Parser
 	}
 	Node parseWithStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseWithStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "with");
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.OpenParenthesis)
@@ -1932,14 +1999,14 @@ final class Parser
 	}
 	Node parseThrowStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseThrowStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "throw");
 		scanToken(attributes.toGoal);
 		return make!(ThrowStatementNode)(parseExpression(Attribute.In | attributes.mask!(Attribute.Yield)));
 	}
 	Node parseTryStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseTryStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "try");
 		scanAndSkipCommentsAndTerminators();
 		Node[] children = [parseBlockStatement(attributes)];
@@ -1980,7 +2047,7 @@ final class Parser
 	}
 	Node parseDebuggerStatement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseDebuggerStatement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "debugger");
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.Semicolon)
@@ -1989,7 +2056,7 @@ final class Parser
 	}
 	Node parseClassDeclaration(int attributes = 0)
 	{
-		version(chatty) { writeln("parseClassDeclaration"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "class");
 		scanAndSkipCommentsAndTerminators();
 		Node name;
@@ -2065,7 +2132,7 @@ final class Parser
 	}
 	Node parseClassGetter(bool isStatic, int attributes = 0)
 	{
-		version(chatty) { writeln("parseClassGetter"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "get");
 		scanAndSkipCommentsAndTerminators();
 		auto name = parsePropertyName(attributes);
@@ -2088,7 +2155,7 @@ final class Parser
 	}
 	Node parseClassSetter(bool isStatic, int attributes = 0)
 	{
-		version(chatty) { writeln("parseClassSetter"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "set");
 		scanAndSkipCommentsAndTerminators();
 		auto name = parsePropertyName(attributes);
@@ -2115,7 +2182,7 @@ final class Parser
 	}
 	Node parseBindingElement(int attributes = 0)
 	{
-		version(chatty) { writeln("parseBindingElement"); }
+		mixin(traceFunction!(__FUNCTION__));
 		skipCommentsAndLineTerminators();
 		switch(token.type)
 		{
@@ -2149,7 +2216,7 @@ final class Parser
 	}
 	Node parseClassMethod(bool isStatic, int attributes = 0, Node name = null)
 	{
-		version(chatty) { writeln("parseClassMethod"); }
+		mixin(traceFunction!(__FUNCTION__));
 		if (name is null)
 		{
 			name = parsePropertyName(attributes);
@@ -2175,7 +2242,7 @@ final class Parser
 	}
 	Node parseFormalParameterList(int attributes = 0)
 	{
-		version(chatty) { writeln("parseFormalParameterList"); }
+		mixin(traceFunction!(__FUNCTION__));
 		Node[] children;
 		skipCommentsAndLineTerminators();
 		while(!isEndOfExpression)
@@ -2196,7 +2263,7 @@ final class Parser
 	}
 	Node parseClassGeneratorMethod(bool isStatic, int attributes = 0)
 	{
-		version(chatty) { writeln("parseClassGeneratorMethod"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Multiply);
 		scanAndSkipCommentsAndTerminators();
 		auto name = parsePropertyName(attributes);
@@ -2221,7 +2288,7 @@ final class Parser
 	}
 	Node parsePropertyName(int attributes = 0)
 	{
-		version(chatty) { writeln("parsePropertyName"); }
+		mixin(traceFunction!(__FUNCTION__));
 		if (token.type == Type.OpenSquareBrackets)
 		{
 			scanToken(attributes.toGoal);
@@ -2246,7 +2313,7 @@ final class Parser
 	}
 	Node parseFunctionDeclaration(int attributes = 0)
 	{
-		version(chatty) { writeln("parseFunctionDeclaration"); }
+		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "function");
 		scanAndSkipCommentsAndTerminators();
 		bool generator = false;
@@ -2282,7 +2349,7 @@ final class Parser
 		auto funcBody = generator ? parseFunctionBody(Attribute.Yield) : parseFunctionBody();
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
-			return error("Expected closing curly brace");
+			return error([funcBody],"Expected closing curly brace");
 		scanAndSkipCommentsAndTerminators();
 		if (generator)
 			return make!(GeneratorDeclarationNode)(name,params,funcBody);
@@ -2290,7 +2357,7 @@ final class Parser
 	}
 	Node parseFunctionBody(int attributes = 0)
 	{
-		version(chatty) { writeln("parseFunctionBody"); }
+		mixin(traceFunction!(__FUNCTION__));
 		return make!(FunctionBodyNode)(parseStatementList(Attribute.Return | attributes));
 	}
 }

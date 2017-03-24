@@ -41,6 +41,7 @@ int main(string[] args)
 	bool forceStdin;
 	bool doMinify;
 	bool bench;
+	bool selfCheck;
 	string fileIn;
 	string fileOut;
 
@@ -53,6 +54,7 @@ int main(string[] args)
 			"i|input", "Input file (defaults to stdin)", &fileIn,
 			"o|output", "Output file (defaults to stdout)", &fileOut,
 			"b|bench", "Lowlevel timings", &bench,
+			"c|check", "Perform check on emitted code", &selfCheck,
 			"minify", "Minify js before outputting (default to false)", &doMinify
 		);
 
@@ -115,6 +117,22 @@ int main(string[] args)
 
 		auto min = measure!("Emitting",()=> emit(node));
 
+		if (selfCheck)
+		{
+			if (!measure!("Selfcheck",(){
+					auto parser2 = parser(min);
+					parser2.scanToken();
+					auto node2 = parser2.parseModule();
+					auto errors2 = node2.collectErrors();
+					if (errors2.length > 0)
+					{
+						reportError(errors2[0].as!ErrorNode,cast(const(ubyte)[])min,0,"Found error in emitted code:\n");
+						return false;
+					}
+					return true;
+				}))
+			return 1;
+		}
 		if (fileOut.length > 0)
 		{
 			if (fileOut != "/dev/null")

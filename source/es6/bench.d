@@ -27,7 +27,8 @@ version (unittest)
 	import std.stdio;
 }
 
-TickDuration[string] timings;
+private TickDuration[string] timings;
+private size_t[string] calls;
 
 auto measure(string name, alias func)()
 {
@@ -42,13 +43,19 @@ auto measure(string name, alias func)()
 	else
 		auto r = func();
 	try {
-		TickDuration a = sw.peek();
-		auto t = timings.get(name, TickDuration(0));
-		timings[name] = t + a;	
+		timingCounter(name, sw.peek());
 	} catch (Exception)
 	{}
 	static if (!is(ReturnType!(func) : void))
 		return r;
+}
+
+auto timingCounter(string name, TickDuration a)
+{
+	auto t = timings.get(name, TickDuration(0));
+	timings[name] = t + a;
+	auto c = calls.get(name,0);
+	calls[name] = c + 1;
 }
 
 auto dumpMeasures()
@@ -56,10 +63,11 @@ auto dumpMeasures()
 	import std.stdio : writefln;
 	foreach(key, value; timings)
 	{
+		auto c = calls[key];
 		if (value.usecs > 9999)
-			writefln("%s: %s msecs", key, value.msecs());
+			writefln("%s: %s msecs (%d calls)", key, value.msecs(), c);
 		else
-			writefln("%s: %s usecs", key, value.usecs());
+			writefln("%s: %s usecs (%d calls)", key, value.usecs(), c);
 	}
 }
 
@@ -81,6 +89,6 @@ unittest
 {
 	measure!("test",(){});
 	assert(timings["test"] != TickDuration(0));
-	assert(dumpMeasures([]) == []);
-	assert(dumpMeasures(["test"]) == ["test: 0ms"]);
+	assert(formatMeasures([]) == []);
+	assert(formatMeasures(["test"]) == ["test: 0ms"]);
 }

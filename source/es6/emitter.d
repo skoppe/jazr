@@ -127,6 +127,12 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 		case NodeType.ErrorNode:
 			auto n = node.as!ErrorNode;
 			return Guide.None;
+		case NodeType.SheBangNode:
+			auto n = node.as!SheBangNode;
+			sink.put("#!");
+			sink.put(n.value);
+			sink.put("\n");
+			return Guide.None;
 		case NodeType.BooleanNode:
 			auto n = node.as!BooleanNode;
 			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
@@ -158,7 +164,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
 			sink.put(n.value);
-			return Guide.RequiresDelimiter;
+			return Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
 		case NodeType.HexLiteralNode:
 			auto n = node.as!HexLiteralNode;
 			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
@@ -298,6 +304,8 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 		case NodeType.UnaryExpressionNode:
 			auto n = node.as!UnaryExpressionNode;
 			auto g = n.prefixs.emit(sink,guide);
+			//if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				//sink.put(" ");
 			n.children[0].emit(sink,g);
 			final switch(n.postfix)
 			{
@@ -995,6 +1003,7 @@ unittest
 {
 	assertEmitted(`a instanceof b;`);
 	assertEmitted(`a in b;`);
+	assertEmitted(`1 in options;`);
 	assertEmitted(`'using'in options;`);
 	assertEmitted(`'using'in{b,c,d}`);
 	assertEmitted(`a&b|c&&d||e^f===g==h!==i!=j<=k<l>=m>n<<o>>>p>>q+r-s*t/u%v;`);

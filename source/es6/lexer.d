@@ -171,7 +171,9 @@ bool isReservedKeyword(Keyword keyword) nothrow pure @nogc
 		keyword != Keyword.Static &&
 		keyword != Keyword.Set &&
 		keyword != Keyword.Let &&
-		keyword != Keyword.Get;
+		keyword != Keyword.Get &&
+		keyword != Keyword.Enum &&	// TODO: enum and await are only reserved if Module is the goal symbol
+		keyword != Keyword.Await;
 }
 
 bool isReservedKeyword(const(ubyte)[] keyword) nothrow
@@ -1054,6 +1056,7 @@ struct Lexer
 		{
 			//if (haveSSE42)
 			//{
+				// NOTE: if whole comment is full with unicode stuff we waste alot of time calling the expensive sse4.2 instruction
 				immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
 				idx += i;
 				tokenLength += i;
@@ -1070,6 +1073,41 @@ struct Lexer
 		} else
 		{
 			auto tok = Token(Type.SingleLineComment,s[0..idx]);
+			idx += len;
+			line += 1;
+			column = 0;
+			s = s[idx..$];
+			return tok;
+		}
+		goto start;
+	}
+	Token lexSheBang() @trusted
+	{
+		assert(s[0] == '#');
+		assert(s[1] == '!');
+		size_t idx = 0;
+		start:
+		version (iasm64NotWindows)
+		{
+			//if (haveSSE42)
+			//{
+				// NOTE: if whole she-bang is full with unicode stuff we waste alot of time calling the expensive sse4.2 instruction
+				immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
+				idx += i;
+				tokenLength += i;
+				if (i == 16)
+					goto start;
+			//}
+		}
+		auto len = s.getLineTerminatorLength(idx);
+		if (len == 0 && s[idx] != 0)
+		{
+			len = s.getUnicodeLength(idx);
+			idx += len;
+			column ++;
+		} else
+		{
+			auto tok = Token(Type.SheBang,s[0..idx]);
 			idx += len;
 			line += 1;
 			column = 0;
@@ -1107,6 +1145,8 @@ struct Lexer
 			case ')': tokenLength++; s.popFront(); return Token(Type.CloseParenthesis);
 			case '[': tokenLength++; s.popFront(); return Token(Type.OpenSquareBrackets);
 			case ']': tokenLength++; s.popFront(); return Token(Type.CloseSquareBrackets);
+			case '#': if (s[1] == '!') return lexSheBang();
+				goto default;
 			case '.': 
 				if (s[1] >= '0' && s[1] <= '9')
 					return lexDecimalLiteral();
@@ -1682,7 +1722,7 @@ unittest
 unittest
 {
 	assert("await" in Keywords);
-	isReservedKeyword(cast(const(ubyte)[])"await").shouldBeTrue;
+	isReservedKeyword(cast(const(ubyte)[])"await").shouldBeFalse;
 	isReservedKeyword(cast(const(ubyte)[])"default").shouldBeTrue;
 	isReservedKeyword(cast(const(ubyte)[])"default2").shouldBeFalse;
 	isReservedKeyword(cast(const(ubyte)[])"yield").shouldBeTrue;

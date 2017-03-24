@@ -21,6 +21,7 @@ module es6.tokens;
 
 enum Type {
 	Identifier,
+	SheBang,
 	StringLiteral,
 	Error,
 	BinaryLiteral,
