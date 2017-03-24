@@ -330,7 +330,7 @@ bool convertIfElseToConditionalExpression(IfStatementNode ifStmt, out Node repla
 		return false;
 
 	auto condition = ifStmt.condition;
-	if (condition.hints.has(Hint.HasAssignment))
+	if (condition.hints.has(Hint.HasAssignment) || condition.type == NodeType.ExpressionNode)
 		condition = condition.parenthesizeExpression();
 
 	auto left = new ExpressionNode([]);
@@ -435,6 +435,10 @@ unittest
 	assertConvertIfElseToConditional(
 		`if (a) { g = 6; } else { k = 7; }`,
 		"a ? g = 6 : k = 7"
+	);
+	assertConvertIfElseToConditional(
+		`if (p(), a) d(); else k()`,
+		`(p(), a) ? d() : k()`
 	);
 	// TODO: there is also precedence situation with yield operator
 }
