@@ -303,10 +303,9 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 			return n.children.emit(sink) | Guide.RequiresDelimiter;
 		case NodeType.UnaryExpressionNode:
 			auto n = node.as!UnaryExpressionNode;
-			auto g = n.prefixs.emit(sink,guide);
-			//if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
-				//sink.put(" ");
-			n.children[0].emit(sink,g);
+			if (n.prefixs.length > 0)
+				guide = n.prefixs.emit(sink,guide);
+			n.children[0].emit(sink,guide);
 			final switch(n.postfix)
 			{
 				case Postfix.Increment: 
@@ -1047,6 +1046,7 @@ unittest
 	assertEmitted(`if(a);else;`);
 	assertEmitted(`if(a){}else if(b)c;else d;`);
 	assertEmitted(`if(a)b=1;else b=2;`);
+	assertEmitted(`function b(){if(a)for(var r=0;r<d;){if(b){if(s)if(l(i)){var o=S(i)}else r++;else e()}else r++}}`);
 }
 @("Switch Statement")
 unittest
