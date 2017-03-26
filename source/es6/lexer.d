@@ -273,25 +273,29 @@ auto getLineTerminatorUnicodeLength(Range)(Range r) pure nothrow
 	auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
 	return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
 }
-auto getRegexLength(Range)(Range r) pure nothrow
+auto getRegexLength(Range)(Range r, ref size_t tokenLength) pure nothrow
 {
 	size_t idx = 1;
 	bool inOneOfExpr = false;
 	if (r[idx] == '*' || r[idx] == '/')
 		return 0;
+	tokenLength = 1;
 	while (true)
 	{
 		switch (r[idx])
 		{
 			case '[':
 				inOneOfExpr = true;
+				tokenLength++;
 				idx++;
 				break;
 			case ']':
 				inOneOfExpr = false;
+				tokenLength++;
 				idx++;
 				break;
 			case '\\':
+				tokenLength++;
 				idx++;
 				auto len = r.getLineTerminatorLength(idx);
 				if (len != 0)
@@ -299,8 +303,10 @@ auto getRegexLength(Range)(Range r) pure nothrow
 				if (r[idx] == 0)
 					return 0;
 				idx += r[idx..$].getUnicodeLength();
+				tokenLength++;
 				break;
 			case '/':
+				tokenLength++;
 				idx++;
 				if (!inOneOfExpr)
 				{
@@ -309,11 +315,13 @@ auto getRegexLength(Range)(Range r) pure nothrow
 						auto len = r[idx..$].getTailIdentifierLength();
 						if (len == 0)
 							return idx;
+						tokenLength++;
 						idx += len;
 					}
 				}
 				break;
 			default:
+				tokenLength++;
 				auto len = r[idx..$].getLineTerminatorLength();
 				if (len != 0)
 					return 0;
@@ -580,7 +588,8 @@ struct Lexer
 	Token token;
 	size_t line;
 	size_t column;
-	private size_t tokenLength;
+	private size_t tokenLength;	// TODO: is actually a wrong name. should be something meaning: the length on the current line
+	private size_t tokenLines;
 	const (ubyte)[] s;
 	void pushState(State state) pure
 	{
@@ -615,8 +624,14 @@ struct Lexer
 		auto scanToken(Goal goal = Goal.All, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
 			//return measure!("Scantoken",(){
+				if (tokenLines > 0)
+				{
+					line += tokenLines;
+					column = 0;
+				}
 				column += tokenLength;
 				tokenLength = 0;
+				tokenLines = 0;
 				token = lexToken(goal);
 				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
 				return token;
@@ -627,8 +642,14 @@ struct Lexer
 		auto scanToken(Goal goal = Goal.All)
 		{
 			//return measure!("Scantoken",(){
+				if (tokenLines > 0)
+				{
+					line += tokenLines;
+					column = 0;
+				}
 				column += tokenLength;
 				tokenLength = 0;
+				tokenLines = 0;
 				token = lexToken(goal);
 				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
 				return token;
@@ -778,11 +799,16 @@ struct Lexer
 	// TODO: test with nested [ or ]
 	auto lookAheadRegex()
 	{
-		return s.getRegexLength();
+		size_t charLen = 0;
+		size_t len = s.getRegexLength(charLen);
+		if (len != 0)
+			tokenLength += charLen;
+		return len;
 	}
 	Token lexString()
 	{
 		auto type = s.front();	// either " or '
+		tokenLength++;
 		size_t idx = 1;
 		while (true)
 		{
@@ -792,7 +818,7 @@ struct Lexer
 			{
 				case 1:
 					ubyte chr = s[idx++];
-					column++;
+					tokenLength++;
 					if (chr == type)
 					{
 						if (type == '"')
@@ -805,6 +831,7 @@ struct Lexer
 							if (s[idx] == 0)
 								goto eof;
 							idx += s.getUnicodeLength(idx);
+							tokenLength++;
 							break;
 						case 0:
 							goto eof;
@@ -838,6 +865,7 @@ struct Lexer
 				if (exponent)
 					return createTokenAndAdvance(TokenType,idx,s[0..idx]);
 				idx++;
+				tokenLength++;
 				fraction = true;
 				continue;
 			}
@@ -851,6 +879,7 @@ struct Lexer
 						if (digit >= base)
 							return createTokenAndAdvance(Type.Error,idx,format("Invalid digit %s in base %s NumericLiteral",cast(char)chr,base));
 					}
+					tokenLength++;
 					idx++;
 					expectingNumbers = false;
 					break;
@@ -867,6 +896,7 @@ struct Lexer
 							if (digit >= base)
 								return createTokenAndAdvance(Type.Error,idx,format("Invalid digit %s in base %s NumericLiteral",cast(char)chr,base));
 						}
+						tokenLength++;
 						idx++;
 						break;
 					}
@@ -884,6 +914,7 @@ struct Lexer
 							if (exponent)
 								return createTokenAndAdvance(Type.Error,idx,format("Already processed exponent part"));
 							exponent = true;
+							tokenLength++;
 							idx++;
 							chr = s[idx];
 							if (chr == '+' || chr == '-')
@@ -1069,13 +1100,13 @@ struct Lexer
 		{
 			len = s.getUnicodeLength(idx);
 			idx += len;
-			column ++;
+			tokenLength++;
 		} else
 		{
 			auto tok = Token(Type.SingleLineComment,s[0..idx]);
 			idx += len;
-			line += 1;
-			column = 0;
+			tokenLines++;
+			tokenLength = 0;
 			s = s[idx..$];
 			return tok;
 		}
@@ -1736,4 +1767,220 @@ unittest
 	lexer.scanToken().shouldEqual(Token(Type.DecimalLiteral,".5"));
 	lexer = createLexer("..");
 	lexer.scanToken().shouldEqual(Token(Type.Error,"One dot too few or too less"));
+}
+
+auto byLines(string input)
+{
+	import std.stdio;
+	struct Lines
+	{
+		private size_t start, end, nextLine;
+		private string input;
+		size_t line;
+		private void determineEnd() {
+			if (end > start || empty)
+				return;
+			size_t cnt;
+			foreach(dchar c; input[start..$])
+			{
+				cnt++;
+				switch(c)
+				{
+					case '\x0d':
+						if (start+cnt > input.length && input[start+cnt] == '\x0a')
+							nextLine = start + cnt + 1;
+						else
+							nextLine = start + cnt;
+						end = start + cnt - 1;
+						return;
+					case '\x0a':
+						nextLine = start + cnt;
+						end = start + cnt - 1;
+						return;
+					case '\u2028':
+					case '\u2029':
+						cnt += 2;
+						nextLine = start + cnt;
+						end = start + cnt - 1;
+						return;
+					default:
+						if (cast(uint)c > 0xffff)
+							cnt += 3;
+						else if (c > '\u07ff')
+							cnt += 2;
+						else if (c > '\x7f')
+							cnt += 1;
+				}
+			}
+			line++;
+			end = input.length;
+		}
+		this(string input)
+		{
+			this.input = input;
+		}
+		bool empty()
+		{
+			return start > input.length;
+		}
+		void popFront()
+		{
+			line++;
+			start = nextLine;
+			determineEnd();
+		}
+		string front()
+		{
+			determineEnd();
+			return input[start..$];
+		}
+	}
+	return Lines(input);
+}
+
+void checkLineAndColumnCounts(string input)
+{
+	import std.stdio;
+	void checkContentByToken(Line)(Line line, Token token, ref Lexer lexer, ptrdiff_t lineOffset = 0)
+	{
+		import std.algorithm : startsWith;
+		import std.format : format;
+		ptrdiff_t offset = lineOffset+lexer.column;
+		assert(offset >= 0);
+		if (!line[offset..$].startsWith(cast(const(char)[])token.match))
+			throw new Exception(format("Lexer mentioned %s:%s but content doesn't match (offset %s)\ntoken-matched: %s (raw-length: %s)\nraw: %s",lexer.line,lexer.column,offset,cast(const(char)[])token.match,lexer.tokenLength,line[offset..offset+token.match.length]));
+	}
+	void checkContent(Line)(Line line, string match, ref Lexer lexer, ptrdiff_t lineOffset = 0)
+	{
+		import std.algorithm : startsWith;
+		import std.format : format;
+		ptrdiff_t offset = lineOffset+lexer.column;
+		assert(offset >= 0);
+		if (!line[offset..$].startsWith(match))
+			throw new Exception(format("Lexer mentioned %s:%s but content doesn't match\ntoken-matched: %s\nraw: %s",lexer.line,lexer.column,match,line[offset..offset+match.length]));
+	}
+	size_t column = 0;
+	auto lexer = createLexer(input);
+	auto lines = input.byLines;
+	auto token = lexer.scanToken();
+	while (token.type != Type.EndOfFile)
+	{
+		writeln(token, " ", lexer.line,":",lexer.column);
+		while (lexer.line > lines.line)
+		{
+			lines.popFront();
+			if (lines.empty())
+				throw new Exception("Input empty while still token left");
+		}
+		auto line = lines.front();
+		switch(token.type)
+		{
+			default:
+				break;
+			case Type.StringLiteral:
+				auto s = line[lexer.column+1..lexer.column+lexer.tokenLength].coerceToSingleQuotedString();
+				writefln("Found: %s",s);
+				checkContentByToken(s, token, lexer, 0-lexer.column); break;
+			case Type.BinaryLiteral:
+			case Type.HexLiteral:
+			case Type.OctalLiteral:
+			case Type.SingleLineComment:
+				checkContentByToken(line, token, lexer, 2); break;
+			case Type.DecimalLiteral:
+			case Type.Identifier:
+				checkContentByToken(line, token, lexer);
+				break;
+			//case Type.SheBang,
+			//case Type.Error,
+			//case Type.TemplateHead,
+			//case Type.TemplateMiddle,
+			//case Type.Template,
+			//case Type.TemplateTail,
+			//case Type.EndOfFile,
+			//case Type.LineTerminator,
+			//case Type.OpenCurlyBrace,
+			//case Type.CloseCurlyBrace,
+			case Type.OpenParenthesis:
+				checkContent(line, "(", lexer);
+				break;
+			//case Type.CloseParenthesis,
+			//case Type.OpenSquareBrackets,
+			//case Type.CloseSquareBrackets,
+			//case Type.Dot,
+			//case Type.SpreadOperator,
+			case Type.Semicolon:
+				checkContent(line, ";", lexer);
+				break;
+			//case Type.Comma,
+			//case Type.LeftShiftAssignment,
+			//case Type.LeftShift,
+			//case Type.LessOrEqual,
+			//case Type.LessThan,
+			//case Type.TripleRightShiftAssignment,
+			//case Type.TripleRightSift,
+			//case Type.RightShiftAssignment,
+			//case Type.RightShift,
+			//case Type.GreaterOrEqual,
+			case Type.GreaterThan:
+				checkContent(line, ">", lexer);
+				break;
+			//case Type.StrictEqual,
+			//case Type.Equal,
+			//case Type.Arrow,
+			case Type.Assignment:
+				checkContent(line, "=", lexer);
+				break;
+			//case Type.StrictNotEqual,
+			//case Type.NotEqual,
+			//case Type.Negation,
+			//case Type.Increment,
+			//case Type.AdditiveAssignment,
+			//case Type.Add,
+			//case Type.Decrement,
+			//case Type.DecrementalAssignment,
+			//case Type.Minus,
+			//case Type.MultiplicativeAssignment,
+			//case Type.Multiply,
+			case Type.DivisionAssignment:
+				checkContent(line, "/=", lexer);
+				break;
+			//case Type.Division,
+			//case Type.ModAssignment,
+			//case Type.Mod,
+			//case Type.LogicalAnd,
+			//case Type.BitwiseAndAssignment,
+			//case Type.BitwiseAnd,
+			//case Type.LogicalOr,
+			//case Type.BitwiseOrAssignment,
+			//case Type.BitwiseOr,
+			//case Type.BitwiseXorAssignment,
+			//case Type.BitwiseXor,
+			//case Type.Tilde,
+			case Type.QuestionMark:
+				checkContent(line, "?", lexer);
+				break;
+			case Type.Colon:
+				checkContent(line, ":", lexer);
+				break;
+			//case Type.Regex,
+			//case Type.MultiLineComment,
+			//case Type.ExponentIndicator,
+			//case Type.UnicodeEscapeSequence,
+			//case Type.StartIdentifier,
+			//case Type.TailIdentifier,
+			//case Type.EndIdentifier
+			
+		}
+		token = lexer.scanToken();
+	}
+}
+
+@("checkLineAndColumnCounts")
+unittest
+{
+	checkLineAndColumnCounts("var a = identifier;");
+	checkLineAndColumnCounts("var a =
+identifier, b = \"basdfas\"");
+	checkLineAndColumnCounts("var a =
+	44, b = 0b01, c = 0x01, d = 0o55");
 }

@@ -22,6 +22,7 @@ import es6.reporter;
 import es6.minifier;
 import es6.analyse;
 import es6.bench;
+import es6.lexer;
 
 import std.getopt;
 import std.stdio;
@@ -42,6 +43,7 @@ int main(string[] args)
 	bool doMinify;
 	bool bench;
 	bool selfCheck;
+	bool checkLinesAndColumns;
 	string fileIn;
 	string fileOut;
 
@@ -55,6 +57,7 @@ int main(string[] args)
 			"o|output", "Output file (defaults to stdout)", &fileOut,
 			"b|bench", "Lowlevel timings", &bench,
 			"c|check", "Perform check on emitted code", &selfCheck,
+			"v|verify", "Verify line and column counts", &checkLinesAndColumns,
 			"minify", "Minify js before outputting (default to false)", &doMinify
 		);
 
@@ -98,6 +101,9 @@ int main(string[] args)
 			parser.scanToken();
 			node = measure!("Parsing", () => parser.parseModule());
 		}
+
+		if (checkLinesAndColumns)
+			checkLineAndColumnCounts(cast(string)input);
 
 		size = input.length;
 		auto errors = measure!("Collect Errors", (){
