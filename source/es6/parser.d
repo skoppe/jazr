@@ -621,6 +621,7 @@ final class Parser
 				break;
 			scanAndSkipCommentsAndTerminators();
 		}
+		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
 			return error(format("Expected closing curly brace before %s",token.type));
 		end: scanAndSkipCommentsAndTerminators();
@@ -871,7 +872,7 @@ final class Parser
 		if (lexer.empty)
 			return cond;
 
-		Node[] children;
+		ArrayBuilder!Node children;
 		while (!lexer.empty) // TODO: this one might loop forever with invalid input, not sure, need to check
 		{
 			Node child;
@@ -892,39 +893,38 @@ final class Parser
 				default:
 					if (children.length == 0)
 						return cond;
-					return make!(AssignmentExpressionNode)(children);
+					return make!(AssignmentExpressionNode)(children.data);
 			}
 			if (children.length == 0)
 			{
-				children.reserve(3);
-				children ~= cond;
+				children.put(cond);
 			}
-			children ~= child;
+			children.put(child);
 			scanToken(attributes.toGoal);
 			cond = parseConditionalExpression(attributes);
 			if (cond.type == NodeType.ConditionalExpressionNode)
 			{
-				children ~= cond;
-				return make!(AssignmentExpressionNode)(children);
+				children.put(cond);
+				return make!(AssignmentExpressionNode)(children.data);
 			}
 			if (cond.type == NodeType.IdentifierReferenceNode && token.type == Type.Arrow)
 			{
 				scanToken(attributes.toGoal);
-				children ~= make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
-				return make!(AssignmentExpressionNode)(children);
+				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In))));
+				return make!(AssignmentExpressionNode)(children.data);
 			}
 			// TODO this idea in the if below is correct, but there might be Comments between the parenthesis and the arrow (which are allowed, as long as the arrow is on the same line as the closing parenthesis)
 			if (cond.type == NodeType.ParenthesisNode && token.type == Type.Arrow)
 			{
 				scanToken(attributes.toGoal);
-				children ~= make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
-				return make!(AssignmentExpressionNode)(children);
+				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In))));
+				return make!(AssignmentExpressionNode)(children.data);
 			}
-			children ~= cond;
+			children.put(cond);
 			if (cond.type == NodeType.UnaryExpressionNode || cond.type == NodeType.BinaryExpressionNode)
-				return make!(AssignmentExpressionNode)(children);
+				return make!(AssignmentExpressionNode)(children.data);
 		}
-		return make!(AssignmentExpressionNode)(children);
+		return make!(AssignmentExpressionNode)(children.data);
 	}
 	Node parseConditionalExpression(int attributes = 0)
 	{
@@ -947,7 +947,7 @@ final class Parser
 	Node parseRightHandSideExpression(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
-		Node[] children;
+		ArrayBuilder!Node children;
 		while (1) // this loop won't run forever
 		{
 			Node unary = parseUnaryExpression(attributes.mask!(Attribute.Yield | Attribute.NoRegex));
@@ -965,19 +965,19 @@ final class Parser
 							{
 								if (children.length == 0)
 									return unary;
-								children ~= unary;
-								return make!(BinaryExpressionNode)(children);
+								children.put(unary);
+								return make!(BinaryExpressionNode)(children.data);
 							}
 							child = make!(ExpressionOperatorNode)(ExpressionOperator.In);
 							break;
 						default:
 							if (children.length == 0)
 								return unary;
-							children ~= unary;
-							return make!(BinaryExpressionNode)(children);
+							children.put(unary);
+							return make!(BinaryExpressionNode)(children.data);
 					}
-					children ~= unary;
-					children ~= child;
+					children.put(unary);
+					children.put(child);
 					scanToken(attributes.toGoal);
 					continue;
 				case Type.LogicalAnd: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalAnd); break;
@@ -1004,11 +1004,11 @@ final class Parser
 				default:
 					if (children.length == 0)
 						return unary;
-					children ~= unary;
-					return make!(BinaryExpressionNode)(children);
+					children.put(unary);
+					return make!(BinaryExpressionNode)(children.data);
 			}
-			children ~= unary;
-			children ~= child;
+			children.put(unary);
+			children.put(child);
 			attributes &= ~Attribute.NoRegex;
 			scanToken(attributes.toGoal);
 		}
@@ -1099,7 +1099,7 @@ final class Parser
 		mixin(traceFunction!(__FUNCTION__));
 		size_t news = 0, args = 0;
 		Node content;
-		Node[] calls;
+		ArrayBuilder!Node calls;
 		while (1)  // TODO: this one might loop forever with invalid input, not sure, need to check
 		{
 			switch (token.type)
@@ -1130,8 +1130,8 @@ final class Parser
 					{
 						args++;
 						if (calls.length == 0)
-							calls ~= content;
-						calls ~= parseAccessor();
+							calls.put(content);
+						calls.put(parseAccessor());
 						break;
 					}
 					if (news == 0)
@@ -1147,9 +1147,9 @@ final class Parser
 						goto default;
 					args++;
 					if (calls.length == 0)
-						calls ~= content;
+						calls.put(content);
 					auto tmplNode = make!(TemplateNode)(token.match);
-					calls ~= make!(TemplateLiteralNode)(tmplNode);
+					calls.put(make!(TemplateLiteralNode)(tmplNode));
 					scanToken(attributes.toGoal);
 					break;
 				case Type.TemplateHead:
@@ -1157,8 +1157,8 @@ final class Parser
 						goto default;
 					args++;
 					if (calls.length == 0)
-						calls ~= content;
-					calls ~= parseTemplateTail(attributes);
+						calls.put(content);
+					calls.put(parseTemplateTail(attributes));
 					break;
 				case Type.LineTerminator:
 				case Type.SingleLineComment:
@@ -1170,16 +1170,16 @@ final class Parser
 						goto default;
 					args++;
 					if (calls.length == 0)
-						calls ~= content;
-					calls ~= parseArguments(attributes.mask!(~Attribute.NoRegex));
+						calls.put(content);
+					calls.put(parseArguments(attributes.mask!(~Attribute.NoRegex)));
 					break;
 				case Type.OpenSquareBrackets:
 					if (content is null)
 						goto default;
 					args++;
 					if (calls.length == 0)
-						calls ~= content;
-					calls ~= parseArrayIndexing(Attribute.In | attributes);
+						calls.put(content);
+					calls.put(parseArrayIndexing(Attribute.In | attributes));
 					break;
 				case Type.EndOfFile:
 					if (content is null)
@@ -1195,15 +1195,15 @@ final class Parser
 		end: if (news == 0 && args == 0)
 			return content;
 		if (calls.length == 0)
-			calls ~= content;
+			calls.put(content);
 		else
-			calls[0] = content;
+			calls.data[0] = content;
 		if (news > 0 && news > args)
 		{
-			return make!(NewExpressionNode)(news,calls);
+			return make!(NewExpressionNode)(news,calls.data);
 		}
 		assert(args > 0);
-		return make!(CallExpressionNode)(news,calls);
+		return make!(CallExpressionNode)(news,calls.data);
 	}
 	bool isIdentifierReservedKeyword(const(ubyte)[] identifier)
 	{
@@ -1229,7 +1229,7 @@ final class Parser
 				return error("keyword yield cannot be used in this context");
 
 		} else if (keyword.isReservedKeyword)
-			return error(format("Invalid IdentifierReference %s",token.match));
+			return error(format("Invalid IdentifierReference %s",cast(const(char)[])token.match));
 
 		scanAndSkipCommentsAndTerminators(attributes);
 		return n;
@@ -1602,7 +1602,7 @@ final class Parser
 				if (iden is null)
 					return error(format("Expected identifier, got %s",name));
 				if (isIdentifierReservedKeyword(iden.identifier))
-					return error(format("Invalid IdentifierReference %s",iden.identifier));
+					return error(format("Invalid IdentifierReference %s",cast(const(char)[])iden.identifier));
 				if (token.type != Type.Assignment)
 					children ~= iden;
 				else

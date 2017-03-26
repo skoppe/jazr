@@ -2,6 +2,11 @@ module es6.allocator;
 
 import core.memory;
 
+version (unittest)
+{
+    import std.stdio;
+}
+
 @safe:
 
 version = customallocator;
@@ -129,4 +134,78 @@ private:
     }
 
     Node* first;
+}
+
+import std.traits;
+
+struct ArrayBuilder(T)
+{
+    void put(T t) @trusted
+    {
+        static if (is(T == class) || isPointer!T)
+            if (t is null)
+                return;
+
+        if (arr !is null)
+        {
+            assert(arr.length > 0);
+            if (_length < arr.length)
+                arr[_length] = t;
+            else
+                arr ~= t;
+            _length++;
+            return;
+        }
+
+        if (_length + 1 >= stackSpace.length)
+        {
+            arr = new T[stackSpace.length << 1];
+            arr[0 .. stackSpace.length] = stackSpace[];
+            arr[_length++] = t;
+
+            return;
+        }
+
+        stackSpace[_length++] = t;
+    }
+
+    size_t length()
+    {
+        return this._length;
+    }
+    T[] data()
+    {
+        if (arr is null)
+        {
+            arr = new T[_length];
+            arr[0 .. _length] = stackSpace[0.._length];
+        }
+        return arr[0.._length];
+    }
+
+private:
+
+    T[8] stackSpace;
+    T[] arr;
+    size_t _length;
+}
+
+@("ArrayBuilder")
+unittest
+{
+    auto arr = ArrayBuilder!int();
+    arr.put(1);
+    arr.put(2);
+    arr.put(3);
+    assert(arr.data == [1,2,3]);
+
+    arr = ArrayBuilder!int();
+    foreach(i; 0..24)
+        arr.put(i);
+    assert(arr.data == [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]);
+
+    arr = ArrayBuilder!int();
+    foreach(i; 0..48)
+        arr.put(i);
+    assert(arr.data == [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]);
 }
