@@ -1744,6 +1744,7 @@ auto byLines(string input)
 	import std.stdio;
 	struct Lines
 	{
+		@safe:
 		private size_t start, end, nextLine;
 		private string input;
 		size_t line;
