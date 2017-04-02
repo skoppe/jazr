@@ -27,6 +27,12 @@ import es6.eval;
 import std.algorithm : map, min, max, any, reduce;
 import std.range : drop, take;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -45,6 +51,8 @@ version(unittest)
 
 bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (node.children.length == 0)
 	{
 		node.detach();

@@ -33,14 +33,14 @@ version (unittest)
 	import std.algorithm : filter;
 	Scope getScope(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto node = parseNode!("parseModule",ModuleNode)(js,file,line);
+		auto node = parseNode!("parseModule",ModuleNode)(js,true,file,line);
 		auto s = node.analyseNode().scp;
 		node.assertTreeInternals(file,line);
 		return s;
 	}
 	Branch getBranch(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto node = parseNode!("parseModule",ModuleNode)(js,file,line);
+		auto node = parseNode!("parseModule",ModuleNode)(js,true,file,line);
 		auto b = node.analyseNode().scp.branch;
 		node.assertTreeInternals(file,line);
 		return b;
@@ -863,6 +863,13 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 	node.hints = hints;
 	return hints & node.getParentHintMask();
 }
+size_t countChildren(Item)(Item entry)
+{
+	size_t cnt = 1;
+	foreach(c; entry.children)
+		cnt += countChildren(c);
+	return cnt;
+}
 AnalysisResult analyseNode(Node root)
 {
 	Scope s = new Scope(root);
@@ -871,6 +878,11 @@ AnalysisResult analyseNode(Node root)
 	Branch trunk = b;
 	measure!("Analysing",() => analyse(root,s,b));
 	measure!("Variable Linking", () => s.linkIdentifierToDefinitions());
+	version(tracing)
+	{
+		setCounter("Scopes",countChildren(s));
+		setCounter("Nodes",countChildren(root));
+	}
 	findGlobals(s);
 	auto ar = AnalysisResult(all,trunk);
 	//ar.fetchUnresolvedIdentifiers();

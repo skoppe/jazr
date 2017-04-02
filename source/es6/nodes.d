@@ -174,7 +174,8 @@ enum NodeType {
 	NameSpaceImportNode,
 	ModuleNode,
 	SemicolonNode,
-	BindingElementNode
+	BindingElementNode,
+	YieldExpressionNode
 }
 enum Assignment {
 	LeftShiftAssignment,
@@ -1956,6 +1957,17 @@ final class BindingElementNode : Node
 	this(Node pattern, Node init)
 	{
 		super(NodeType.BindingElementNode,[pattern,init]);
+	}
+}
+final class YieldExpressionNode : Node
+{
+	Node assignExpr;
+	bool _delegate;
+	this(Node assignExpr, bool _delegate)
+	{
+		super(NodeType.YieldExpressionNode, assignExpr);
+		this.assignExpr = assignExpr;
+		this._delegate = _delegate;
 	}
 }
 ErrorNode[] collectErrors(Node root)

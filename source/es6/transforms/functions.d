@@ -27,6 +27,12 @@ import std.range : enumerate, tee;
 import std.algorithm : filter, each, remove;
 import std.array : array;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -38,6 +44,8 @@ version(unittest)
 
 void hoistFunctions(Scope scp)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	size_t insertionPoint = 0;
 	Node entry = scp.entry;
 	void hoistFunction(Node node)
@@ -110,10 +118,24 @@ unittest
 		`var a = 0; a = function*(){};`,
 		`var a = 0; a = function*(){};`
 	);
+	assertHoistFunctions(
+		`var a = 0; export function abc() {};`,
+		`export function abc() {}; var a = 0;`
+	);
+	assertHoistFunctions(
+		`var a = 0; export function *abc() {};`,
+		`export function *abc() {}; var a = 0;`
+	);
+	assertHoistFunctions(
+		`var a = 0; export { a };`,
+		`var a = 0; export { a };`
+	);
 }
 
 void removeFunctionExpressionUnusedName(Scope scp)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	size_t popped = 0;
 	auto funcs = scp.variables
 		.enumerate

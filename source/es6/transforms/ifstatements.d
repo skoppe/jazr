@@ -28,6 +28,12 @@ import std.range : retro;
 import std.algorithm : until, each;
 import std.array : array;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -39,6 +45,8 @@ version(unittest)
 
 bool combineNestedIfs(IfStatementNode parent, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (parent.hasElsePath)
 		return false;
 
@@ -143,6 +151,8 @@ unittest
 
 bool convertIfsToExpressionStatements(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (ifStmt.hasElsePath)
 		return false;
 
@@ -304,6 +314,8 @@ unittest
 
 bool removeEmptyIfPaths(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (ifStmt.truthPath.hasStatements)
 	{
 		if (!ifStmt.hasElsePath)
@@ -384,6 +396,8 @@ unittest
 }
 bool simplifyStaticIfStatement(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto value = ifStmt.condition.coerceToTernary;
 
 	if (value == Ternary.None)
@@ -487,6 +501,8 @@ unittest
 
 bool moveExpressionsIntoIfCond(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (ifStmt.parent.type != NodeType.BlockStatementNode &&
 		ifStmt.parent.type != NodeType.ModuleNode &&
 		ifStmt.parent.type != NodeType.FunctionBodyNode)

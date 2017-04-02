@@ -328,14 +328,14 @@ unittest
 	getScope(`a,b,c;`).assertGlobals(["a","b","c"]);
 	auto s = getScope(`var a,b; function e(c){ var d; return a*b*c*d; }`);
 	s.assertGlobals([]);
-	s.children[0].assertGlobals(["a","b"]);
+	s.children[0].assertGlobals([]);
 	s = getScope(`function e(c){ var d; return a*b*c*d; }`);
 	s.assertGlobals(["a","b"]);
 	s.children[0].assertGlobals(["a","b"]);
 	s = getScope(`function bla(a){function c(c){return a*c*d*b}var d,e}`);
 	s.assertGlobals(["b"]);
 	s.children[0].assertGlobals(["b"]);
-	s.children[0].children[0].assertGlobals(["a","d","b"]);
+	s.children[0].children[0].assertGlobals(["b"]);
 }
 @("isGlobal")
 unittest

@@ -19,14 +19,17 @@ module es6.transformer;
 
 import es6.nodes;
 import es6.scopes;
-	import std.traits : fullyQualifiedName;
 
 version (chatty) {
+	version = tracing;
 	import std.traits : fullyQualifiedName;
 	import std.stdio;
 }
 
+import es6.bench;
+
 version (unittest) {
+	import std.traits : fullyQualifiedName;
 	import std.stdio;
 	import es6.parser;
 	import es6.analyse;
@@ -84,7 +87,7 @@ version (unittest)
 		node.assertTreeInternals(file,line);
 		auto str = emit(node);
 		writeln(str);
-		auto expected = parseModule(str,file,line);
+		auto expected = parseModule(str,true,file,line);
 		expected.analyseNode();
 		auto diff = diffTree(node,expected);
 		if (diff.type != Diff.No)
@@ -168,7 +171,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 								}
 								if (replacedWith !is null && replacedWith.parent !is node.parent)
 									return replacedWith;
-								if (typedNode.parent is null)
+								if (replacedWith is null && typedNode.parent is null)
 									return null;
 							} else {
 								version(chatty) { writeln(fullyQualifiedName!_fun); }
@@ -181,7 +184,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 									}
 									if (replacedWith !is null && replacedWith.parent !is node.parent)
 										return replacedWith;
-									if (typedNode.parent is null)
+									if (replacedWith is null && typedNode.parent is null)
 										return null;
 								}
 							}
@@ -205,7 +208,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 							}
 							if (replacedWith !is null && replacedWith.parent !is node.parent)
 								return replacedWith;
-							if (node.parent is null)
+							if (replacedWith is null && node.parent is null)
 								return null;
 						} else {
 							version(chatty) { writeln(fullyQualifiedName!_fun); }
@@ -218,7 +221,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 								}
 								if (replacedWith !is null && replacedWith.parent !is node.parent)
 									return replacedWith;
-								if (node.parent is null)
+								if (replacedWith is null && node.parent is null)
 									return null;
 							}
 						}
@@ -229,9 +232,13 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 	}
 	Node transformNodes(Node node)
 	{
+		version(tracing) mixin(traceTransformer!(__FUNCTION__));
+		import std.algorithm : reverse;
 		assert(node !is null);
 		Node replacedWith;
-		foreach(c; node.children.dup)
+		auto children = node.children.dup;
+		//reverse(children);
+		foreach(c; children)
 		{
 			if (c.startsNewScope)
 				continue;
@@ -244,7 +251,10 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 				{
 					if (replacedWith.parent is null)
 						return transformNodes(replacedWith);
-					return transformNodes(replacedWith).parent;
+					auto r = transformNode(replacedWith);
+					if (r !is null)
+						return r.parent;
+					return replacedWith.parent;
 				}
 				c = replacedWith;
 				replacedWith = transformNodes(c);
@@ -274,4 +284,16 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 		} while (!first);
 	}
 	transformScope(node.branch.scp);
+}
+
+template traceTransformer(string fun)
+{
+	version (tracing) {
+		enum traceTransformer = 
+			`auto sw = StopWatch();
+			sw.start();
+			scope(exit) {
+				timingCounter("`~fun~`",sw.peek);
+			}`;
+	} else enum traceTransformer = "";
 }

@@ -27,6 +27,12 @@ import std.algorithm : each, until, find, countUntil;
 import std.range : retro;
 import std.array : array;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -38,6 +44,8 @@ version(unittest)
 
 bool negateReturningIf(Scope s)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	bool modified = false;
 	foreach_reverse(branch; s.branch.children)
 	{
@@ -229,6 +237,8 @@ unittest
 
 void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (!ifStmt.hasElsePath)
 		return;
 
@@ -309,6 +319,8 @@ Node createVoid0Node()
 
 void combineReturnStatements(Scope scp)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	Node parenthesizeIfNecessary(Node n)
 	{
 		if (n.type != NodeType.ExpressionNode)
@@ -561,6 +573,8 @@ unittest
 
 bool moveExpressionsIntoReturn(ReturnStatementNode retStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (retStmt.parent.type != NodeType.BlockStatementNode &&
 		retStmt.parent.type != NodeType.ModuleNode &&
 		retStmt.parent.type != NodeType.FunctionBodyNode)

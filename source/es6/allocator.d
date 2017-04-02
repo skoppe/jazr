@@ -138,7 +138,7 @@ private:
 
 import std.traits;
 
-struct ArrayBuilder(T)
+struct ArrayBuilder(T, size_t Len = 8)
 {
     void put(T t) @trusted
     {
@@ -185,7 +185,7 @@ struct ArrayBuilder(T)
 
 private:
 
-    T[8] stackSpace;
+    T[Len] stackSpace;
     T[] arr;
     size_t _length;
 }

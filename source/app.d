@@ -44,6 +44,7 @@ int main(string[] args)
 	bool bench;
 	bool selfCheck;
 	bool checkLinesAndColumns;
+	bool nodeModules;
 	string fileIn;
 	string fileOut;
 
@@ -58,6 +59,7 @@ int main(string[] args)
 			"b|bench", "Lowlevel timings", &bench,
 			"c|check", "Perform check on emitted code", &selfCheck,
 			"v|verify", "Verify line and column counts", &checkLinesAndColumns,
+			"n|node", "Parse input as meant for NodeJS", &nodeModules,
 			"minify", "Minify js before outputting (default to false)", &doMinify
 		);
 
@@ -66,7 +68,9 @@ int main(string[] args)
 			defaultGetoptPrinter("ECMAScript Tool.\n\nUsage:\t"~baseName(args[0])~" [OPTIONS]\n\nOptions:\n", helpInformation.options);
 			return 1;
 		}
-
+		int parserFlags = 0;
+		if (nodeModules)
+			parserFlags |= Parser.Flags.Node;
 		string[] timing;
 		Node node;
 		const(ubyte)[] input;
@@ -90,14 +94,14 @@ int main(string[] args)
 				f.rawRead(buffer[0..fileSize]);
 			});
 			input = buffer;
-			auto parser = parser(input,true);
+			auto parser = parser(input,true,parserFlags);
 			parser.scanToken();
 			node = measure!("Parsing", () => parser.parseModule());
 		}
 		else
 		{
 			input = cast(const(ubyte)[])stdin.byChunk(4096).map!(c=>cast(char[])c).joiner.to!string;
-			auto parser = parser(input);
+			auto parser = parser(input,false,parserFlags);
 			parser.scanToken();
 			node = measure!("Parsing", () => parser.parseModule());
 		}
@@ -126,7 +130,7 @@ int main(string[] args)
 		if (selfCheck)
 		{
 			if (!measure!("Selfcheck",(){
-					auto parser2 = parser(min);
+					auto parser2 = parser(min,parserFlags);
 					parser2.scanToken();
 					auto node2 = parser2.parseModule();
 					auto errors2 = node2.collectErrors();

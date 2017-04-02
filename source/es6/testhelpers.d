@@ -69,4 +69,10 @@ version(unittest)
 		(new Node(NodeType.ErrorNode)).shouldBeOfType!A.shouldThrow();
 		(){throw new UnitTestException(["bla"]);}().shouldThrowSaying("not bla").shouldThrow();
 	}
+	void shouldHaveNoErrors(Node root, in string file = __FILE__, in size_t line = __LINE__) @trusted
+	{
+		auto errors = root.collectErrors();
+		if (errors.length > 0)
+			throw new UnitTestException([format("Expected no errors but got: [%s]",errors[0].value)],file,line);
+	}
 }

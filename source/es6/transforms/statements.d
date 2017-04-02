@@ -23,6 +23,12 @@ import es6.analyse;
 import es6.eval;
 import es6.transforms.expressions;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -72,6 +78,8 @@ bool isChildOfIfStatmentTruthPathWithoutBlockStatement(Node node)
 
 void removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (node.children.length == 1)
 	{
 		if (node.children[$-1].hasNestedEndingSingleIfStatment() && 

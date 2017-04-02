@@ -26,6 +26,12 @@ import es6.eval;
 import std.range : retro, enumerate;
 import std.algorithm : all, each, map, reduce, sum, any;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -46,6 +52,8 @@ Node parenthesizeExpression(Node a)
 
 Node combineExpressions(Node a, Node b)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (a.hints.has(Hint.Or) || a.type == NodeType.ConditionalExpressionNode || !a.opt!(ExpressionNode).isSingleExpression.getOrElse(true) ||
 		a.type == NodeType.AssignmentExpressionNode)
 		a = parenthesizeExpression(a);
@@ -137,6 +145,8 @@ bool combineModuleIntoExpression(ModuleNode node, out Node replacedWith)
 
 private bool combineStatementsIntoExpression(Node node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+	
 	assert(node.type == NodeType.BlockStatementNode || node.type == NodeType.FunctionBodyNode || node.type == NodeType.ModuleNode);
 
 	auto length = node.children.length;
@@ -192,6 +202,10 @@ unittest
 {
 	alias assertCombineStatements = assertTransformations!(combineBlockStatementIntoExpression,combineFunctionBodyIntoExpression,combineModuleIntoExpression);
 	assertCombineStatements(
+		`a();`,
+		`a();`
+	);
+	assertCombineStatements(
 		`a();b();`,
 		`a(),b()`
 	);
@@ -204,19 +218,28 @@ unittest
 		`a = 6, b = 7, c = 8`
 	);
 	assertCombineStatements(
+		`a = 6; for (;;); b = 7, c = 8;`,
+		`a = 6; for (;;); b = 7, c = 8`
+	);
+	assertCombineStatements(
 		`a ? b() : c(); e && f && (d = 6); g = {a: 4}; h = [0,1]; (i || j) && g(); a = /^(?:webkit|moz|o)[A-Z]/.test("");`,
 		`a ? b() : c(), e && f && (d = 6), g = {a: 4}, h = [0,1], (i || j) && g(), a = /^(?:webkit|moz|o)[A-Z]/.test("");`
+	);
+	assertCombineStatements(
+		`a(),b();c(),d();`,
+		`a(),b(),c(),d();`
 	);
 }
 bool simplifyUnaryExpressions(UnaryExpressionNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto raw = node.getRawValue();
 	switch (raw.type)
 	{
 		case ValueType.Undefined:
-			if (node.prefixs.length > 0 && node.prefixs[0].type == NodeType.PrefixExpressionNode && node.prefixs[0].as!(PrefixExpressionNode).prefix == Prefix.Void)
-				return false;
-			goto case ValueType.String;
+			assert(node.prefixs.length > 0 && node.prefixs[0].type == NodeType.PrefixExpressionNode && node.prefixs[0].as!(PrefixExpressionNode).prefix == Prefix.Void);
+			return false;
 		case ValueType.NaN:
 		case ValueType.Bool:
 		case ValueType.String:
@@ -232,6 +255,14 @@ unittest
 	assertSimplifyUnaryExpr(
 		`!false`,
 		`true`
+	);
+	assertSimplifyUnaryExpr(
+		`!NaN`,
+		`true`
+	);
+	assertSimplifyUnaryExpr(
+		`+"abc"`,
+		`NaN`
 	);
 	assertSimplifyUnaryExpr(
 		`-Infinity`,
@@ -259,6 +290,8 @@ bool simplifyBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 @("simplifyBinaryExpressions")
 unittest
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	alias assertSimplifyBinaryExpr = assertTransformations!(simplifyBinaryExpressions);
 	assertSimplifyBinaryExpr(
 		`var a = 123 + 123`,
@@ -277,9 +310,15 @@ unittest
 		`if (123 > 456) a();`,
 		`if (false) a();`
 	);
+	assertSimplifyBinaryExpr(
+		`if (123 > b) a();`,
+		`if (123 > b) a();`
+	);
 }
 bool shortenBooleanNodes(BooleanNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (node.parent.type == NodeType.CallExpressionNode)
 		return false;
 	if (node.parent.type == NodeType.UnaryExpressionNode)
@@ -330,6 +369,8 @@ unittest
 
 void moveStringComparisonToLeftOperand(BinaryExpressionNode binExpr, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto ops = binExpr.getOperators();
 	foreach(idx, op; ops.enumerate)
 	{
@@ -395,6 +436,8 @@ unittest
 
 void convertHexToDecimalLiterals(HexLiteralNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (node.value.length > 8)
 		return;
 	uint dec = (cast(const(char)[])node.value).to!uint(16);
@@ -413,8 +456,17 @@ unittest
 		`0xFf;`,
 		`255;`
 	);
+	assertHexDecLiterals(
+		`0xffffffff;`,
+		`4294967295;`
+	);
+	assertHexDecLiterals(
+		`0xfffffffff;`,
+		`0xfffffffff;`
+	);
 }
 
+// TODO: this is an unfortunate name. Better something like NonNestedExpression
 bool isExpressionStatement(Node node)
 {
 	switch (node.parent.type)
@@ -440,6 +492,8 @@ bool isExpressionStatement(Node node)
 
 void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto opNode = node.children[1].as!(ExpressionOperatorNode);
 	if (opNode.operator != ExpressionOperator.LogicalAnd && 
 		opNode.operator != ExpressionOperator.LogicalOr)
@@ -450,19 +504,16 @@ void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 
 	if (node.children[0].type == NodeType.UnaryExpressionNode)
 	{
-		if (node.parent.type == NodeType.ParenthesisNode)
-			return;
 		auto unary = node.children[0].as!UnaryExpressionNode;
+		if (unary.prefixs.length != 1)
+			return;
+		if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
+			return;
+
 		if (unary.children[0].type == NodeType.ParenthesisNode)
 		{
-			if (unary.prefixs.length != 1)
-				return;
-			if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
-				return;
-
 			auto paren = unary.children[0].as!ParenthesisNode;
-			if (paren.children.length != 1)
-				return;
+			assert(paren.children.length == 1); // its possible for a parenthesisNode to have more children, but only as argumentlist for arrow function
 			if (paren.children[0].type != NodeType.BinaryExpressionNode)
 				return;
 			auto innerBin = paren.children[0].as!BinaryExpressionNode;
@@ -473,7 +524,7 @@ void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 				auto un = n.as!UnaryExpressionNode;
 				if (un.prefixs.length != 1)
 					return -1;
-				if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
+				if (un.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
 					return -1;
 				return 1;
 			});
@@ -511,10 +562,6 @@ void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 			}
 		} else
 		{
-			if (unary.prefixs.length != 1)
-				return;
-			if (unary.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Negation)
-				return;
 			unary.replaceWith(unary.children[0]);
 			opNode.operator = opNode.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd;
 			opNode.reanalyseHints();
@@ -522,8 +569,7 @@ void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 	} else if (node.children[0].type == NodeType.ParenthesisNode)
 	{
 		auto paren = node.children[0].as!ParenthesisNode;
-		if (paren.children.length != 1)
-			return;
+		assert(paren.children.length == 1); // its possible for a parenthesisNode to have more children, but only as argumentlist for arrow function
 		if (paren.children[0].type != NodeType.BinaryExpressionNode)
 			return;
 		auto innerBin = paren.children[0].as!BinaryExpressionNode;
@@ -557,8 +603,52 @@ unittest
 	alias assertInvertBinExpr = assertTransformations!(invertBinaryExpressions);
 
 	assertInvertBinExpr(
+		`!a > b()`,
+		`!a > b()`
+	);
+	assertInvertBinExpr(
 		`!a && b()`,
 		`a || b()`
+	);
+	assertInvertBinExpr(
+		`~!(a) && b()`,
+		`~!(a) && b()`
+	);
+	assertInvertBinExpr(
+		`~(a) && b()`,
+		`~(a) && b()`
+	);
+	assertInvertBinExpr(
+		`!(!!a && b) && b()`,
+		`!!a && b || b();`	// TODO: actually the !! from 'a' can be removed
+	);
+	assertInvertBinExpr(
+		`!(~a && b) && b()`,
+		`~a && b || b()`
+	);
+	assertInvertBinExpr(
+		`!(~a || !b) && b()`,
+		`!~a && b && b();`
+	);
+	assertInvertBinExpr(
+		`!((a)) && b()`,
+		`!((a)) && b()`
+	);
+	assertInvertBinExpr(
+		`(a) && b()`,
+		`(a) && b()`
+	);
+	assertInvertBinExpr(
+		`(!!a && c) && b()`,
+		`(!!a && c) && b()`
+	);
+	assertInvertBinExpr(
+		`(a && c) && b()`,
+		`(a && c) && b()`
+	);
+	assertInvertBinExpr(
+		`(~a && c) && b()`,
+		`(~a && c) && b()`
 	);
 	assertInvertBinExpr(
 		`d && !a && b()`,
@@ -676,6 +766,10 @@ unittest
 		`for(var b;!b && c;d++);`,
 		`for(var b;!b && c;d++);`
 	);
+	assertInvertBinExpr(
+		`do a && b(); while(c);`,
+		`do a && b(); while(c);`
+	);
 }
 
 
@@ -687,6 +781,10 @@ unittest
 	//assertInvertEqualityBinExpr(
 	//	`d(), !(a == 9)`,
 	//	`d(), a != 9`
+	//);
+	//assertInvertEqualityBinExpr(
+		//`(t.type !== a.Token.Keyword || t.value !== e) && this.throwUnexpectedToken(t)`,
+		//`t.type === a.Token.Keyword && t.value === e || this.throwUnexpectedToken(t)`
 	//);
 
 

@@ -30,7 +30,7 @@ version (unittest)
 	import std.stdio;
 	ArrowFunctionNode parseArrowFunction(string input, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto node = parseNode!("parseAssignmentExpression",ArrowFunctionNode)(input,file,line);
+		auto node = parseNode!("parseAssignmentExpression",ArrowFunctionNode)(input,true,file,line);
 		node.analyseNode();
 		return node;
 	}

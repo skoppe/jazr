@@ -24,6 +24,12 @@ import es6.eval;
 import es6.lexer;
 import es6.transforms.expressions;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -35,6 +41,8 @@ version(unittest)
 
 bool shortenLiteralPropertyNames(PropertyDefinitionNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (node.name.type != NodeType.StringLiteralNode)
 		return false;
 

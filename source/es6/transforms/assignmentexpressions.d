@@ -21,6 +21,12 @@ import es6.nodes;
 import std.algorithm : map, each;
 import std.array : array;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version (unittest)
 {
 	import unit_threaded;
@@ -33,10 +39,6 @@ version (unittest)
 
 bool simplifyRedundantAssignmentExpressions(ExpressionNode expr, out Node replacedWith)
 {
-	if (expr.isSingleExpression) {
-		import std.stdio;
-		writeln(expr.parent);
-	}
 	assert(!expr.isSingleExpression);
 
 	if (expr.children[$-2].type != NodeType.AssignmentExpressionNode)
@@ -85,6 +87,16 @@ unittest
 			return;
 		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
+	assertTransformation
+	(
+		`var a = (b = 5, b);`,
+		`var a = (b = 5);`
+	);
+	assertTransformation
+	(
+		`var a = (b, c);`,
+		`var a = (b, c);`
+	);
 	assertTransformation
 	(
 		`if (a = 5) doBla();`,

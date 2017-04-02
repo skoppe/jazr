@@ -26,6 +26,12 @@ import es6.transforms.expressions;
 import std.algorithm : each, countUntil;
 import std.range : retro;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -37,6 +43,8 @@ version(unittest)
 
 void convertEscapedUnicodeToUnicode(StringLiteralNode str, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	import std.array : replaceSlice;
 	import std.conv : to;
 	size_t start = 0;
@@ -102,6 +110,8 @@ unittest
 
 void removeUseStrict(StringLiteralNode strLit, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (strLit.parent.type != NodeType.ModuleNode &&
 		strLit.parent.type != NodeType.FunctionBodyNode)
 		return;

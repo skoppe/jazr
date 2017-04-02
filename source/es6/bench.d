@@ -29,6 +29,7 @@ version (unittest)
 
 private TickDuration[string] timings;
 private size_t[string] calls;
+private size_t[string] counters;
 
 auto measure(string name, alias func)()
 {
@@ -58,17 +59,29 @@ auto timingCounter(string name, TickDuration a)
 	calls[name] = c + 1;
 }
 
+auto setCounter(string name, size_t counter)
+{
+	counters[name] = counter;
+}
+
 auto dumpMeasures()
 {
 	import std.stdio : writefln;
-	foreach(key, value; timings)
+	import std.array : array;
+	import std.algorithm : sort;
+	auto sorted = timings.byKeyValue.array.sort!((a,b) => a.value < b.value);
+	foreach(item; sorted)
 	{
+		auto key = item.key;
+		auto value = item.value;
 		auto c = calls[key];
 		if (value.usecs > 9999)
 			writefln("%s: %s msecs (%d calls)", key, value.msecs(), c);
 		else
 			writefln("%s: %s usecs (%d calls)", key, value.usecs(), c);
 	}
+	foreach(key, value; counters)
+		writefln("%s: %s", key, value);
 }
 
 auto formatMeasures(string[] measures)

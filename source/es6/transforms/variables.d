@@ -24,6 +24,12 @@ import std.algorithm : map;
 import std.array : array;
 import es6.bench;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
 version(unittest)
 {
 	import es6.parser;
@@ -258,7 +264,7 @@ unittest
 {
 	void assertVariableRenaming(string js, string expected, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto root = parseModule(js,file,line);
+		auto root = parseModule(js,true,file,line);
 		auto ar = analyseNode(root);
 		ar.scp.findGlobals();
 		ar.scp.shortenVariables();
@@ -329,6 +335,8 @@ unittest
 }
 void removeUnusedParameters(Scope scp)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	import std.range : retro;
 	auto params = scp.variables.retro.onlyParameters;
 	foreach(param; params)
@@ -366,6 +374,8 @@ unittest
 
 void mergeNeighbouringVariableDeclarationStatements(VariableStatementNode stmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto idx = stmt.parent.getIndexOfChild(stmt);
 	if (idx == 0)
 		return;
@@ -379,6 +389,8 @@ void mergeNeighbouringVariableDeclarationStatements(VariableStatementNode stmt, 
 }
 void mergeNeighbouringLexicalDeclarationStatements(LexicalDeclarationNode stmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto idx = stmt.parent.getIndexOfChild(stmt);
 	if (idx == 0)
 		return;
@@ -420,6 +432,8 @@ unittest
 
 bool mergeVariableDeclarationStatements(Scope scp)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	import std.algorithm : filter;
 	import std.array : array;
 	bool doneWork = false;
@@ -490,6 +504,8 @@ unittest
 
 void mergeDuplicateVariableDeclarations(Scope scp)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	import std.typecons : tuple;
 	import std.algorithm : sort, group, filter, remove, each, find, SwapStrategy;
 	import std.range : drop, take;

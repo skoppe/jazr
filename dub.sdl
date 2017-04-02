@@ -23,6 +23,7 @@ configuration "unittest" {
 	excludedSourceFiles "source/app.d"
 	targetType "executable"
 	dependency "unit-threaded" version="==0.7.2"
+	version "chatty"
 }
 configuration "pgo-profile" {
 	targetType "executable"

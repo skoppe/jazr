@@ -24,6 +24,13 @@ import es6.eval;
 import es6.transforms.expressions;
 import std.algorithm : each;
 
+version(tracing)
+{
+	import es6.transformer;
+	import std.datetime : StopWatch;
+	import es6.bench;
+}
+
 version(unittest)
 {
 	import es6.parser;
@@ -59,10 +66,28 @@ version(unittest)
 			return;
 		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
+
+	void assertNegateNode(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
+	{
+		auto got = parseModule(input);
+		auto expected = parseModule(output);
+		auto trunkA = got.analyseNode().trunk;
+		auto trunkB = expected.analyseNode().trunk;
+		assert(got.type == NodeType.ModuleNode);
+		assert(got.children.length > 0);
+		got.children[0].negateNode();
+		got.assertTreeInternals(file,line);
+		auto diff = diffTree(got,expected);
+		if (diff.type == Diff.No)
+			return;
+		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+	}
 }
 
 bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (!ifStmt.hasElsePath)
 		return false;
 
@@ -277,6 +302,14 @@ void negateNode(Node node)
 	node.replaceWith(unary);
 	unary.addChild(node);
 }
+@("negateNode")
+unittest
+{
+	assertNegateNode(`35`,`35`).shouldThrow();
+	assertNegateNode(`45 && 46;`,`!(45 && 46);`);
+	assertNegateNode(`!45;`,`45;`);
+	assertNegateNode(`45;`,`!45;`);
+}
 void negateCondition(IfStatementNode node)
 {
 	auto bin = node.condition().opt!(BinaryExpressionNode);
@@ -314,10 +347,13 @@ unittest
 	assertNegateCondition(`if (!(a && b)) b = 5;`,`if ((a && b)) b = 5;`);
 	assertNegateCondition(`if (a && b) b = 5;`,`if (!(a && b)) b = 5;`);
 	assertNegateCondition(`if (a = 5) b = 5;`,`if (!(a = 5)) b = 5;`);
+	assertNegateCondition(`if (a, 45 > 46) b;`,`if (a, !(45 > 46)) b;`);
 }
 
 bool convertIfElseToConditionalExpression(IfStatementNode ifStmt, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	if (!ifStmt.hasElsePath)
 		return false;
 
@@ -445,6 +481,8 @@ unittest
 
 bool simplifyStaticConditional(ConditionalExpressionNode cond, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	auto value = cond.condition.coerceToTernary;
 
 	if (value == Ternary.None)

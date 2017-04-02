@@ -129,7 +129,6 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 			return Guide.None;
 		case NodeType.SheBangNode:
 			auto n = node.as!SheBangNode;
-			sink.put("#!");
 			sink.put(n.value);
 			sink.put("\n");
 			return Guide.None;

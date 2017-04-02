@@ -25,7 +25,7 @@ string generateErrorMessage(ErrorNode error, const(char)[] input, int around = 2
 {
 	import std.string : lineSplitter;
 	import std.algorithm : joiner, max, map;
-	import std.range : drop,take;
+	import std.range : drop, take, walkLength;
 	import std.uni : isWhite;
 	import std.utf : byCodeUnit;
 	import std.conv : text;
@@ -36,9 +36,15 @@ string generateErrorMessage(ErrorNode error, const(char)[] input, int around = 2
 	auto lines = input.lineSplitter().drop(start).take((around*2)+1);
 	auto lead = lines;
 	auto tail = lines.drop(pre-1);
-	string s = tail.take(1).front.byCodeUnit.take(error.column).map!((c){
-			return c.isWhite ? c : ' ';
-		}).text;
+	auto tailLen = tail.walkLength();
+
+	string s;
+	if (tailLen > 0)
+		s = tail.take(1).front.byCodeUnit.take(error.column).map!((c){
+				return c.isWhite ? c : ' ';
+			}).text;
+	else
+		s = "";
 	
 	return format("\n%s\n%s^ %s\n%s at %s:%s",lead.take(pre).joiner("\n"),s,cast(const(char)[])error.value,tail.drop(1).joiner("\n"),error.line,error.column);
 }
