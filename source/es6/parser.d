@@ -583,6 +583,11 @@ final class Parser
 				case Type.BinaryLiteral:
 					auto name = parsePropertyName();
 					skipCommentsAndLineTerminators();
+					if (token.type == Type.OpenParenthesis)
+					{
+						children.put(parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield),name));
+						break;
+					}
 					if (token.type != Type.Colon)
 						return error("Expected colon as part of PropertyDefinition");
 					scanAndSkipCommentsAndTerminators();
@@ -2860,7 +2865,7 @@ unittest
 			auto err = n.shouldBeOfType!(ErrorNode);
 			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
 		}
-		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
+		if (n.type != NodeType.ErrorNode && parser.lexer.s[0] != 0)
 			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		return shouldBeOfType!(Type)(n,file,line);
 	}
@@ -2880,6 +2885,7 @@ unittest
 	parseObjectLiteral("{a:1,b:2}");
 	parseObjectLiteral("{a:1,b:2,}");
 	parseObjectLiteral("{c=6}");
+	parseObjectLiteral(`{"a"() { f() } };`);
 	parseObjectLiteral("{c=6").shouldThrowSaying("Error: Expected closing curly brace before EndOfFile");
 	parseObjectLiteral(`{"abc"}`).shouldThrowSaying("Error: Expected colon as part of PropertyDefinition");
 	//parseObjectLiteral(`{function}`).shouldThrowSaying("Error: Unexpected keyword function");

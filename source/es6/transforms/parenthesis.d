@@ -195,7 +195,8 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 		}
 	} else if (isExpression && isPartOfConditionalExpr)
 	{
-		if (hasAssignment)
+		auto lastSubExprHasAssignment = node.children[0].children[$-1].hints.has(Hint.HasAssignment);
+		if (lastSubExprHasAssignment)
 			return false;
 		auto condExpr = node.parent.as!(ConditionalExpressionNode);
 		if (condExpr.condition !is node)
@@ -491,6 +492,18 @@ unittest
 	assertRemoveParens(
 		`a ? (c ? d : e) : b;`,
 		`a ? c ? d : e : b;`
+	);
+	assertRemoveParens(
+		`(a=5, t) ? c() : k || d();`,
+		`a=5, t ? c() : k || d();`
+	);
+	assertRemoveParens(
+		`(t, a=5) ? c() : k || d();`,
+		`(t, a=5) ? c() : k || d();`,
+	);
+	assertRemoveParens(
+		`var a = () => 2*2;`,
+		`var a = () => 2*2;`
 	);
 	//assertRemoveParens(
 	//	`(f ? (c ? '+' : '') : '-')`,

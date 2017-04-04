@@ -45,13 +45,15 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 	}
 	measure!("Transform", (){
 		root.runTransform!(
+			negateIfContinue,
 			removeFunctionExpressionUnusedName,
 			invertBinaryExpressions,
 			convertHexToDecimalLiterals,
 			removeUseStrict,
 			mergeDuplicateVariableDeclarations,
-			convertEscapedUnicodeToUnicode,
+			moveVariableDeclarationsIntoForLoops,
 			mergeNeighbouringVariableDeclarationStatements,
+			convertEscapedUnicodeToUnicode,
 			mergeVariableDeclarationStatements,
 			moveStringComparisonToLeftOperand,
 			hoistFunctions,
@@ -800,6 +802,10 @@ unittest
   	assertMinifier(
   		"noop\nnew ReaddirReq(path, cb)",
 		`noop, new ReaddirReq(path, cb);`
+  	);
+  	assertMinifier(
+  		`function abc(keysFunc, undefinedOnly) { return function(obj) { var length = arguments.length; if (length < 2 || obj == null) return obj; for (var index = 1; index < length; index++) { var source = arguments[index], keys = keysFunc(source), l = keys.length; for (var i = 0; i < l; i++) { var key = keys[i]; if (!undefinedOnly || obj[key] === void 0) obj[key] = source[key]; } } return obj; }; };`,
+  		`function abc(h, i) { return function(a) { var e = arguments.length, b, c; if (e < 2 || a == null) return a; for (b = 1; b < e; b++) for (var f = arguments[b], g = h(f), j = g.length, d = 0; d < j; d++) c = g[d], (!i || a[c] === void 0) && (a[c] = f[c]); return a } }`
   	);
 }
 

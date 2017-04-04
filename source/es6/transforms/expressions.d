@@ -477,6 +477,7 @@ bool isExpressionStatement(Node node)
 		case NodeType.CaseBodyNode:
 		case NodeType.WithStatementNode:
 		case NodeType.ReturnStatementNode:
+		case NodeType.ExpressionNode:
 			return true;
 		case NodeType.IfStatementNode:
 			return node.parent.as!IfStatementNode.condition !is node;
@@ -736,7 +737,7 @@ unittest
 	);
 	assertInvertBinExpr(
 		`(c(), !a && !g) && b()`,
-		`(c(), !a && !g) && b()`
+		`(c(), a || !g) && b()`
 	);
 	assertInvertBinExpr(
 		`if(!a && b) bla();`,
@@ -769,6 +770,10 @@ unittest
 	assertInvertBinExpr(
 		`do a && b(); while(c);`,
 		`do a && b(); while(c);`
+	);
+	assertInvertBinExpr(
+		`a=6, !b && d();`,
+		`a=6, b || d();`
 	);
 }
 

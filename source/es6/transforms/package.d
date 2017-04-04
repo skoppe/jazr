@@ -11,3 +11,4 @@ public import es6.transforms.functions;
 public import es6.transforms.parenthesis;
 public import es6.transforms.statements;
 public import es6.transforms.stringliterals;
+public import es6.transforms.loops;

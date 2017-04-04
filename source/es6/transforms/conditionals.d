@@ -310,7 +310,7 @@ unittest
 	assertNegateNode(`!45;`,`45;`);
 	assertNegateNode(`45;`,`!45;`);
 }
-void negateCondition(IfStatementNode node)
+void negateCondition(IfStatementNode node) @trusted // TODO: actually it is @safe
 {
 	auto bin = node.condition().opt!(BinaryExpressionNode);
 	if (bin.isDefined)

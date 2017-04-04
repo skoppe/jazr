@@ -427,6 +427,10 @@ unittest
 		`let a; let b;`,
 		`let a, b;`
 	);
+	assertMergeVars(
+		`for (var a = 0; a < 10; a++) { var b = 6; d() };`,
+		`for (var a = 0; a < 10; a++) { var b = 6; d() };`
+	);
 	// TODO: All this stuff should also work on let and consts
 }
 
@@ -441,18 +445,24 @@ bool mergeVariableDeclarationStatements(Scope scp)
 	if (vars.length < 2)
 		return doneWork;
 	auto firstStmt = vars[0].node.parent.parent;
+	auto firstStmtIdx = firstStmt.getIndex();
 	foreach(v; vars[1..$])
 	{
 		auto stmt = v.node.parent.parent;
 		if (stmt is firstStmt)
 			continue;
+		bool isForLoop = stmt.parent.type == NodeType.ForStatementNode;
 		auto varDecl = v.node.parent;
+		auto stmtIdx = stmt.getIndex();
+		assert(firstStmtIdx < stmtIdx || firstStmt.parent !is stmt.parent);
+		auto areNeighbouring = firstStmt.parent is stmt.parent && (stmtIdx - firstStmtIdx) == 1;
 		// either when variable is only child of stmt
-		if (stmt.children.length == 1)
+		if (stmt.children.length == 1 || areNeighbouring)
 		{
 			doneWork = true;
 			varDecl.detach();
-			if (varDecl.children.length == 2)
+			// when there is an initializer
+			if (varDecl.children.length == 2 && !areNeighbouring)
 			{
 				auto rhs = varDecl.children[1];
 				varDecl.children = varDecl.children[0..1];
@@ -464,7 +474,9 @@ bool mergeVariableDeclarationStatements(Scope scp)
 				scp.linkToDefinition(iden);
 				stmt.replaceWith(assignExpr);
 				assignOp.reanalyseHints();
-			} else
+				if (isForLoop)
+					assignExpr.parent.as!(ForStatementNode).loopType = ForLoop.ExprCStyle;
+			} else if (stmt.children.length == 0 && !isForLoop)
 				stmt.detach();
 			firstStmt.addChild(varDecl);
 		// or if variables has no initializer
@@ -499,7 +511,106 @@ unittest
 		`var a; if (b) { var c = 5; doBla(); }`,
 		`var a, c; if (b) { c = 5; doBla(); }`
 	);
+	assertMergeVars(
+		`var a; var b;`,
+		`var a, b;`
+	);
+	assertMergeVars(
+		`var a; var b; var c;`,
+		`var a, b, c;`
+	);
+	assertMergeVars(
+		`var a = 1; var b; var c = 3;`,
+		`var a = 1, b, c = 3;`
+	);
+	assertMergeVars(
+		`var a = 1; bla(); var b; var c = 3;`,
+		`var a = 1, b, c; bla(); c = 3;`
+	);
+	assertMergeVars(
+		`var a; for (var b = 0;;);`,
+		`var a, b; for (b = 0;;);`
+	);
+	assertMergeVars(
+		`var a; for (var c, b = 0;;);`,
+		`var a, c, b; for (b = 0;;);`
+	);
+	assertMergeVars(
+		`var a; for (var c = 0, b = 0;;);`,
+		`var a; for (var c = 0, b = 0;;);`
+	);
+	assertMergeVars(
+		`for (var a = 0; a < 10; a++) { var b = 6; d() };`,
+		`for (var a = 0, b; a < 10; a++) { b = 6; d() };`
+	);
 	// TODO: All this stuff should also work on let and consts
+}
+
+// NOTE: this needs to run before mergeVariableDeclarationStatements
+bool moveVariableDeclarationsIntoForLoops(VariableStatementNode stmt, out Node replacedWith)
+{
+	if (stmt.parent.type == NodeType.ForStatementNode)
+		return false;
+	
+	auto idx = stmt.getIndex();
+
+	if (stmt.parent.children.length <= idx + 1)
+		return false;
+	if (stmt.parent.children[idx+1].type != NodeType.ForStatementNode)
+		return false;
+
+	auto loop = stmt.parent.children[idx+1].as!ForStatementNode;
+	switch(loop.loopType)
+	{
+		case ForLoop.VarCStyle:
+			loop.children[0].prependChildren(stmt.children);
+			stmt.detach();
+			return true;
+		case ForLoop.ExprCStyle:
+			if (loop.children[0].type != NodeType.SemicolonNode)
+				return false;
+			stmt.detach();
+			loop.prependChildren([stmt]);
+			loop.loopType = ForLoop.VarCStyle;
+			return true;
+		default:
+			return false;
+	}
+}
+
+@("moveVariableDeclarationsIntoForLoops")
+unittest
+{
+	alias assertMoveIntoFor = assertTransformations!(moveVariableDeclarationsIntoForLoops);
+
+	assertMoveIntoFor(
+		`var a; for(var b;;);`,
+		`for(var a, b;;);`
+	);
+	assertMoveIntoFor(
+		`var a; for(;;);`,
+		`for(var a;;);`
+	);
+	assertMoveIntoFor(
+		`var a; for(b = 6;;);`,
+		`var a; for(b = 6;;);`
+	);
+	assertMoveIntoFor(
+		`var a; for(var b in d);`,
+		`var a; for(var b in d);`
+	);
+	assertMoveIntoFor(
+		`var a; for(let b;;);`,
+		`var a; for(let b;;);`
+	);
+	assertMoveIntoFor(
+		`var a; for(const b;;);`,
+		`var a; for(const b;;);`
+	);
+	assertMoveIntoFor(
+		`var a; for(var b of d);`,
+		`var a; for(var b of d);`
+	);
 }
 
 void mergeDuplicateVariableDeclarations(Scope scp)

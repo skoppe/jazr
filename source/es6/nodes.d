@@ -397,6 +397,11 @@ class Node
 		assert(idx != -1);
 		return idx;
 	}
+	auto getIndex()
+	{
+		assert(parent);
+		return parent.getIndexOfChild(this);
+	}
 	bool isLastSibling()
 	{
 		if (parent is null)
@@ -1391,6 +1396,13 @@ final class IfStatementNode : Node
 	IfPath elsePath() { assert(hasElsePath); return IfPath(children[2]); }
 	Node condition() { return children[0]; }
 	void removeElsePath() { children[2].branch.remove(); children[2].parent = null; children = children[0..2]; }
+	override void detach()
+	{
+		truthPath.branch.remove();
+		if (hasElsePath)
+			elsePath.branch.remove();
+		super.detach();
+	}
 	void swapPaths()
 	{
 		// TODO: need to test
@@ -2012,7 +2024,7 @@ string getDiffMessage(DiffResult d)
 		case Diff.Children:
 			return format("Node a has the following children\n%sYet node b has\n%s",d.a,d.b);
 		case Diff.Content:
-			return format("Node a (of type %s) doesn't have the same content as node b (%s)",d.a.type,d.b);
+			return format("Node a (%s) doesn't have the same content as node b (%s)",d.a,d.b);
 		case Diff.BranchChildren:
 			return format("Branch a has %s children, but branch b has %s\na: %s\bb: %sFrom nodes\n%s%s\nRoot %s\n%s",d.a.branch.children.length,d.b.branch.children.length,d.a.branch,d.b.branch,d.a,d.b,d.a.getRoot,d.b.getRoot);
 		case Diff.BranchEntryTypes:
@@ -2302,5 +2314,10 @@ auto assignmentToExpressionOperator(Assignment a)
 	case Assignment.BitwiseOrAssignment: return ExpressionOperator.BitwiseOr;
 	case Assignment.BitwiseXorAssignment: return ExpressionOperator.BitwiseXor;
 	}
+}
+
+bool canHaveSideEffects(Node node)
+{
+	return true; // TODO: We need to introduce a hint that keeps track of side effects
 }
 
