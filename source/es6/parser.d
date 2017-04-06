@@ -2509,16 +2509,11 @@ unittest
 @("parseUnaryExpression")
 unittest
 {
-	auto parseUnaryExpression(Type = UnaryExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseUnaryExpression();
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseUnaryExpression(Type = UnaryExpressionNode) = parseNode!("parseUnaryExpression",Type);
+
 	void assertUnaryExpressionPrefix(string r, Prefix[] prefixs, Postfix postfix = Postfix.None, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto unExpr = parseUnaryExpression(r,file,line);
+		auto unExpr = parseUnaryExpression(r,true,file,line);
 		unExpr.prefixs.length.shouldEqual(prefixs.length,file,line);
 		foreach(idx, prefix; prefixs)
 			unExpr.prefixs[idx].shouldBeOfType!(PrefixExpressionNode).prefix.shouldEqual(prefix);
@@ -2608,7 +2603,7 @@ unittest
 @("parseRightHandSideExpression")
 unittest
 {
-	Type assertBinaryExpression(Type = BinaryExpressionNode)(in string r, ExpressionOperator[] ops, in string file = __FILE__, in size_t line = __LINE__) @trusted
+	BinaryExpressionNode assertBinaryExpression(in string r, ExpressionOperator[] ops, in string file = __FILE__, in size_t line = __LINE__) @trusted
 	{
 		import std.range : lockstep, stride, drop;
 		auto parser = parser(r);
@@ -2616,7 +2611,7 @@ unittest
 		auto n = parser.parseRightHandSideExpression(Attribute.In);
 		if (!parser.lexer.empty)
 			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		auto t = shouldBeOfType!(Type)(n,file,line);
+		auto t = shouldBeOfType!(BinaryExpressionNode)(n,file,line);
 		t.children.length.shouldEqual(ops.length*2 + 1);
 		foreach(node,op; t.children.drop(1).stride(2).lockstep(ops))
 		{
@@ -2668,15 +2663,8 @@ unittest
 @("parseAssignmentExpression")
 unittest
 {
-	auto parseAssignmentExpression(Type = AssignmentExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseAssignmentExpression();
-		//if (!parser.lexer.empty)
-			//throw new UnitTestException([format("Expected input to be empty, got %s",parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseAssignmentExpression(Type = AssignmentExpressionNode) = parseNode!("parseAssignmentExpression",Type);
+
 	parseAssignmentExpression!(IdentifierReferenceNode)("abc");
 	auto assign = parseAssignmentExpression("abc12 = def");
 	assign.children.length.shouldEqual(3);
@@ -2705,27 +2693,23 @@ unittest
 	parseAssignmentExpression("abc = !bla").children[2].shouldBeOfType!UnaryExpressionNode;
 	parseAssignmentExpression("abc = bla & 7").children[2].shouldBeOfType!BinaryExpressionNode;
 	parseAssignmentExpression("abc = def *= 7");
+	parseAssignmentExpression("abc.b = () => { }").children[2].shouldBeOfType!ArrowFunctionNode;
+	parseAssignmentExpression("abc.b = (\na,\nb,\nc) => { }").children[2].shouldBeOfType!ArrowFunctionNode;
+	parseAssignmentExpression("abc.b = (\na,\nb,\nc) => \n { b = {}; }").children[2].shouldBeOfType!ArrowFunctionNode;
 }
 @("parseExpression")
 unittest
 {
-	auto parseExpression(Type = ExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseExpression();
-		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseExpression(Type = ExpressionNode) = parseNode!("parseExpression",Type);
+
 	parseExpression!(IdentifierReferenceNode)("abc");
 	parseExpression!(ConditionalExpressionNode)("abc ? 7 : 6");
 	parseExpression!(UnaryExpressionNode)("!bla");
 	parseExpression!(BinaryExpressionNode)("bla & 7");
 	parseExpression("abc() // \n, /* multi \n line \r\n comment */ \n \r\n def = ghi");
-	parseExpression!(ErrorNode)(",");
-	parseExpression!(ErrorNode)("bla,,");
-	parseExpression!(ErrorNode)("");
+	parseExpression(",").shouldThrowSaying("Expected AssignmentExpression instead got comma");
+	parseExpression("bla,,").shouldThrowSaying("Expected AssignmentExpression instead got comma");
+	parseExpression("").shouldThrowSaying("Expected AssignmentExpression");
 
 	auto expr = parseExpression("abc, def");
 	expr.children.length.shouldEqual(2);
@@ -2745,15 +2729,7 @@ unittest
 @("parseStatement")
 unittest
 {
-	auto parseStatement(Type)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseStatement();
-		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseStatement(Type) = parseNode!("parseStatement", Type);
 
 	parseStatement!(IdentifierReferenceNode)("abc").identifier.shouldEqual("abc");
 	parseStatement!(IdentifierReferenceNode)("abc;");
@@ -2767,7 +2743,7 @@ unittest
 @("parseVariableStatement")
 unittest
 {
-	alias parseVariableStatement(Type = VariableStatementNode) = parseNode!("parseVariableStatement",Type);
+	alias parseVariableStatement = parseNode!("parseVariableStatement",VariableStatementNode);
 
 	parseVariableStatement("var ").shouldThrow();
 	parseVariableStatement("var a").children[0].shouldBeOfType!(VariableDeclarationNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("a");
@@ -2781,7 +2757,7 @@ unittest
 @("parseLexicalDeclaration")
 unittest
 {
-	alias parseLexicalDeclaration(Type = LexicalDeclarationNode) = parseNode!("parseLexicalDeclaration",Type);
+	alias parseLexicalDeclaration = parseNode!("parseLexicalDeclaration",LexicalDeclarationNode);
 
 	parseLexicalDeclaration("let ").shouldThrow();
 	parseLexicalDeclaration("let a").children[0].shouldBeOfType!(LexicalDeclarationItemNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("a");
@@ -2795,7 +2771,7 @@ unittest
 @("parseYieldExpression")
 unittest
 {
-	alias parseYieldExpression(Type = YieldExpressionNode) = parseNode!("parseYieldExpression",Type);
+	alias parseYieldExpression = parseNode!("parseYieldExpression",YieldExpressionNode);
 
 	parseYieldExpression(`yield`);
 	parseYieldExpression(`yield a`).children.length.shouldEqual(1);
@@ -2822,21 +2798,7 @@ unittest
 @("parseForStatement")
 unittest
 {
-	auto parseForStatement(Type = ForStatementNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseForStatement();
-		if (n.type == NodeType.ErrorNode)
-		{
-			import std.range : repeat;
-			auto err = n.shouldBeOfType!(ErrorNode);
-			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
-		}
-		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseForStatement = parseNode!("parseForStatement",ForStatementNode);
 
 	parseForStatement("for (var i = 0; i < 10; i++) {}").loopType.shouldEqual(ForLoop.VarCStyle);
 	parseForStatement("for (let i = 0; i < 10; i++) {}").loopType.shouldEqual(ForLoop.LetCStyle);
@@ -2854,21 +2816,7 @@ unittest
 @("parseObjectLiteral")
 unittest
 {
-	auto parseObjectLiteral(Type = ObjectLiteralNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseObjectLiteral();
-		if (n.type == NodeType.ErrorNode)
-		{
-			import std.range : repeat;
-			auto err = n.shouldBeOfType!(ErrorNode);
-			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
-		}
-		if (n.type != NodeType.ErrorNode && parser.lexer.s[0] != 0)
-			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseObjectLiteral = parseNode!("parseObjectLiteral",ObjectLiteralNode);
 
 	parseObjectLiteral("{}");
 	parseObjectLiteral(`{obj:obj}`);
@@ -2885,18 +2833,18 @@ unittest
 	parseObjectLiteral("{a:1,b:2}");
 	parseObjectLiteral("{a:1,b:2,}");
 	parseObjectLiteral("{c=6}");
-	parseObjectLiteral(`{"a"() { f() } };`);
-	parseObjectLiteral("{c=6").shouldThrowSaying("Error: Expected closing curly brace before EndOfFile");
-	parseObjectLiteral(`{"abc"}`).shouldThrowSaying("Error: Expected colon as part of PropertyDefinition");
-	//parseObjectLiteral(`{function}`).shouldThrowSaying("Error: Unexpected keyword function");
-	parseObjectLiteral(`{,}`).shouldThrowSaying("Error: Expected a PropertyDefinition");
+	parseObjectLiteral(`{"a"() { f() } }`);
+	parseObjectLiteral("{c=6").shouldThrowSaying("Expected closing curly brace before EndOfFile");
+	parseObjectLiteral(`{"abc"}`).shouldThrowSaying("Expected colon as part of PropertyDefinition");
+	//parseObjectLiteral(`{function}`).shouldThrowSaying("Unexpected keyword function");
+	parseObjectLiteral(`{,}`).shouldThrowSaying("Expected a PropertyDefinition");
 	parseObjectLiteral(`{}`).shouldThrowSaying("Here we test whether shouldThrowSaying fails when the expr doesn't throw").shouldThrow;
 
 }
 @("parseArrayLiteral")
 unittest
 {
-	alias parseArrayLiteral(Type = ArrayLiteralNode) = parseNode!("parseArrayLiteral",Type);
+	alias parseArrayLiteral = parseNode!("parseArrayLiteral",ArrayLiteralNode);
 
 	parseArrayLiteral(`[]`);
 	parseArrayLiteral(`[a]`);
@@ -2906,21 +2854,7 @@ unittest
 @("parseFunctionExpression")
 unittest
 {
-	auto parseFunctionExpression(Type = FunctionExpressionNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseFunctionExpression();
-		if (n.type == NodeType.ErrorNode)
-		{
-			import std.range : repeat;
-			auto err = n.shouldBeOfType!(ErrorNode);
-			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
-		}
-		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseFunctionExpression = parseNode!("parseFunctionExpression",FunctionExpressionNode);
 
 	parseFunctionExpression("function(){}");
 	parseFunctionExpression("function(){;}");
@@ -2931,12 +2865,13 @@ unittest
 unittest
 {
 	alias parseFunctionDeclaration = parseNode!("parseFunctionDeclaration",FunctionDeclarationNode);
+
 	parseFunctionDeclaration("function a(){return}");
 }
 @("parseObjectBindingPattern")
 unittest
 {
-	alias parseObjectBindingPattern(Type = ObjectBindingPatternNode) = parseNode!("parseObjectBindingPattern",Type);
+	alias parseObjectBindingPattern = parseNode!("parseObjectBindingPattern",ObjectBindingPatternNode);
 
 	parseObjectBindingPattern(`{h}`);
 	parseObjectBindingPattern(`{o:bla}`);
@@ -2948,7 +2883,7 @@ unittest
 @("parseArrayBindingPattern")
 unittest
 {
-	alias parseArrayBindingPattern(Type = ArrayBindingPatternNode) = parseNode!("parseArrayBindingPattern",Type);
+	alias parseArrayBindingPattern = parseNode!("parseArrayBindingPattern",ArrayBindingPatternNode);
 
 	parseArrayBindingPattern(`[,,[a,b],l]`);
 	parseArrayBindingPattern(`[l,,m,k=5]`);
@@ -2957,21 +2892,7 @@ unittest
 @("parseDoWhileStatement")
 unittest
 {
-	auto parseDoWhileStatement(Type = DoWhileStatementNode)(string r, in string file = __FILE__, in size_t line = __LINE__)
-	{
-		auto parser = parser(r);
-		parser.scanToken();
-		auto n = parser.parseDoWhileStatement();
-		if (n.type == NodeType.ErrorNode)
-		{
-			import std.range : repeat;
-			auto err = n.shouldBeOfType!(ErrorNode);
-			throw new UnitTestException([format("%s\n%s\n%s^",err,r,' '.repeat(err.column-1))],file,line);
-		}
-		if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
-			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
-		return shouldBeOfType!(Type)(n,file,line);
-	}
+	alias parseDoWhileStatement = parseNode!("parseDoWhileStatement",DoWhileStatementNode);
 
 	parseDoWhileStatement("do a;while(true)");
 }
@@ -2991,7 +2912,7 @@ unittest
 @("parseIdentifier")
 unittest
 {
-	alias parseIdentifier(Type = IdentifierReferenceNode) = parseNode!("parseIdentifier",Type);
+	alias parseIdentifier = parseNode!("parseIdentifier",IdentifierReferenceNode);
 
 	parseIdentifier("name");
 	parseIdentifier("name_");
@@ -3000,7 +2921,7 @@ unittest
 @("parseClassDeclaration")
 unittest
 {
-	alias parseClassDeclaration(Type = ClassDeclarationNode) = parseNode!("parseClassDeclaration",Type);
+	alias parseClassDeclaration = parseNode!("parseClassDeclaration",ClassDeclarationNode);
 
 	parseClassDeclaration("class abc{}").name.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("abc");
 	parseClassDeclaration("class abc extends def{}").base.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("def");
