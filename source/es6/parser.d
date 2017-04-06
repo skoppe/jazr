@@ -950,14 +950,14 @@ final class Parser
 			}
 			if (cond.type == NodeType.IdentifierReferenceNode && token.type == Type.Arrow)
 			{
-				scanToken(attributes.toGoal);
+				scanAndSkipCommentsAndTerminators(attributes.toGoal);
 				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In))));
 				return make!(AssignmentExpressionNode)(children.data);
 			}
 			// TODO this idea in the if below is correct, but there might be Comments between the parenthesis and the arrow (which are allowed, as long as the arrow is on the same line as the closing parenthesis)
 			if (cond.type == NodeType.ParenthesisNode && token.type == Type.Arrow)
 			{
-				scanToken(attributes.toGoal);
+				scanAndSkipCommentsAndTerminators(attributes.toGoal);
 				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In))));
 				return make!(AssignmentExpressionNode)(children.data);
 			}
