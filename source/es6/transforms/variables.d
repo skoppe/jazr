@@ -20,7 +20,7 @@ module es6.transforms.variables;
 import es6.nodes;
 import es6.scopes;
 import es6.analyse;
-import std.algorithm : map;
+import std.algorithm : map, countUntil, each, filter, remove;
 import std.array : array;
 import es6.bench;
 
@@ -139,6 +139,29 @@ unittest
 		walkScope(s, list);
 }*/
 
+bool isUnusedItem(Range)(Range ranges, int item)
+	if (is(ElementType!(Range) : int[]))
+{
+	import std.algorithm : any, find;
+	import std.range : front, empty;
+	return !ranges.any!((r){
+		auto loc = r.find!(i => i >= item);
+		return !loc.empty && loc.front == item;
+	});
+}
+
+@("isUnusedItem")
+unittest
+{
+	auto rr = [[0,1,2,3,4,8,9,11],[0,2,5,6],[7],[]];
+	assert(!isUnusedItem(rr,0));
+	assert(!isUnusedItem(rr,1));
+	assert(!isUnusedItem(rr,6));
+	assert(!isUnusedItem(rr,7));
+	assert(isUnusedItem(rr,10));
+	assert(isUnusedItem(rr,12));
+}
+
 auto findUnusedItem(Range)(Range ranges)
 	if (is(ElementType!(Range) : int[]))
 {
@@ -194,25 +217,85 @@ struct VariableAlloc
 {
 	int[] usedList;
 }
-void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList())
+void shortenVariables(Scope scp, string charMap = "nterioaucslfhpdgvmybwxkjqz_$NTERIOAUCSLFHPDGVMYBWXKJQZ")//, BookKeepingList list = new BookKeepingList())
 {
-	import std.algorithm : map, canFind, sort, reduce, max, filter, any, uniq;
+	import std.algorithm : map, canFind, sort, reduce, max, filter, any, uniq, partition;
 	import std.array : appender, Appender;
 	import std.range : chain, iota, only, zip;
+	import std.uni : toUpper;
+
 	auto vars = appender!(Variable[]);
+
 	void collectVars(Scope s)
 	{
+		auto start = vars.data.length;
 		vars.put(s.getVariables);
 		foreach (c; s.children)
 			collectVars(c);
 	}
 	foreach(c; scp.children)
 		collectVars(c);
-	auto sortedVars = vars.data.sort!((a,b) => b.references.length < a.references.length);
+
+	/* Here we have some strategies to determine which variables gets which name when renaming them.
+	   Funnily enough, when gzipping, the size is minified if we just rename them in the order they
+	   appear in the AST, eventhough, some of the other strategies produce smaller minified files.
+	*/
+	/* 
+	// Strategy 1: locals params sorted by index, non locals params sorted by ref-count, anything else sorted by ref-count
+	auto others = vars.data.partition!(v => v.type == IdentifierType.Parameter);
+	others.sort!"a.references.length > b.references.length";
+	auto parameters = vars.data[0..$-others.length];
+	auto nonLocals = parameters.partition!(v => !v.isLocal);
+	auto locals = parameters[0..$-nonLocals.length];
+	locals.sort!((a,b){
+		return a.node.getIndex < b.node.getIndex;
+	});
+	nonLocals.sort!"a.references.length > b.references.length";
+	*/
+
+	/*
+	// Strategy 2: locals params sorted by index, local variables sorted by index, local functions by ref-count, rest by ref-count
+	auto nonLocals = vars.data.partition!(v => v.isLocal);
+	auto locals = vars.data[0..$-nonLocals.length];
+	auto nonParams = locals.partition!(v => v.type == IdentifierType.Parameter);
+	auto funs = nonParams.partition!(v => v.type == IdentifierType.Variable);
+	auto variables = nonParams[0..$-funs.length];
+	auto parameters = locals[0..$-nonParams.length];
+	
+	nonLocals.sort!"a.references.length > b.references.length";
+	variables.sort!"a.node.getIndex < b.node.getIndex";
+	funs.sort!"a.references.length > b.references.length";
+	parameters.sort!"a.node.getIndex < b.node.getIndex";
+	*/
+
+	/*
+	// Strategy 3: locals params sorted by index, local variables sorted by index, rest by ref-count
+	auto nonLocals = vars.data.partition!(v => v.isLocal);
+	auto locals = vars.data[0..$-nonLocals.length];
+	auto nonParams = locals.partition!(v => v.type == IdentifierType.Parameter);
+	auto params = locals[0..$-nonParams.length];
+	auto nonVariables = nonParams.partition!(v => v.type == IdentifierType.Variable);
+	auto variables = nonParams[0..$-nonVariables.length];
+	auto rest = vars.data[params.length+variables.length..$];
+
+	params.sort!"a.node.getIndex < b.node.getIndex";
+	variables.sort!"a.node.getIndex < b.node.getIndex";
+	rest.sort!"a.references.length > b.references.length";
+	*/
+
+	/*
+	// Strategy 4: assign the most used character to the most used variable (produces smallest minified file)
+	vars.data.sort!"a.references.length > b.references.length";
+	*/
+
+	auto sortedVars = vars.data;
 	VariableAlloc[void*] counters;
 	auto scopeSink = appender!(Scope[]);
+
 	foreach(v; sortedVars)
 	{
+		if (v.definition !is null)
+			continue;
 		auto node = v.node;
 		Scope startingScope = node.branch.scp;
 		
@@ -239,14 +322,23 @@ void shortenVariables(Scope scp)//, BookKeepingList list = new BookKeepingList()
 		int item;
 		string id;
 
-		do {
+		int preferredItem = cast(int)node.getIndex();
+		if (v.type == IdentifierType.Parameter && allocs.map!(s => s.usedList).isUnusedItem(preferredItem))
+			item = preferredItem;
+		else
 			item = allocs.map!(s => s.usedList).findUnusedItem();
-			id = generateValidIdentifier(item);
+
+		do {
+			id = generateValidIdentifier(item, charMap);
 
 			foreach(ref a; allocs)
 				a.usedList.insertItem(item);
+
+			if (!startingScope.getGlobals.map!(g => g.node.identifier).any!(i => i == id))
+				break;
 			
-		} while(startingScope.getGlobals.map!(g => g.node.identifier).any!(i => i == id));
+			item = allocs.map!(s => s.usedList).findUnusedItem();
+		} while(true);
 
 		allocs.zip(scopes).each!((z){
 			counters[cast(void*)(z[1])] = z[0];
@@ -277,59 +369,91 @@ unittest
 	);
 	assertVariableRenaming(
 		`function bla(){var x,y,z}`,
-		`function bla(){var a,b,c}`
+		`function bla(){var n,t,e}`
 	);
 	assertVariableRenaming(
-		`function bla(){var c,b,a}`,
-		`function bla(){var a,b,c}`
+		`function bla(){var e,t,n}`,
+		`function bla(){var n,t,e}`
 	);
 	assertVariableRenaming(
 		`function bla(x){}`,
-		`function bla(a){}`
+		`function bla(n){}`
+	);
+	assertVariableRenaming(
+		`function bla(t,y,u){var c,b,a}`,
+		`function bla(n,t,e){var r,i,o}`
 	);
 	assertVariableRenaming(
 		`function bla(){function w(){return 6}}`,
-		`function bla(){function a(){return 6}}`
+		`function bla(){function n(){return 6}}`
 	);
 	assertVariableRenaming(
 		`function bla(){function w(){var y;return 6*y}}`,
-		`function bla(){function a(){var a;return 6*a}}`
+		`function bla(){function n(){var n;return 6*n}}`
 	);
 	assertVariableRenaming(
 		`function bla(w){function z(){return 6*a*w}}`,
-		`function bla(b){function c(){return 6*a*b}}`
+		`function bla(n){function t(){return 6*a*n}}`
 	);
 	assertVariableRenaming(
 		`function bla(x){function w(p){return x*p*y*p*b}var y,z}`,
-		`function bla(c){function a(a){return c*a*d*a*b}var d,e}`
+		`function bla(n){function t(t){return n*t*e*t*b}var e,r}`
 	);
 	assertVariableRenaming(
 		`function bla(c,b,a){function w(p){function k(p){return p*2}return a.a*b*f*e*p}function r(h,i,j){return h*i*j*g*e*d}var f,e,d}`,
-		`function bla(f,b,c){function h(e){function f(a){return a*2}return c.a*b*d*a*e}function i(b,c,d){return b*c*d*g*a*e}var d,a,e}`
+		`function bla(n,t,e){function r(n){function r(n){return n*2}return e.a*t*o*a*n}function i(n,t,e){return n*t*e*g*a*u}var o,a,u}`
 	);
 	assertVariableRenaming(
 		`function s(o,u){var a=c;t(function(e){var n=t[o][e]})}`,
-		`function s(a,b){var d=c;t(function(b){var c=t[a][b]})}`
+		`function s(n,e){var r=c;t(function(e){var r=t[n][e]})}`
 	);
 	assertVariableRenaming(
 		`function s(){var x,y,z=function(t){return t*t*t*t*x*x*x}}`,
-		`function s(){var b,a,c=function(a){return a*a*a*a*b*b*b}}`,
+		`function s(){var n,t,e=function(t){return t*t*t*t*n*n*n}}`,
 	);
 	assertVariableRenaming(
 		`function a(){var a,b,c,d,e,f,g,h,i;return function(){var d,e,f;return d*d*d*d*e*e*f*a*a*a*b*c}}`,
-		`function a(){var b,d,e,a,c,f,g,h,i;return function(){var a,c,f;return a*a*a*a*c*c*f*b*b*b*d*e}}`
+		`function a(){var n,t,e,r,i,o,a,u,c;return function(){var r,i,o;return r*r*r*r*i*i*o*n*n*n*t*e}}`
 	);
 	assertVariableRenaming(
 		`function bla(s){ var w = [s]; w.on('pre-require', function(x){ x.a = function(){ w[0](x, w, x, x) } }) }`,
-		`function bla(a){var b=[a];b.on('pre-require',function(a){a.a=function(){b[0](a,b,a,a)}})}`
+		`function bla(n){var t=[n];t.on('pre-require',function(n){n.a=function(){t[0](n,t,n,n)}})}`
 	);
 	assertVariableRenaming(
 		`function bla(suite){ var suites = [suite]; suite.on(function(context){ context.w = function(){ suites[0].c(suites, suites); }; }); };`,
-		`function bla(b){var a=[b];b.on(function(b){b.w=function(){a[0].c(a,a)}})}`
+		`function bla(n){var t=[n];n.on(function(n){n.w=function(){t[0].c(t,t)}})}`
 	);
 	assertVariableRenaming(
 		`function bla(suite){ var suites = [suite]; suite.on(function(context){ context.p = context.g; context.s(); context.w = function(){ suites[0].c(suites, suites); }; }); };`,
-		`function bla(a){var b=[a];a.on(function(a){a.p=a.g;a.s();a.w=function(){b[0].c(b,b)}})}`
+		`function bla(n){var t=[n];n.on(function(n){n.p=n.g;n.s();n.w=function(){t[0].c(t,t)}})}`
+	);
+	assertVariableRenaming(
+		`function bla(){for(var g in a);}`,
+		`function bla(){for(var n in a);}`
+	);
+	assertVariableRenaming(
+		`var a=6;function bla(d){d=a}`,
+		`var a=6;function bla(n){n=a}`,
+	);
+	assertVariableRenaming(
+		`function b() { var a; var a; }`,
+		`function b(){var n;var n}`
+	);
+	assertVariableRenaming(
+		`function b(a) { var a; }`,
+		`function b(n){var n}`
+	);
+	assertVariableRenaming(
+		`function b(a) { for (var a in b); }`,
+		`function b(n){for(var n in b);}`
+	);
+	assertVariableRenaming(
+		`function b() { var a; for (var a in b); }`,
+		`function b(){var n;for(var n in b);}`
+	);
+	assertVariableRenaming(
+		`function b() { for (var a in b); var a; }`,
+		`function b(){for(var n in b);var n}`
 	);
 	// TODO: All this stuff should also work on let and consts
 }
@@ -384,6 +508,7 @@ void mergeNeighbouringVariableDeclarationStatements(VariableStatementNode stmt, 
 	auto sibling = stmt.parent.children[idx-1].as!VariableStatementNode;
 
 	sibling.addChildren(stmt.children);
+	sibling.sortOnUnitializedUsage();
 	stmt.detach();
 	replacedWith = sibling;
 }
@@ -431,6 +556,14 @@ unittest
 		`for (var a = 0; a < 10; a++) { var b = 6; d() };`,
 		`for (var a = 0; a < 10; a++) { var b = 6; d() };`
 	);
+	assertMergeVars(
+		`var a; var b; var c;`,
+		`var a, b, c;`
+	);
+	assertMergeVars(
+		`var a = 1; var b = 2; var c = 3;`,
+		`var a=1, b=2, c=3;`
+	);
 	// TODO: All this stuff should also work on let and consts
 }
 
@@ -441,7 +574,7 @@ bool mergeVariableDeclarationStatements(Scope scp)
 	import std.algorithm : filter;
 	import std.array : array;
 	bool doneWork = false;
-	auto vars = scp.variables.filter!(v => v.type == IdentifierType.Variable).array;
+	auto vars = scp.variables.filter!(v => v.type == IdentifierType.Variable && v.node.parent.type != NodeType.ForStatementNode).array;
 	if (vars.length < 2)
 		return doneWork;
 	auto firstStmt = vars[0].node.parent.parent;
@@ -450,6 +583,8 @@ bool mergeVariableDeclarationStatements(Scope scp)
 	{
 		auto stmt = v.node.parent.parent;
 		if (stmt is firstStmt)
+			continue;
+		if (v.node.parent.type == NodeType.ForStatementNode)
 			continue;
 		bool isForLoop = stmt.parent.type == NodeType.ForStatementNode;
 		auto varDecl = v.node.parent;
@@ -476,8 +611,12 @@ bool mergeVariableDeclarationStatements(Scope scp)
 				assignOp.reanalyseHints();
 				if (isForLoop)
 					assignExpr.parent.as!(ForStatementNode).loopType = ForLoop.ExprCStyle;
-			} else if (stmt.children.length == 0 && !isForLoop)
+			} else if (stmt.children.length == 0)
+			{
+				if (isForLoop)
+					stmt.parent.as!(ForStatementNode).loopType = ForLoop.ExprCStyle;
 				stmt.detach();
+			}
 			firstStmt.addChild(varDecl);
 		// or if variables has no initializer
 		} else if (varDecl.children.length == 1)
@@ -487,6 +626,8 @@ bool mergeVariableDeclarationStatements(Scope scp)
 			firstStmt.addChild(varDecl);
 		}
 	}
+	if (doneWork)
+		firstStmt.as!(VariableStatementNode).sortOnUnitializedUsage();
 	return doneWork;
 }
 
@@ -532,8 +673,8 @@ unittest
 		`var a, b; for (b = 0;;);`
 	);
 	assertMergeVars(
-		`var a; for (var c, b = 0;;);`,
-		`var a, c, b; for (b = 0;;);`
+		`var a, k = 5; for (var c, b = 0;;);`,
+		`var a, k = 5, c, b; for (b = 0;;);`
 	);
 	assertMergeVars(
 		`var a; for (var c = 0, b = 0;;);`,
@@ -543,77 +684,22 @@ unittest
 		`for (var a = 0; a < 10; a++) { var b = 6; d() };`,
 		`for (var a = 0, b; a < 10; a++) { b = 6; d() };`
 	);
+	assertMergeVars(
+		`function a(node){var parents=[];for(;!node;)b();var closest;for(var inst;node;)closest=inst}`,
+		`function a(node){var parents=[],closest,inst;for(;!node;)b();for(;node;)closest=inst}`
+	);
+	assertMergeVars(
+		`function nativeKeysIn(object){var result=[];if(object!=null)for(var key in Object(object))result.push(key);return result}`,
+		`function nativeKeysIn(object){var result=[];if(object!=null)for(var key in Object(object))result.push(key);return result}`
+	);
+	assertMergeVars(
+		`function checkPropTypes(componentName, propTypes, props, location) { for (var propName in propTypes) { if (propTypes.hasOwnProperty(propName)) { var error; } } }`,
+		`function checkPropTypes(componentName,propTypes,props,location){for(var propName in propTypes){if(propTypes.hasOwnProperty(propName)){var error}}}`
+	);
 	// TODO: All this stuff should also work on let and consts
 }
 
-// NOTE: this needs to run before mergeVariableDeclarationStatements
-bool moveVariableDeclarationsIntoForLoops(VariableStatementNode stmt, out Node replacedWith)
-{
-	if (stmt.parent.type == NodeType.ForStatementNode)
-		return false;
-	
-	auto idx = stmt.getIndex();
-
-	if (stmt.parent.children.length <= idx + 1)
-		return false;
-	if (stmt.parent.children[idx+1].type != NodeType.ForStatementNode)
-		return false;
-
-	auto loop = stmt.parent.children[idx+1].as!ForStatementNode;
-	switch(loop.loopType)
-	{
-		case ForLoop.VarCStyle:
-			loop.children[0].prependChildren(stmt.children);
-			stmt.detach();
-			return true;
-		case ForLoop.ExprCStyle:
-			if (loop.children[0].type != NodeType.SemicolonNode)
-				return false;
-			stmt.detach();
-			loop.prependChildren([stmt]);
-			loop.loopType = ForLoop.VarCStyle;
-			return true;
-		default:
-			return false;
-	}
-}
-
-@("moveVariableDeclarationsIntoForLoops")
-unittest
-{
-	alias assertMoveIntoFor = assertTransformations!(moveVariableDeclarationsIntoForLoops);
-
-	assertMoveIntoFor(
-		`var a; for(var b;;);`,
-		`for(var a, b;;);`
-	);
-	assertMoveIntoFor(
-		`var a; for(;;);`,
-		`for(var a;;);`
-	);
-	assertMoveIntoFor(
-		`var a; for(b = 6;;);`,
-		`var a; for(b = 6;;);`
-	);
-	assertMoveIntoFor(
-		`var a; for(var b in d);`,
-		`var a; for(var b in d);`
-	);
-	assertMoveIntoFor(
-		`var a; for(let b;;);`,
-		`var a; for(let b;;);`
-	);
-	assertMoveIntoFor(
-		`var a; for(const b;;);`,
-		`var a; for(const b;;);`
-	);
-	assertMoveIntoFor(
-		`var a; for(var b of d);`,
-		`var a; for(var b of d);`
-	);
-}
-
-void mergeDuplicateVariableDeclarations(Scope scp)
+bool mergeDuplicateVariableDeclarations(Scope scp)
 {
 	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
@@ -621,11 +707,12 @@ void mergeDuplicateVariableDeclarations(Scope scp)
 	import std.algorithm : sort, group, filter, remove, each, find, SwapStrategy;
 	import std.range : drop, take;
 	auto duplicateVars = scp.variables
-		.filter!(v => v.type == IdentifierType.Variable || v.type == IdentifierType.Parameter)
+		.filter!(v => (v.type == IdentifierType.Variable || v.type == IdentifierType.Parameter) && v.node.parent.type != NodeType.ForStatementNode)
 		.map!(v => tuple!("name","node","variable")(v.node.identifier, v.node, v))
 		.array
 		.sort!((a,b) => a.name < b.name, SwapStrategy.stable)
 		.groupBy;
+	bool didWork = false;
 	foreach(duplicateVar; duplicateVars)
 	{
 		auto firstDecl = duplicateVar.front;
@@ -635,6 +722,7 @@ void mergeDuplicateVariableDeclarations(Scope scp)
 			auto varStmt = varDecl.parent;
 			if (varStmt.parent.type == NodeType.ForStatementNode && varStmt.children.length > 1)
 				continue;
+			didWork = true;
 			// if the variable declaration item has no initializer
 			if (varDecl.children.length == 1)
 			{
@@ -658,7 +746,7 @@ void mergeDuplicateVariableDeclarations(Scope scp)
 				auto assignOp = new AssignmentOperatorNode(Assignment.Assignment);
 				Node[] children = [duplicate.node,assignOp];
 				scp.addIdentifier(Identifier(duplicate.node,firstDecl.node));
-				scp.variables.find!((ref v){return v.node is firstDecl.node;}).take(1).each!((ref v){v.references ~= duplicate.node;});
+				scp.variables.find!((ref v){return v.node is firstDecl.node;}).take(1).each!((ref v){v.insertReference(duplicate.node);});
 				//firstDecl.variable.references ~= duplicate.node;
 				if (rhs.type == NodeType.AssignmentExpressionNode)
 					children ~= rhs.children;
@@ -710,6 +798,7 @@ void mergeDuplicateVariableDeclarations(Scope scp)
 			scp.variables = scp.variables.remove!(v => v.node is duplicate.node);
 		}
 	}
+	return didWork;
 }
 
 @("mergeDuplicateVariableDeclarations")
@@ -784,7 +873,214 @@ unittest
 		`var n; for (var n;;) i(o);`,
         `var n; for (;;) i(o);`
 	);
+	assertMergeDuplicateVars(
+		`b.merge = function (h, p) { for (var g in h) { } for (var g in p) { } return m; };`,
+		`b.merge=function(h,p){for(var g in h){}for(var g in p){}return m};`
+	);
+	assertMergeDuplicateVars(
+		`function b(){ for (var a = 0; a < 10; a++) bla(a); for (var a = 0, c = 6; a < 10; a++) bla(a); }`,
+		`function b(){ for (var a = 0; a < 10; a++) bla(a); for (var a = 0, c = 6; a < 10; a++) bla(a); }`
+	);
 	// TODO: All this stuff should also work on let and consts
 }
+
+bool reuseVariable(Scope scp)
+{
+	import std.range : enumerate;
+	import std.typecons : tuple;
+	size_t indexOnParent(Node child, Node parent)
+	{
+		assert(parent !is null);
+		assert(child.parent !is null);
+		if (child.parent is parent)
+			return child.getIndex();
+		return indexOnParent(child.parent,parent);
+	}
+	struct Helper
+	{
+		Variable v;
+		size_t idx;
+		Node firstUse;
+		Node lastUse;
+		size_t firstIdx;
+		size_t lastIdx;
+		bool done;
+		bool breakUpVar;
+	}
+	auto items = scp.variables
+		.enumerate
+		.filter!(v=>v.value.type == IdentifierType.Variable && v.value.isLocal)
+		.map!((v){
+			auto first = v.value.node;
+			auto last = v.value.references.length > 0 ? v.value.references[$-1] : v.value.node;
+			auto firstIdx = indexOnParent(first,scp.entry);
+			auto lastIdx = indexOnParent(last,scp.entry);
+			return Helper(v.value,v.index,first,last,firstIdx,lastIdx);
+		}).array();
+
+	bool didWork = false;
+	if (items.length < 2)
+		return false;
+
+	foreach(idx, ref current; items[0..$-1])
+	{
+		if (current.done || current.v.definition !is null)
+			continue;
+		auto candidates = items[idx+1..$];
+		foreach(ref candidate; candidates)
+		{
+			if (candidate.done)
+				continue;
+			if (current.v.node.identifier == candidate.v.node.identifier)
+				continue;
+			if (candidate.v.definition !is null)
+				continue;
+			if (current.lastIdx < candidate.firstIdx)
+			{
+				// break up var stmt
+				if (candidate.v.node.parent.type == NodeType.ForStatementNode)
+				{
+					candidate.breakUpVar = true;
+					// add references to current variable
+					scp.variables[current.idx].references ~= candidate.v.node;
+					candidate.v.node.parent.as!(ForStatementNode).loopType = ForLoop.ExprIn;
+				} else
+				{
+					auto varDeclNode = candidate.v.node.parent.as!(VariableDeclarationNode);
+					if (varDeclNode.children.length == 1)
+					{
+						//when we keep the var decl we need to set the definition (as it is now a redeclared var)
+						continue;
+					}
+					auto varStmtNode = varDeclNode.parent;
+					if (varStmtNode.children.length == 1)
+					{
+						scp.addIdentifier(Identifier(candidate.v.node, current.v.node));
+						candidate.breakUpVar = true;
+						// add references to current variable
+						scp.variables[current.idx].references ~= candidate.v.node;
+						if (varStmtNode.parent.type == NodeType.ForStatementNode)
+						{
+							varStmtNode.parent.as!(ForStatementNode).loopType = ForLoop.ExprCStyle;
+						}
+						Node rhs;
+						if (varDeclNode.children.length == 1)
+						{
+							// NOTE: this we don't do this anymore as we bail out early when length == 1
+							rhs = new IdentifierReferenceNode(cast(const(ubyte)[])"undefined");
+							scp.addIdentifier(Identifier(rhs.as!IdentifierNode));
+						}
+						else
+							rhs = varDeclNode.children[1];
+
+						auto lhs = candidate.v.node;
+						auto assignOp = new AssignmentOperatorNode(Assignment.Assignment);
+						auto stmt = new AssignmentExpressionNode([lhs,assignOp,rhs]);
+						varStmtNode.replaceWith(stmt);
+						assignOp.reanalyseHints();
+					}
+				}
+				didWork = true;
+				// adjust all identifiers
+				candidate.v.node.identifier = current.v.node.identifier;
+				foreach(r; candidate.v.references) {
+					r.as!(IdentifierNode).identifier = current.v.node.identifier;
+				}
+				
+				assert(scp.variables[current.idx].node is current.v.node);
+				assert(scp.variables[candidate.idx].node is candidate.v.node);
+
+				if (!candidate.breakUpVar) {
+					scp.variables[candidate.idx].definition = current.v.node;
+					scp.variables[current.idx].insertReference(candidate.v.node);
+				}
+
+				scp.variables[current.idx].references ~= candidate.v.references;
+				scp.variables[candidate.idx].references = [];
+
+				candidate.done = true;
+				break;
+			}
+		}
+	}
+	size_t offset = 0;
+	foreach(candidate; items[1..$])
+	{
+		if (candidate.done && candidate.breakUpVar)
+		{
+			// remove candidate variable from scope
+			assert(scp.variables[candidate.idx - offset].node is candidate.v.node);
+			scp.variables = scp.variables.remove(candidate.idx - offset);
+			offset++;
+		}
+	}
+	return didWork;
+}
+
+@("reuseVariable")
+unittest
+{
+	alias assertReuseVariable = assertTransformations!(reuseVariable);
+
+	assertReuseVariable(
+		`function b(){ var a = 5; doBla(a); var b = 7; doBla(b); }`,
+		`function b(){ var a = 5; doBla(a); a = 7; doBla(a); }`
+	);
+	assertReuseVariable(
+		`function b(d,e){ var a = 5; doBla(a); var b = 7; doBla(b); }`,
+		`function b(d,e){ var a = 5; doBla(a); a = 7; doBla(a); }`
+	);
+	assertReuseVariable(
+		`function b(){ var a = 5; doBla(a); var b = 7, k = 5; doBla(b); }`,
+		`function b(){ var a = 5; doBla(a); var a = 7, k = 5; doBla(a); }`
+	);
+	assertReuseVariable(
+		`function b(){ var a = 5; doBla(a); var b; doBla(b); }`,
+		`function b(){ var a = 5; doBla(a); var b; doBla(b); }` // TODO: could do variable inlining here (doBla(void 0))
+	);
+	assertReuseVariable(
+		`function b(){ for (var a = 0; a < 10; a++) bla(a); for (var b = 0; b < 10; b++) bla(b); }`,
+		`function b(){ for (var a = 0; a < 10; a++) bla(a); for (a = 0; a < 10; a++) bla(a); }`
+	);
+	assertReuseVariable(
+		`function b(){ for (var a = 0; a < 10; a++) bla(a); for (var b = 0, c = 6; b < 10; b++) bla(b); }`,
+		`function b(){ for (var a = 0; a < 10; a++) bla(a); for (var a = 0, c = 6; a < 10; a++) bla(a); }`
+	);
+	assertReuseVariable(
+		`function b(){ for (var a = 0; a < 10; a++) { var b = 7; bla(b); } }`,
+		`function b(){ for (var a = 0; a < 10; a++) { var b = 7; bla(b); } }`
+	);
+	// TODO: here vars oldKeyToIdx, idxInOld, elmToMove, refElm aren't initialized till after removeOnly last use, therefor one can use removeOnly's spot
+	/*assertReuseVariable(
+		`function updateChildren (parentElm, oldCh, newCh, insertedVnodeQueue, removeOnly) {
+    var newStartIdx = 0;
+    var oldStartVnode = oldCh[0];
+    var newStartVnode = newCh[0];
+    var oldKeyToIdx, idxInOld, elmToMove, refElm;
+
+    // removeOnly is a special flag used only by <transition-group>
+    // to ensure removed elements stay in correct relative positions
+    // during leaving transitions
+    var canMove = !removeOnly;
+
+    while (a) {
+      if (sameVnode(elmToMove, newStartVnode)) {
+        patchVnode(elmToMove, newStartVnode, insertedVnodeQueue);
+        oldCh[idxInOld] = undefined;
+        canMove && nodeOps.insertBefore(parentElm, newStartVnode.elm, oldStartVnode.elm);
+        newStartVnode = newCh[++newStartIdx];
+      } else {
+        // same key but different element. treat as new element
+        createElm(newStartVnode, insertedVnodeQueue, parentElm, oldStartVnode.elm);
+        newStartVnode = newCh[++newStartIdx];
+      }
+    }
+  }
+  updateChildren();`,
+      `function updateChildren(e,n,d,t,o){var r=0,l=n[0],w=d[0],m,h,i,v,u=!o;while(a)w=sameVnode(i,w)?(patchVnode(i,w,t),n[h]=void 0,u&&nodeOps.insertBefore(e,w.elm,l.elm),d[++r]):(createElm(w,t,e,l.elm),d[++r])}updateChildren();`
+	);*/
+}
+
+
 
 

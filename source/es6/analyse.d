@@ -547,7 +547,20 @@ private int calcHints(Node node)
 		case NodeType.ImportDeclarationNode:
 			return Hint.NonExpression;
 		case NodeType.ReturnStatementNode:
-			return Hint.NonExpression | (node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
+			if (node.children.length == 0)
+				return Hint.NonExpression | Hint.Return;
+			if (node.children[0].type == NodeType.IdentifierReferenceNode)
+			{
+				auto iden = node.children[0].as!IdentifierReferenceNode;
+				return Hint.NonExpression | (iden.identifier == "undefined" ? Hint.Return : Hint.ReturnValue);
+			}
+			if (node.children[0].type == NodeType.UnaryExpressionNode)
+			{
+				auto unary = node.children[0].as!UnaryExpressionNode;
+				if (unary.prefixs.length == 1 && unary.prefixs[0].as!(PrefixExpressionNode).prefix == Prefix.Void && !unary.children[0].canHaveSideEffects)
+					return Hint.NonExpression | Hint.Return;
+			}
+			return Hint.NonExpression | Hint.ReturnValue;
 		case NodeType.ExpressionOperatorNode:
 			switch(node.as!(ExpressionOperatorNode).operator)
 			{
@@ -603,21 +616,38 @@ void reanalyseHints(Node node)
 		hints |= (node.getHintMask() & reduce!((a,b)=>a|b) (cast(int)Hint.None,node.children.map!(c => c.getParentHintMask() & c.hints.get)) );
 		if (start !is node && node.hints.get == hints)
 			return;
-		node.hints = hints;
+		node.hints = hints | (node.hints.get & Hint.Visited);
 		node = node.parent;
 	}
+}
+void reanalyseHints(Branch b)
+{
+	b.hints = b.entry.hints.get & (Hint.Return | Hint.ReturnValue);
 }
 // moves all branches that start under n, into b's children.
 // the position where they end up depends on the branches that
 // started before node n
 void moveSubBranchesToNewBranch(Node n, Branch b)
 {
+	size_t getIndexInStatementList(Node n)
+	{
+		switch (n.parent.type)
+		{
+			case NodeType.BlockStatementNode:
+			case NodeType.FunctionBodyNode:
+			case NodeType.ModuleNode:
+				return n.parent.getIndexOfChild(n);
+			default:
+				break;
+		}
+		return getIndexInStatementList(n.parent);
+	}
 	import std.range : retro;
 	import std.algorithm : find;
-	auto idx = n.parent.getIndexOfChild(n);
+	auto idx = getIndexInStatementList(n);
 	auto r = b.children.retro.find!((c){
 		auto entry = c.getParentBranchEntry();
-		auto bIdx = n.parent.getIndexOfChild(entry);
+		auto bIdx = getIndexInStatementList(entry);
 		return bIdx < idx;
 	});
 	switch(n.type)
@@ -635,6 +665,14 @@ void moveSubBranchesToNewBranch(Node n, Branch b)
 				b.prepend(ifStmt.truthPath.branch);
 			else
 				b.insertAfter(r.front,ifStmt.truthPath.branch);
+			return;
+		case NodeType.ForStatementNode:
+			auto forStmt = n.as!(ForStatementNode);
+			auto bdy = forStmt.children[$-1];
+			if (r.empty)
+				b.prepend(bdy.branch);
+			else
+				b.insertAfter(r.front,bdy.branch);
 			return; default: assert(0);
 	}
 }
@@ -676,6 +714,7 @@ void assignBranch(Node n, Branch b)
 			n.children[0].assignBranch(b);
 			return;
 		case NodeType.ForStatementNode:
+			n.moveSubBranchesToNewBranch(b);
 			n.children[0..$-1].each!(c => c.assignBranch(b));
 			return;
 		case NodeType.DoWhileStatementNode:
@@ -829,16 +868,36 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			}
 			break;
 		case NodeType.ForStatementNode:
-			hints |= analyseChildren(node.children[0..$-1],s,b);
+			auto forLoop = node.as!(ForStatementNode);
+			switch (forLoop.loopType)
+			{
+				case ForLoop.VarIn:
+				case ForLoop.VarOf:
+				case ForLoop.ConstIn:
+				case ForLoop.ConstOf:
+				case ForLoop.LetIn:
+				case ForLoop.LetOf:
+					if (forLoop.children[0].type == NodeType.IdentifierReferenceNode)
+					{
+						s.addVariable(Variable(forLoop.children[0].as!IdentifierReferenceNode,IdentifierType.Variable));
+						forLoop.children[0].branch = b;
+					} else
+						analyse(forLoop.children[0],s,b);
+					hints |= analyseChildren(node.children[1..$-1],s,b);
+					break;
+				default:
+					hints |= analyseChildren(node.children[0..$-1],s,b);
+					break;
+			}
 			auto stmt = node.children[$-1];
 			hints |= analyse(node.children[$-1],s,b.newBranch(stmt));
 			break;
 		case NodeType.DoWhileStatementNode:
-			analyse(node.children[0],s,b.newBranch(node.children[0]));
+			hints |= analyse(node.children[0],s,b.newBranch(node.children[0]));
 			analyse(node.children[1],s,b);
 			break;
 		case NodeType.WhileStatementNode:
-			analyse(node.children[1],s,b.newBranch(node.children[1]));
+			hints |= analyse(node.children[1],s,b.newBranch(node.children[1]));
 			analyse(node.children[0],s,b);
 			break;
 		case NodeType.ArrayBindingPatternNode:
@@ -848,8 +907,10 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 			analyseObjectBindingPatternNode(node,s,b,IdentifierType.Identifier);
 			break;
 		case NodeType.ReturnStatementNode:
-			b.addHint(node.children.length == 0 ? Hint.Return : Hint.ReturnValue);
 			hints |= analyseChildren(node.children,s,b);
+			auto h = calcHints(node);
+			b.addHint(h & (Hint.Return | Hint.ReturnValue));
+			hints |= h;
 			break;
 		case NodeType.FunctionBodyNode:
 		case NodeType.ModuleNode:
@@ -1139,6 +1200,102 @@ unittest
 {
 	getScope(`for(;;){ if (a) break;}`);
 }
+void shread(Scope scp)
+{
+	// remove scope from parent
+	if (scp.parent)
+	{
+		scp.parent.removeChild(scp);
+	}
+	// clean up globals array of parent
+	if (scp.parent)
+	{
+		// TODO:
+	}
+	// remove all linkToDefinitions for all
+	foreach(ref iden; scp.identifiers)
+	{
+		auto definition = iden.definition;
+		if (definition is null)
+			continue;
+		definition.branch.scp.removeReference(iden);
+	}
+	foreach(c; scp.children)
+	{
+		c.parent = null;
+		shread(c);
+	}
+	scp.parent = null;
+}
+void shread(Node[] node)
+{
+	foreach(n; node)
+		n.shread();
+}
+void shread(Node node)
+{
+	import std.algorithm : remove;
+	switch(node.type)
+	{
+		case NodeType.FunctionDeclarationNode:
+		case NodeType.FunctionExpressionNode:
+			Scope parentScp;
+			// remove scope from parent
+			if (node.children[$-1].branch)
+			{
+				// remove variable from parent
+				if (node.children.length == 3)
+					node.children[$-1].branch.scp.parent.variables = node.children[$-1].branch.scp.parent.variables.remove!(v => v.node is node.children[0]);
+				// shread scope
+				shread(node.children[$-1].branch.scp);
+			}
+			// detach node
+			node.detach();
+			break;
+		case NodeType.IfStatementNode:
+			auto n = node.as!IfStatementNode;
+			shread(n.condition);
+			shread(n.truthPath.node);
+			if (n.hasElsePath)
+				shread(n.elsePath.node);
+			break;
+		case NodeType.VariableDeclarationNode:
+			auto n = node.as!VariableDeclarationNode;
+			auto init = node.children.length > 1 ? node.children[1] : null;
+			node.branch.scp.removeVariable(node.children[0]);
+			if (init) {
+				init.shread();
+			}
+			break;
+		case NodeType.IdentifierReferenceNode:
+			node.branch.scp.removeIdentifier(node);
+			break;
+		case NodeType.ForStatementNode:
+			auto n = node.as!ForStatementNode;
+			switch(n.loopType)
+			{
+				case ForLoop.VarIn:
+				case ForLoop.VarOf:
+				case ForLoop.ConstIn:
+				case ForLoop.ConstOf:
+				case ForLoop.LetIn:
+				case ForLoop.LetOf:
+					node.branch.scp.removeVariable(n.children[0]);
+					foreach(c; node.children[1..$])
+						c.shread();
+					break;
+				default: 
+					foreach(c; node.children)
+						c.shread();
+			}
+			break;
+		// TODO: there are probably other types we need to specialize on
+		default:
+			foreach(c; node.children)
+				c.shread();
+	}
+}
+
 /*
 
 //TODO: Also test this: `var [a,{b,f}={b:[,,b]={g:t},f},c,k={o:[,,l]}={op}]=d;`

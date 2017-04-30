@@ -18,6 +18,7 @@
 module es6.transforms.assignmentexpressions;
 
 import es6.nodes;
+import es6.analyse;
 import std.algorithm : map, each;
 import std.array : array;
 
@@ -64,6 +65,7 @@ bool simplifyRedundantAssignmentExpressions(ExpressionNode expr, out Node replac
 	} else
 		return false;
 
+	expr.children[$-1].shread();
 	expr.children = expr.children[0..$-1];
 
 	if (expr.children.length == 1)
@@ -80,7 +82,7 @@ unittest
 		Node expected = parseModule(output);
 		got.analyseNode();
 		expected.analyseNode();
-		got.runTransform!(simplifyRedundantAssignmentExpressions);
+		got.runTransform!(simplifyRedundantAssignmentExpressions)(file,line);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)

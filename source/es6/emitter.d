@@ -76,10 +76,7 @@ Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide =
 			sink.put(";");
 		else if (!(r & Guide.SkipDelimiter) && (!(r & Guide.EndOfStatement) || delimiter != ";"))
 			sink.put(delimiter);
-		//if (r & Guide.RequiresWhitespaceBeforeIdentifier)
-			//guide |= Guide.RequiresWhitespaceBeforeIdentifier;
-		//else
-			guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
+		guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
 		g = (guide | r) & ~Guide.RequiresWhitespaceBeforeIdentifier;
 	}
 	auto r = nodes[$-1].emit(sink,g | Guide.EndOfList);
@@ -107,7 +104,37 @@ Guide emit(Sink)(Node[] nodes, Sink sink, int guide = Guide.None)
 string emit(Node node)
 {
 	import std.array : appender;
-	auto app = appender!string;
+	class NewLineAppender
+	{
+		private {
+			Appender!string app;
+			size_t columnCnt;
+		}
+		void put(T)(T t)
+		{
+			import std.traits : isArray;
+			static if (isArray!T)
+				columnCnt += t.length;
+			else
+				columnCnt ++;
+			app.put(t);
+		}
+		bool newlineOpportunity()
+		{
+			if (columnCnt > 30000)
+			{
+				put('\n');
+				columnCnt = 0;
+				return true;
+			}
+			return false;
+		}
+		string data()
+		{
+			return app.data;
+		}
+	}
+	auto app = new NewLineAppender();
 	node.emit(app);
 	return app.data;
 }
@@ -275,7 +302,6 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 			return Guide.RequiresDelimiter;
 		case NodeType.SpreadOperatorNode:
 			sink.put("...");
-			//node.children[0].emit(sink);
 			return Guide.None;
 		case NodeType.ArgumentsNode:
 			sink.put("(");
@@ -420,7 +446,7 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 			auto n = node.as!LabelledStatementNode;
 			sink.put(n.label);
 			sink.put(":");
-			return Guide.SkipDelimiter;
+			return n.children[0].emit(sink);
 		case NodeType.VariableStatementNode:
 			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
 				sink.put(" ");
@@ -659,7 +685,10 @@ Guide emit(Sink)(Node node, Sink sink, int guide = Guide.None) @trusted
 			return Guide.None;
 		case NodeType.FunctionExpressionNode:
 		case NodeType.FunctionDeclarationNode:
-			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+			bool emittedNewLine = false;
+			if (node.children.length == 3)
+				emittedNewLine = sink.newlineOpportunity();
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier && !emittedNewLine)
 				sink.put(" ");
 			sink.put("function");
 			if (node.children.length == 3)
@@ -883,12 +912,10 @@ unittest
 {
 	assertEmitted("a=function(){};");
 	assertEmitted("a=function(a,b,c){};");
-	assertEmitted("a=function(){;};");
 	assertEmitted("a=function fun(...rest){};");
 	assertEmitted("a=function fun(a,b,c){};");
 	assertEmitted("a=function fun(a,b,c,...rest){};");
 	assertEmitted(`(function(){})();`);
-	assertEmitted(`;(function(){})();`);
 }
 @("Array Literal")
 unittest
@@ -926,6 +953,13 @@ unittest
 	assertEmitted(`(a=5,b);`);
 	assertEmitted(`(a=5,...b);`);
 	assertEmitted(`(...b);`);
+}
+@("Labelled Statement")
+unittest
+{
+	assertEmitted(`n:{}`);
+	assertEmitted(`n:var a=6;`);
+	assertEmitted(`if(b)n:for(;;)break n;`);
 }
 @("Primary Expression")
 unittest

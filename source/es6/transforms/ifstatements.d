@@ -88,17 +88,21 @@ unittest
 		got.analyseNode();
 		expected.analyseNode();
 		got.assertTreeInternals(file,line);
-		got.runTransform!(combineNestedIfs);
+		got.runTransform!(combineNestedIfs)(file,line);
 		got.assertTreeInternals(file,line);
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emit(got).shouldEqual(emit(expected), file, line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertCombineNestedIfs(
 		"function a() { if (a) if (c && d) return bla; }",
 		"function a() { if (a && c && d) return ook; }"
 	).shouldThrow();
+	assertCombineNestedIfs(
+		`function b(){var type,k,i;if(l)if(k=4,o)for(i=0;;)l()}b();`,
+		`function b(){var type,k,i;if(l&&(k=4,o))for(i=0;;)l()}b();`
+	);
 	assertCombineNestedIfs(
 		"function a() { if (a) if (c && d) return bla; }",
 		"function a() { if (a && c && d) return bla; }"
@@ -333,6 +337,7 @@ bool removeEmptyIfPaths(IfStatementNode ifStmt, out Node replacedWith)
 		auto cond = ifStmt.condition;
 		ifStmt.truthPath.branch.remove();
 		ifStmt.replaceWith(cond);
+		replacedWith = cond;
 		cond.parent.reanalyseHints();
 		return true;
 	} else if (ifStmt.elsePath.hasStatements)
@@ -350,6 +355,7 @@ bool removeEmptyIfPaths(IfStatementNode ifStmt, out Node replacedWith)
 	ifStmt.truthPath.branch.remove();
 	ifStmt.elsePath.branch.remove();
 	ifStmt.replaceWith(cond);
+	replacedWith = cond;
 	cond.parent.reanalyseHints();
 	return true;
 }
@@ -413,24 +419,81 @@ bool simplifyStaticIfStatement(IfStatementNode ifStmt, out Node replacedWith)
 		ifStmt.insertBefore(ifStmt.condition);
 	}
 
+	Node replaceIfStmt(Node node)
+	{
+		Node parent = ifStmt.parent;
+		auto idx = ifStmt.getIndex();
+		ifStmt.detach();
+		node.detach();
+		if (node.type == NodeType.BlockStatementNode)
+		{
+			if (node.children.length == 0)
+			{
+				if (parent.type == NodeType.BlockStatementNode || parent.type == NodeType.FunctionBodyNode || parent.type == NodeType.ModuleNode)
+					return parent;
+				auto empty = new EmptyStatementNode();
+				parent.insertInPlace(idx, empty);
+				empty.assignBranch(ifStmt.branch);
+				if (ifStmt.branch.entry is ifStmt)
+					ifStmt.branch.entry = empty;
+				return empty;
+			}
+			if (parent.type != NodeType.BlockStatementNode && parent.type != NodeType.FunctionBodyNode && parent.type != NodeType.ModuleNode)
+			{
+				parent.insertInPlace(idx, node);
+				node.assignBranch(ifStmt.branch);
+				if (ifStmt.branch.entry is ifStmt)
+					ifStmt.branch.entry = node;
+				return node;
+			}
+			parent.insertInPlace(idx, node.children);
+			node.children.each!(c => c.assignBranch(parent.branch));
+			if (ifStmt.branch.entry is ifStmt)
+			{
+				assert(node.children.length > 0);
+				ifStmt.branch.entry = node.children[0];
+			}
+			return node.children[0];
+		} else
+		{
+			if (ifStmt.branch.entry is ifStmt)
+				ifStmt.branch.entry = node;
+			parent.insertInPlace(idx, node);
+			node.assignBranch(ifStmt.branch);
+			return node;
+		}
+	}
+
 	ifStmt.truthPath.branch.remove();
 	Node parent = ifStmt.parent;
 	if (value == Ternary.True)
 	{
 		if (ifStmt.hasElsePath)
+		{
+			ifStmt.elsePath.branch.remove();
+			auto elseNode = ifStmt.elsePath.node;
 			ifStmt.removeElsePath();
-		replacedWith = ifStmt.replaceWith(ifStmt.truthPath.node);
+			elseNode.shread();
+		}
+
+		replacedWith = replaceIfStmt(ifStmt.truthPath.node);
 		parent.reanalyseHints();
 		return true;
 	}
+
 	if (ifStmt.hasElsePath)
 	{
 		ifStmt.elsePath.branch.remove();
-		replacedWith = ifStmt.replaceWith(ifStmt.elsePath.node);
+
+		auto truthNode = ifStmt.truthPath.node;
+		truthNode.shread();
+		replacedWith = replaceIfStmt(ifStmt.elsePath.node);
 		parent.reanalyseHints();
 		return true;
 	}
 	ifStmt.detach();
+	ifStmt.truthPath.shread();
+	parent.reanalyseHints();
 	return true;
 }
 @("simplifyStaticIfStatement")
@@ -470,12 +533,20 @@ unittest
 		`a; c`
 	);
 	assertSimplifyStaticIf(
-		`if (a) { if (true) { d=5,p=6 } else { g=5 } }`,
-		`if (a) { { d=5,p=6 } }`
+		`if (a) { if (true) { d=5,p=6 } else { g=5; k=7; } }`,
+		`if (a) { d=5,p=6 }`
 	);
 	assertSimplifyStaticIf(
-		`if (a) { if (false) { d=5,p=6 } else { g=5 } }`,
-		`if (a) { { g=5 } }`
+		`if (a) { if (false) { d=5,p=6 } else { g=5; k=7; } }`,
+		`if (a) { g=5; k=7 }`
+	);
+	assertSimplifyStaticIf(
+		`if (a) if (true) { d=5,p=6 } else { g=5; k=7; }`,
+		`if (a) { d=5,p=6 }`
+	);
+	assertSimplifyStaticIf(
+		`if (a) if (false) { d=5,p=6 } else { g=5; k=7; }`,
+		`if (a) { g=5; k=7 }`
 	);
 	assertSimplifyStaticIf(
 		`if (0) a();`,
@@ -496,6 +567,58 @@ unittest
 	assertSimplifyStaticIf(
 		`if (bla(),(hup(),"0")) a();`,
 		`bla(),(hup());a();`
+	);
+	assertSimplifyStaticIf(
+		`function b() { if (!0) { if (c); bla() } }`,
+		`function b() { if (c); bla() }`
+	);
+	assertSimplifyStaticIf(
+		`if (!0) { if (c); bla() } `,
+		`if (c); bla()`
+	);
+	assertSimplifyStaticIf(
+		`function b() { if (!0) { if (c); bla() } b = 6; }`,
+		`function b() { if (c); bla(); b = 6; }`
+	);
+	assertSimplifyStaticIf(
+		`if (!0) { if (c); bla() } b = 6;`,
+		`if (c); bla(); b = 6;`
+	);
+	assertSimplifyStaticIf(
+		`function b() { if (0) { if (c); bla() } else { k = 5; } b = 6; }`,
+		`function b() { k = 5; b = 6; }`
+	);
+	assertSimplifyStaticIf(
+		`if (0) { if (c); bla() } else { k = 5; } b = 6;`,
+		`k = 5; b = 6;`
+	);
+	assertSimplifyStaticIf(
+		`if (a) if (!0) d=5, p=6; else g=5;`,
+		`if (a) d=5, p=6;`,
+	);
+	assertSimplifyStaticIf(
+		`if (a) if (!0) g=5; else var b = t;`,
+		`if (a) g=5;`,
+	);
+	assertSimplifyStaticIf(
+		`if (a) if (!1) var b = t; else g=5;`,
+		`if (a) g=5;`,
+	);
+	assertSimplifyStaticIf(
+		`if (!1) var b = t;`,
+		``,
+	);
+	assertSimplifyStaticIf(
+		`function a(){ if ("a" !== 'b') b(); if ("a" !== 'b') c(); }`,
+		`function a(){ b(); c(); }`
+	);
+	assertSimplifyStaticIf(
+		`function a(){ if ("a" !== 'b') { b(); }; if ("a" !== 'b') { c(); } }`,
+		`function a(){ b(); c(); }`
+	);
+	assertSimplifyStaticIf(
+		`function a(){ if ("a" !== 'b') { }; if ("a2" !== 'b2') { } }`,
+		`function a(){ }`
 	);
 }
 
@@ -526,6 +649,7 @@ bool moveExpressionsIntoIfCond(IfStatementNode ifStmt, out Node replacedWith)
 			cond.prependChildren([expr]);
 	cond.reanalyseHints();
 	ifStmt.parent.reanalyseHints();
+	replacedWith = ifStmt;
 	return true;
 }
 
@@ -562,8 +686,8 @@ unittest
 		`if(b) kaz(); if(a) foo();`
 	);
 	assertMoveIntoIf(
-		`bla(), hup(); if(a) foo(); bla(), hup(); if(a) foo();`,
-		`if(bla(), hup(), a) foo(); if(bla(), hup(), a) foo();`
+		`bla(), hup(); if(a) foo(); blah(), hup(); if(a) foo();`,
+		`if(bla(), hup(), a) foo(); if(blah(), hup(), a) foo();`
 	);
 	assertMoveIntoIf(
 		`bla(); hup(); if(a, b) foo();`,

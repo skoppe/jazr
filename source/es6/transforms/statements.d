@@ -76,7 +76,7 @@ bool isChildOfIfStatmentTruthPathWithoutBlockStatement(Node node)
 	return node.parent.isChildOfIfStatmentTruthPathWithoutBlockStatement();
 }
 
-void removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWith)
+bool removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWith)
 {
 	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
@@ -84,14 +84,20 @@ void removeRedundantBlockStatements(BlockStatementNode node, out Node replacedWi
 	{
 		if (node.children[$-1].hasNestedEndingSingleIfStatment() && 
 			node.isChildOfIfStatmentTruthPathWithoutBlockStatement)
-			return;
-
+		{
+			return false;
+		}
 		if (node.parent.type == NodeType.TryStatementNode ||
 			node.parent.type == NodeType.CatchStatementNode ||
 			node.parent.type == NodeType.FinallyStatementNode)
-			return;
+		{
+			return false;
+		}
 		replacedWith = node.replaceWith(node.children[0]);
+		node.parent = null;
+		return true;
 	}
+	return false;
 }
 
 @("removeRedundantBlockStatements")
@@ -133,6 +139,10 @@ unittest
 		}`,
 		`for (c in a)
 		    b = a[c], S(b) ? this[c] = b : this['_' + c] = b`
+	);
+	assertRemoveRedundantBlockStatements(
+		`function c(a){for(;;){if(!b){u=0}}}`,
+		`function c(a){for(;;)if(!b)u=0}`
 	);
 	assertRemoveRedundantBlockStatements(
 		`if (a) for (;;) { if (b) bla(); } else doo();`,

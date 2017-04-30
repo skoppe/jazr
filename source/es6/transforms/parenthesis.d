@@ -55,6 +55,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 
 	if (node.children.length == 0)
 	{
+		replacedWith = node.parent;
 		node.detach();
 		return true;
 	}
@@ -116,7 +117,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 			if (innerLowestPrecedence < outerHighestPrecedence)
 				return false;
 			outerBinaryExpr.replaceChildWith(node, innerBinaryExpr);
-			replacedWith = innerBinaryExpr.children[0];
+			replacedWith = outerBinaryExpr;
 		}
 		else if (parent.parent.type == NodeType.ConditionalExpressionNode)
 			return false;
@@ -181,6 +182,8 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 			}
 		} else
 		{
+			if (unary.as!(UnaryExpressionNode).prefixs.any!(p => p.as!(PrefixExpressionNode).prefix == Prefix.Void))
+				return false;
 			node.children[0].replaceWith(last);
 			if (unary.parent.type == NodeType.ExpressionNode)
 			{
@@ -211,16 +214,20 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 			node.children = [];
 			node.addChild(cond);
 			exprNode.addChild(condExpr);
+			replacedWith = exprNode;
 			return true;
 		}
 		auto exprNode = condExpr.replaceWith(new ExpressionNode(transfers));
 		cond.parent = null;
 		condExpr.condition.replaceWith(cond);
 		exprNode.addChild(condExpr);
+		replacedWith = exprNode;
 	} else if (isExpression && isPartOfExpression)
 	{
-		node.insertBefore(node.children[0].children);
+		auto children = node.children[0].children;
+		node.insertBefore(children);
 		node.detach();
+		replacedWith = children[0];
 	} else if (isPartOfConditionalExpr && isLeftChild && hasAssignment)
 	{
 		return false;
@@ -231,6 +238,7 @@ bool removeUnnecessaryParenthesis(ParenthesisNode node, out Node replacedWith)
 	{
 		node.insertBefore(node.children);
 		node.detach();
+		replacedWith = parent;
 	}
 	parent.reanalyseHints();
 	return true;
@@ -553,5 +561,15 @@ unittest
 	assertRemoveParens(
 		`function m(){var k,expr;switch(l){default:expr=o();return w?(p(),r)?4:2:5}}`,
 		`function m(){var k,expr;switch(l){default:expr=o();return w?(p(),r)?4:2:5}}`
+	);
+
+	assertRemoveParens(
+		`function a(a){return(k=6,a instanceof a)?a:5}`,
+		`function a(a){return k=6,a instanceof a?a:5}`
+	);
+
+	assertRemoveParens(
+		`void(this._wrapped=b,b=5,e=6,p=8);`,
+		`void(this._wrapped=b,b=5,e=6,p=8);`
 	);
 }

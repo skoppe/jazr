@@ -169,3 +169,47 @@ unittest
 		`a = function bla() { }; c = function() { return bla()*2 };`
 	);
 }
+
+void removeUnusedFunctions(Scope scp)
+{
+	import std.algorithm : filter;
+	import std.array : array;
+	bool didWork;
+	do {
+		didWork = false;
+		auto funs = scp.variables.filter!(v => v.type == IdentifierType.Function).array;
+		foreach(funName; funs)
+		{
+			if (funName.node.parent.parent.type == NodeType.ExportDeclarationNode)
+				continue;
+			if (funName.references.length == 0)
+			{
+				didWork = true;
+				funName.node.parent.shread();
+			}
+		}
+	} while(didWork);
+}
+
+@("removeUnusedFunctions")
+unittest
+{
+	alias assertRemoveUnusedFunctions = assertTransformations!(removeUnusedFunctions);
+
+	assertRemoveUnusedFunctions(
+		`function a(){}`,
+		``
+	);
+	assertRemoveUnusedFunctions(
+		`function a(){}; a();`,
+		`function a(){}; a();`
+	);
+	assertRemoveUnusedFunctions(
+		`function a(){};function b(){a()}`,
+		``
+	);
+}
+
+
+
+

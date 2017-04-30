@@ -136,6 +136,8 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out 
 	truthAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
 	falseAssignExpr.as!(AssignmentExpressionNode).removeFirstAssignment();
 
+	ifStmt.branch.scp.removeIdentifier(falseAssign.as!IdentifierNode);
+
 	auto oper = new AssignmentOperatorNode(newAssign);
 
 	auto truthPath = ifStmt.truthPath.convertToAssignmentExpression;
@@ -150,7 +152,7 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out 
 		oper,
 		cond
 	]);
-	r.reanalyseHints();
+	//r.reanalyseHints();
 	cond.reanalyseHints();
 	oper.reanalyseHints();
 
@@ -160,11 +162,11 @@ bool convertIfElseAssignmentToConditionalExpression(IfStatementNode ifStmt, out 
 		condition.replaceWith(condition.children[$-1]);
 		preExprs ~= r;
 		r = new ExpressionNode(preExprs);
-		r.reanalyseHints();
 	}
 
 	r.assignBranch(ifStmt.branch);
 	replacedWith = ifStmt.replaceWith(r);
+	r.reanalyseHints();
 	return true;
 }
 @("convertIfElseAssignmentToConditionalExpression")
@@ -301,6 +303,8 @@ void negateNode(Node node)
 	auto unary = new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Negation)]).withBranch(node.branch);
 	node.replaceWith(unary);
 	unary.addChild(node);
+	if (node.hints.has(Hint.Visited))
+		unary.hints = unary.hints.get | Hint.Visited;
 }
 @("negateNode")
 unittest
@@ -495,15 +499,19 @@ bool simplifyStaticConditional(ConditionalExpressionNode cond, out Node replaced
 				walk.type == NodeType.ParenthesisNode))
 			walk = walk.children[$-1];
 		walk.detach();
+		walk.shread();
 		cond.insertBefore(cond.condition);
 	}
 
-	auto parent = cond.parent;
 	Node node;
 	if (value == Ternary.True)
+	{
 		node = cond.truthPath;
-	else
+		cond.elsePath.shread();
+	} else {
 		node = cond.elsePath;
+		cond.truthPath.shread();
+	}
 
 	replacedWith = cond.replaceWith(node);
 	return true;
@@ -557,5 +565,60 @@ unittest
 	assertSimplifyStaticConditional(
 		`(bla(),false) ? (b,c) : (d,e)`,
 		`(bla());(d,e)`
+	);
+}
+
+bool swapNegatedConditionals(ConditionalExpressionNode cond, out Node replacedWith)
+{
+	import std.algorithm : any;
+	if (cond.condition.type != NodeType.UnaryExpressionNode)
+		return false;
+	auto unary = cond.condition.as!UnaryExpressionNode;
+
+	if (unary.prefixs.any!(p => p.as!(PrefixExpressionNode).prefix != Prefix.Negation))
+		return false;
+
+	auto cnt = unary.prefixs.length;
+
+	if (cnt & 0x1)
+	{
+		cond.swapPaths;
+		unary.replaceWith(unary.children[0]);
+	} else
+	{
+		unary.replaceWith(unary.children[0]);
+	}
+
+	return true;
+}
+
+@("swapNegatedConditionals")
+unittest
+{
+	alias assertSwapNegatedConditionals = assertTransformations!(swapNegatedConditionals);
+
+	assertSwapNegatedConditionals(
+		`!a ? c : d`,
+		`a ? d : c`
+	);
+
+	assertSwapNegatedConditionals(
+		`!(a || d) ? c : d`,
+		`(a || d) ? d : c`
+	);
+
+	assertSwapNegatedConditionals(
+		`!!a ? c : d`,
+		`a ? c : d`
+	);
+
+	assertSwapNegatedConditionals(
+		`!!!a ? c : d`,
+		`a ? d : c`
+	);
+
+	assertSwapNegatedConditionals(
+		`function a(b){k=6;return b instanceof a?b:!(this instanceof a)?new a(b):void(this._wrapped=b,b=5,e=6,p=8)}`,
+		`function a(b){k=6;return b instanceof a?b:(this instanceof a)?void(this._wrapped=b,b=5,e=6,p=8):new a(b)}`
 	);
 }

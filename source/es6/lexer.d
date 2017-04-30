@@ -149,6 +149,23 @@ auto getLineTerminatorUnicodeLength(Range)(Range r) pure nothrow
 	auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
 	return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
 }
+bool isLineTerminator(uint cp)
+{
+	if (cp <= 0x7f)
+	{
+		return cp == 0x0d || cp == 0x0a;
+	}
+	return cp == 0x2028 || cp == 0x2029;
+}
+@("isLineTerminator")
+unittest
+{
+	isLineTerminator(0x0d).shouldBeTrue;
+	isLineTerminator(0x0a).shouldBeTrue;
+	isLineTerminator(0x2028).shouldBeTrue;
+	isLineTerminator(0x2029).shouldBeTrue;
+	isLineTerminator(0x400).shouldBeFalse;
+}
 auto getRegexLength(Range)(Range r, ref size_t tokenLength) pure nothrow
 {
 	size_t idx = 1;
@@ -266,6 +283,21 @@ bool isValid4ByteIdentifierTail(size_t cp) nothrow pure
 	static immutable int[] cp4b = [0x10000,0x1000b,0x1000d,0x10026,0x10028,0x1003a,0x1003c,0x1003d,0x1003f,0x1004d,0x10050,0x1005d,0x10080,0x100fa,0x10140,0x10174,0x101fd,0x101fd,0x10280,0x1029c,0x102a0,0x102d0,0x102e0,0x102e0,0x10300,0x1031f,0x10330,0x1034a,0x10350,0x1037a,0x10380,0x1039d,0x103a0,0x103c3,0x103c8,0x103cf,0x103d1,0x103d5,0x10400,0x1049d,0x104a0,0x104a9,0x10500,0x10527,0x10530,0x10563,0x10600,0x10736,0x10740,0x10755,0x10760,0x10767,0x10800,0x10805,0x10808,0x10808,0x1080a,0x10835,0x10837,0x10838,0x1083c,0x1083c,0x1083f,0x10855,0x10860,0x10876,0x10880,0x1089e,0x108e0,0x108f2,0x108f4,0x108f5,0x10900,0x10915,0x10920,0x10939,0x10980,0x109b7,0x109be,0x109bf,0x10a00,0x10a03,0x10a05,0x10a06,0x10a0c,0x10a13,0x10a15,0x10a17,0x10a19,0x10a33,0x10a38,0x10a3a,0x10a3f,0x10a3f,0x10a60,0x10a7c,0x10a80,0x10a9c,0x10ac0,0x10ac7,0x10ac9,0x10ae6,0x10b00,0x10b35,0x10b40,0x10b55,0x10b60,0x10b72,0x10b80,0x10b91,0x10c00,0x10c48,0x10c80,0x10cb2,0x10cc0,0x10cf2,0x11000,0x11046,0x11066,0x1106f,0x1107f,0x110ba,0x110d0,0x110e8,0x110f0,0x110f9,0x11100,0x11134,0x11136,0x1113f,0x11150,0x11173,0x11176,0x11176,0x11180,0x111c4,0x111ca,0x111cc,0x111d0,0x111da,0x111dc,0x111dc,0x11200,0x11211,0x11213,0x11237,0x11280,0x11286,0x11288,0x11288,0x1128a,0x1128d,0x1128f,0x1129d,0x1129f,0x112a8,0x112b0,0x112ea,0x112f0,0x112f9,0x11300,0x11303,0x11305,0x1130c,0x1130f,0x11310,0x11313,0x11328,0x1132a,0x11330,0x11332,0x11333,0x11335,0x11339,0x1133c,0x11344,0x11347,0x11348,0x1134b,0x1134d,0x11350,0x11350,0x11357,0x11357,0x1135d,0x11363,0x11366,0x1136c,0x11370,0x11374,0x11480,0x114c5,0x114c7,0x114c7,0x114d0,0x114d9,0x11580,0x115b5,0x115b8,0x115c0,0x115d8,0x115dd,0x11600,0x11640,0x11644,0x11644,0x11650,0x11659,0x11680,0x116b7,0x116c0,0x116c9,0x11700,0x11719,0x1171d,0x1172b,0x11730,0x11739,0x118a0,0x118e9,0x118ff,0x118ff,0x11ac0,0x11af8,0x12000,0x12399,0x12400,0x1246e,0x12480,0x12543,0x13000,0x1342e,0x14400,0x14646,0x16800,0x16a38,0x16a40,0x16a5e,0x16a60,0x16a69,0x16ad0,0x16aed,0x16af0,0x16af4,0x16b00,0x16b36,0x16b40,0x16b43,0x16b50,0x16b59,0x16b63,0x16b77,0x16b7d,0x16b8f,0x16f00,0x16f44,0x16f50,0x16f7e,0x16f8f,0x16f9f,0x1b000,0x1b001,0x1bc00,0x1bc6a,0x1bc70,0x1bc7c,0x1bc80,0x1bc88,0x1bc90,0x1bc99,0x1bc9d,0x1bc9e,0x1d165,0x1d169,0x1d16d,0x1d172,0x1d17b,0x1d182,0x1d185,0x1d18b,0x1d1aa,0x1d1ad,0x1d242,0x1d244,0x1d400,0x1d454,0x1d456,0x1d49c,0x1d49e,0x1d49f,0x1d4a2,0x1d4a2,0x1d4a5,0x1d4a6,0x1d4a9,0x1d4ac,0x1d4ae,0x1d4b9,0x1d4bb,0x1d4bb,0x1d4bd,0x1d4c3,0x1d4c5,0x1d505,0x1d507,0x1d50a,0x1d50d,0x1d514,0x1d516,0x1d51c,0x1d51e,0x1d539,0x1d53b,0x1d53e,0x1d540,0x1d544,0x1d546,0x1d546,0x1d54a,0x1d550,0x1d552,0x1d6a5,0x1d6a8,0x1d6c0,0x1d6c2,0x1d6da,0x1d6dc,0x1d6fa,0x1d6fc,0x1d714,0x1da00,0x1da36,0x1da3b,0x1da6c,0x1da75,0x1da75,0x1da84,0x1da84,0x1da9b,0x1da9f,0x1daa1,0x1daaf,0x1d716,0x1d734,0x1d736,0x1d74e,0x1d750,0x1d76e,0x1d770,0x1d788,0x1d78a,0x1d7a8,0x1d7aa,0x1d7c2,0x1d7c4,0x1d7cb,0x1d7ce,0x1d7ff,0x1e800,0x1e8c4,0x1e8d0,0x1e8d6,0x1ee00,0x1ee03,0x1ee05,0x1ee1f,0x1ee21,0x1ee22,0x1ee24,0x1ee24,0x1ee27,0x1ee27,0x1ee29,0x1ee32,0x1ee34,0x1ee37,0x1ee39,0x1ee39,0x1ee3b,0x1ee3b,0x1ee42,0x1ee42,0x1ee47,0x1ee47,0x1ee49,0x1ee49,0x1ee4b,0x1ee4b,0x1ee4d,0x1ee4f,0x1ee51,0x1ee52,0x1ee54,0x1ee54,0x1ee57,0x1ee57,0x1ee59,0x1ee59,0x1ee5b,0x1ee5b,0x1ee5d,0x1ee5d,0x1ee5f,0x1ee5f,0x1ee61,0x1ee62,0x1ee64,0x1ee64,0x1ee67,0x1ee6a,0x1ee6c,0x1ee72,0x1ee74,0x1ee77,0x1ee79,0x1ee7c,0x1ee7e,0x1ee7e,0x1ee80,0x1ee89,0x1ee8b,0x1ee9b,0x1eea1,0x1eea3,0x1eea5,0x1eea9,0x1eeab,0x1eebb,0x20000,0x2a6d6,0x2a700,0x2b734,0x2b740,0x2b81d,0x2b820,0x2cea1,0x2f800,0x2fa1d,0xe0100,0xe01ef];
 	return isAmongRangeList(cp, cp4b);
 }
+bool isValidByteIdentifierTail(size_t cp) nothrow pure
+{
+	if (cp < 0x80)
+		return ((cp >= 0x61 && cp <= 0x7a) || (cp >= 0x41 && cp <= 0x5a) || (cp >= 0x30 && cp <= 0x39) || cp == '$' || cp == '_' || cp == 0x5f) ? true : false;
+	if (cp < 0x800)
+	{
+		return cp.isValid2ByteIdentifierTail;
+	} else if (cp < 0x10000)
+	{
+		return cp.isValid3ByteIdentifierTail;
+	} else 
+	{
+		return cp.isValid4ByteIdentifierTail;
+	}
+}
 @("isValidByteIdentifierStart")
 unittest
 {
@@ -353,7 +385,9 @@ template unicodeRepresentation(uint i) {
 }
 auto toUnicodeRepresentation(uint i) pure nothrow
 {
-	if (i < 0x800) {
+	if (i < 0x80) {
+		return cast(ubyte[])[cast(ubyte)i];
+	} else if (i < 0x800) {
 		return cast(ubyte[])[0xc0 | ((i >> 6) & 0x1f), 0x80 | (i & 0x3f)];
 	} else if (i < 0x10000) {
 		return cast(ubyte[])[0xe0 | ((i >> 12) & 0x0f), 0x80 | ((i >> 6) & 0x3f), 0x80 | (i & 0x3f)];
@@ -370,18 +404,25 @@ auto getTailIdentifierLength(Range)(Range r, size_t idx = 0) pure nothrow
 		return ((r[idx] >= 0x61 && r[idx] <= 0x7a) || (r[idx] >= 0x41 && r[idx] <= 0x5a) || (r[idx] >= 0x30 && r[idx] <= 0x39) || r[idx] == '$' || r[idx] == '_' || r[idx] == 0x5f) ? 1 : 0;
 	if (r[idx] >= 0xf0) // 4 byte unicode
 	{
-		auto hex = r.decodeUnicodeCodePoint!4;	// 4 byte unicode
+		auto hex = r.decodeUnicodeCodePoint!4(idx);	// 4 byte unicode
 		return hex.isValid4ByteIdentifierTail ? 4 : 0;
 	} else if (r[idx] >= 0xe0)
 	{
-		auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
+		auto hex = r.decodeUnicodeCodePoint!3(idx);	// 3 byte unicode
 		return hex.isValid3ByteIdentifierTail ? 3 : 0;
 	} else if (r[idx] >= 0xc0)
 	{
-		auto hex = r.decodeUnicodeCodePoint!2;	// 2 byte unicode
+		auto hex = r.decodeUnicodeCodePoint!2(idx);	// 2 byte unicode
 		return hex.isValid2ByteIdentifierTail ? 2 : 0;
 	}
 	assert(0);
+}
+
+@("getTailIdentifierLength")
+unittest
+{
+	"€".getTailIdentifierLength.shouldEqual(0);
+	"b".getTailIdentifierLength.shouldEqual(1);
 }
 
 auto coerceToSingleQuotedString(const ubyte[] str) pure nothrow
@@ -392,26 +433,30 @@ auto coerceToSingleQuotedString(const ubyte[] str) pure nothrow
 	auto sink = appender!(ubyte[]);
 	sink.reserve(str.length+max(2,min(str.length / 4, 5)));
 
-	bool escape = false;
-	foreach(s; str)
+	for (auto i = 0; i < str.length; i++)
 	{
-		if (escape)
-		{
-			if (s != '"')
-				sink.put('\\');
-			escape = s == '\\';
-		}
+		ubyte s = str[i];
 		if (s == '\\')
 		{
-			escape = true;
+			i++;
+			if (i >= str.length)
+			{
+				sink.put('\\');
+				break;
+			}
+			if (str[i] == '"')
+				sink.put('"');
+			else
+			{
+				sink.put('\\');
+				sink.put(str[i]);
+			}
 			continue;
 		}
 		if (s == '\'')
 			sink.put('\\');
 		sink.put(s);
 	}
-	if (escape)
-		sink.put('\\');
 	return sink.data;
 }
 auto coerceToSingleQuotedString(string str) pure nothrow
@@ -428,6 +473,7 @@ unittest
 	assert(`*(?:'((?:\\\\.|[^\\\\'])*)'|\"((?:\\\\.|[^\\\\\"])*)\"|(`.coerceToSingleQuotedString == `*(?:\'((?:\\\\.|[^\\\\\'])*)\'|"((?:\\\\.|[^\\\\"])*)"|(`);
 	assert(`a \xaa\xbb`.coerceToSingleQuotedString == `a \xaa\xbb`);
 	assert(`\\`.coerceToSingleQuotedString == `\\`);
+	`\'`.coerceToSingleQuotedString.shouldEqual(`\'`);
 }
 ulong rangeMatch(bool invert, chars...)(const ubyte*) pure nothrow @trusted @nogc
 {
@@ -494,7 +540,8 @@ struct Lexer
 	size_t line;
 	size_t column;
 	private size_t tokenLength;	// TODO: is actually a wrong name. should be something meaning: the length on the current line
-	private size_t tokenLines;
+	private size_t _tokenLines;
+	@property size_t tokenLines() { return _tokenLines; }
 	const (ubyte)[] s;
 	void pushState(State state) pure
 	{
@@ -526,21 +573,21 @@ struct Lexer
 	{
 		s = source;
 		pushState(s.empty ? State.EndOfFile : State.TokensRemaining);
-		haveSSE42 = sse42();
+		haveSSE42 = sse42(); //TODO: need to make template param
 	}
 	version(unittest)
 	{
 		auto scanToken(Goal goal = Goal.All, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
 			//return measure!("Scantoken",(){
-				if (tokenLines > 0)
+				if (_tokenLines > 0)
 				{
-					line += tokenLines;
+					line += _tokenLines;
 					column = 0;
 				}
 				column += tokenLength;
 				tokenLength = 0;
-				tokenLines = 0;
+				_tokenLines = 0;
 				token = lexToken(goal);
 				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
 				return token;
@@ -551,14 +598,14 @@ struct Lexer
 		auto scanToken(Goal goal = Goal.All)
 		{
 			//return measure!("Scantoken",(){
-				if (tokenLines > 0)
+				if (_tokenLines > 0)
 				{
-					line += tokenLines;
+					line += _tokenLines;
 					column = 0;
 				}
 				column += tokenLength;
 				tokenLength = 0;
-				tokenLines = 0;
+				_tokenLines = 0;
 				token = lexToken(goal);
 				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
 				return token;
@@ -631,8 +678,6 @@ struct Lexer
 				immutable ulong i = rangeMatch!(false, 'a', 'z', 'A', 'Z', '_', '_', '$', '$')(s.ptr + idx);
 				if (i > 0)
 				{
-					//import std.stdio;
-					//writeln(cast(const(char)[])s[idx..idx+10],":",i,",");
 					idx += i;
 					tokenLength += i;
 				} else
@@ -981,7 +1026,7 @@ struct Lexer
 				column++;
 			} else {
 				idx += len;
-				line++;
+				_tokenLines++;
 				column=0;
 			}
 		}
@@ -1014,7 +1059,7 @@ struct Lexer
 		{
 			auto tok = Token(Type.SingleLineComment,s[0..idx]);
 			idx += len;
-			tokenLines++;
+			_tokenLines++;
 			tokenLength = 0;
 			s = s[idx..$];
 			return tok;
@@ -1049,7 +1094,7 @@ struct Lexer
 		{
 			auto tok = Token(Type.SheBang,s[0..idx]);
 			idx += len;
-			line += 1;
+			_tokenLines += 1;
 			column = 0;
 			s = s[idx..$];
 			return tok;
@@ -1106,7 +1151,6 @@ struct Lexer
 			case ';': tokenLength++; s.popFront(); return Token(Type.Semicolon);
 			case ',': tokenLength++; s.popFront(); return Token(Type.Comma);
 			case '<':
-				// continue work
 				tokenLength++;
 				s.popFront();
 				if (s.popNextIf('<'))
@@ -1334,7 +1378,8 @@ struct Lexer
 				}
 				if (s.front() < '0' || s.front() > '9')
 					return Token(Type.DecimalLiteral,"0");
-				return Token(Type.Error,"Not expecting NumericLiteral to start with 0");
+				tokenLength++;
+				return lexOctalLiteral;
 			case '1': .. case '9':
 				return lexDecimalLiteral;
 			case '`':
@@ -1444,6 +1489,18 @@ unittest
 	lexer = createLexer(`"\\";`);
 	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"\\\\"));
 	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
+	lexer = createLexer(`'\'';`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"\\'"));
+	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
+	lexer = createLexer(`"\'";`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,"\\'"));
+	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
+	lexer = createLexer(`'\"';`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`\"`));
+	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
+	lexer = createLexer(`"\"";`);
+	lexer.lexString.shouldEqual(Token(Type.StringLiteral,`"`));
+	lexer.scanToken().shouldEqual(Token(Type.Semicolon));
 }
 @("lexBinaryLiteral")
 unittest
@@ -1493,7 +1550,7 @@ unittest
 	lexer = createLexer("15 ");
 	lexer.lexDecimalLiteral().shouldEqual(Token(Type.DecimalLiteral,"15"));
 	lexer = createLexer("0123");
-	lexer.scanToken().shouldEqual(Token(Type.Error,"Not expecting NumericLiteral to start with 0"));
+	lexer.scanToken().shouldEqual(Token(Type.OctalLiteral,"123"));
 }
 @("lexHexLiteral")
 unittest

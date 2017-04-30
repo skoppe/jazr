@@ -25,7 +25,7 @@ import es6.transforms.expressions;
 import option;
 import std.algorithm : each, until, find, countUntil;
 import std.range : retro;
-import std.array : array;
+import std.array : array, appender;
 
 version(tracing)
 {
@@ -72,6 +72,7 @@ bool negateReturningIf(Scope s)
 			if (ifStmt.truthPath.isSingleStatement())
 			{
 				ifStmt.truthPath.branch.remove();
+				ifStmt.truthPath.shread();
 				ifStmt.replaceWith(ifStmt.condition).reanalyseHints();
 			}
 			else {
@@ -102,9 +103,10 @@ bool negateReturningIf(Scope s)
 			target = ifStmt.elsePath();
 		}
 		target.addStatements(transfers);
-		//transfers.each!(t => t.assignBranch(target.branch));
 
 		ifStmt.parent.reanalyseHints();
+		branch.reanalyseHints();
+		ifStmt.parent.branch.reanalyseHints();
 		continue;
 	}
 	return modified;
@@ -233,6 +235,18 @@ unittest
 		`function b() { if (d(), a == 9) return; op() }`,
 		`function b() { if (d(), !(a == 9)) { op() } }`
 	);
+	assertReturnIfNegation(
+		`function b() { if (a) return; return 7 }`,
+		`function b() { if (!a) { return 7 } }`
+	);
+	assertReturnIfNegation(
+		`function b() { if (c) return undefined; if (k) return 5; return 7;}`,
+		`function b() { if (!c) { if (k) return 5; return 7; } }`
+	);
+	assertReturnIfNegation(
+		`function b() { if (c) return void 0; if (k) return 5; return 7;}`,
+		`function b() { if (!c) { if (k) return 5; return 7; } }`
+	);
 }
 
 void removeRedundantElse(IfStatementNode ifStmt, out Node replacedWith)
@@ -317,7 +331,7 @@ Node createVoid0Node()
 	return new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Void)],new DecimalLiteralNode(cast(const(ubyte)[])"0"));
 }
 
-void combineReturnStatements(Scope scp)
+bool combineReturnStatements(Scope scp)
 {
 	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
@@ -330,25 +344,33 @@ void combineReturnStatements(Scope scp)
 		return n.parenthesizeExpression;
 	}
 	import std.algorithm : any, map, all, fold;
-	import std.range : retro, zip;
-	void combineReturnStatements(Branch branch)
+	import std.range : retro, zip, drop, take;
+	bool combineReturnStatements(Branch branch)
 	{
 		foreach(b; branch.children)
 			if (b.children.length > 0)
-				combineReturnStatements(b);
+				if (combineReturnStatements(b))
+					return true;
 
 		if (branch.children.length == 0)
-			return;
+			return false;
 
 		// the last return of the branch, if any
 		auto baseReturn = branch.entry.children.retro.find!(c => c.type == NodeType.ReturnStatementNode);
 
+		auto tailIgnoreCnt = branch.entry.children.retro.countUntil!(c => c.type == NodeType.ReturnStatementNode || c.type == NodeType.IfStatementNode);
+		if (tailIgnoreCnt == -1)
+			return false;
+
+		if (branch.entry.children.retro.take(tailIgnoreCnt).any!(c => c.hints.has(Hint.NonExpression)))
+			return false;
+
 		// the maximum index from the end where each node is either an if or a return 
-		auto idx = branch.entry.children.retro.countUntil!(c => c.type != NodeType.IfStatementNode && c.type != NodeType.ReturnStatementNode);
+		auto idx = branch.entry.children.retro.drop(tailIgnoreCnt).countUntil!(c => c.type != NodeType.IfStatementNode && c.type != NodeType.ReturnStatementNode);
 
 		// if there are fewer than 2 return/ifs
 		if (idx > -1 && idx < 2)
-			return;
+			return false;
 
 		Node[] validNodes;
 		Branch[] validBranches;
@@ -361,54 +383,58 @@ void combineReturnStatements(Scope scp)
 			validNodes = branch.entry.children;
 		}
 		else {
-			// else we take only those nodes and branches starting from idx from the back
-			if (branch.entry.children[$-idx].type != NodeType.IfStatementNode)
-				return;
 
-			validNodes = branch.entry.children[$-idx..$];
+			validNodes = branch.entry.children[$-idx-tailIgnoreCnt..$-tailIgnoreCnt];
+			// else we take only those nodes and branches starting from idx from the back
+			if (validNodes[0].type != NodeType.IfStatementNode)
+				return false;
 
 			auto startingBranch = validNodes[0].as!(IfStatementNode).truthPath.branch;
 			startingBranchIdx = branch.children.countUntil!(c => c is startingBranch);
 			if (startingBranchIdx == -1)
-				return;
+				return false;
 			validBranches = branch.children[startingBranchIdx..$];
 		}
 
 		if (validBranches.length < 1)
-			return;
+			return false;
 
 		// if any sub branch has children
 		if (validBranches.any!(c => c.children.length > 0 || c.entry.parent.type != NodeType.IfStatementNode))
-			return;
+			return false;
 
 		auto ifStmts = validBranches.map!(c => c.entry.parent.as!IfStatementNode);
 
 		// if any ifstatement has an elsepath
 		if (ifStmts.any!(i => i.hasElsePath))
-			return;
+			return false;
 		
 		// if any ifstatement has no return
 		if (!ifStmts.all!(i => i.truthPath.node.hints.has(Hint.Return | Hint.ReturnValue)))
-			return;
+			return false;
 
 		// if any if statement have statements that are non expressions (besides return values)
 		if (!ifStmts.all!(i => i.truthPath.type == NodeType.ReturnStatementNode || i.truthPath.children.all!(c => c.type == NodeType.ReturnStatementNode)))
-			return;
+			return false;
 
 		// if this branch doesn't return
 		if (baseReturn.empty)
 		{
 			// we can still apply the optimisation BUT only if we have at least 2 branches
 			if (validBranches.length < 2)
-				return;
+				return false;
+
+			// unless we are in a for or while loop
+			if (branch.entry.inLoop)
+				return false;
 
 			// and only if there are NO statements after this branch ends
 			auto walk = branch.entry;
-			do {
+			while (walk !is null && walk.type != NodeType.FunctionBodyNode) {
 				if (!walk.isLastSibling)
-					return;
+					return false;
 				walk = walk.parent;
-			} while (walk !is null && walk.type != NodeType.FunctionBodyNode);
+			}
 		}
 
 		// map all the return values from all if statements
@@ -426,7 +452,30 @@ void combineReturnStatements(Scope scp)
 		Node lastValue;
 		if (baseReturn.empty || baseReturn.front().children.length == 0)
 		{
-			lastValue = createVoid0Node();
+			if (tailIgnoreCnt == 0)
+				lastValue = createVoid0Node();
+			else
+			{
+				auto app = appender!(Node[]);
+				app.reserve(tailIgnoreCnt);
+				foreach(c; branch.entry.children.retro.take(tailIgnoreCnt).retro)
+					if (c.type == NodeType.ExpressionNode)
+						app.put(c.children);
+					else
+						app.put(c);
+				if (app.data.length == 1)
+				{
+					auto paren = new ParenthesisNode(app.data);
+					lastValue = new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Void)],paren);
+					paren.reanalyseHints();
+				}
+				else
+				{
+					auto expr = new ExpressionNode(app.data);
+					lastValue = new UnaryExpressionNode([new PrefixExpressionNode(Prefix.Void)],new ParenthesisNode([expr]));
+					expr.reanalyseHints();
+				}
+			}
 		} else {
 			lastValue = parenthesizeIfNecessary(baseReturn.front().children[0]);
 		}
@@ -452,7 +501,7 @@ void combineReturnStatements(Scope scp)
 		} else {
 			// when only some statements applied for this transformation
 			// we need to keep them around
-			auto startIdx = branch.entry.children.length - idx;
+			auto startIdx = branch.entry.children.length - idx - tailIgnoreCnt;
 			branch.entry.children = branch.entry.children[0..startIdx+1];
 			branch.entry.children[startIdx] = returnNode;
 			returnNode.parent = branch.entry;
@@ -461,8 +510,10 @@ void combineReturnStatements(Scope scp)
 		branch.children = branch.children[0..startingBranchIdx];
 		returnNode.reanalyseHints();
 		branch.hints |= Hint.ReturnValue;
+
+		return true;
 	}
-	combineReturnStatements(scp.branch);
+	return combineReturnStatements(scp.branch);
 }
 
 @("combineReturnStatements")
@@ -556,12 +607,61 @@ unittest
 			} else {
 				return results;
 			}
-		}`);
+		}`
+	);
+	assertCombineReturn(
+		`function a(b) { if (b instanceof a) return b; if (!(this instanceof a)) return new a(b); this._wrapped = b }`,
+        `function a(b){return b instanceof a?b:!(this instanceof a)?new a(b):void(this._wrapped=b)}`
+    );
+	assertCombineReturn(
+		`function a(b) { k = 6; if (b instanceof a) return b; if (!(this instanceof a)) return new a(b); this._wrapped = b; b = 5, e = 6; p = 8;}`,
+        `function a(b){k=6;return b instanceof a?b:!(this instanceof a)?new a(b):void(this._wrapped=b,b=5,e=6,p=8)}`
+    );
+    assertCombineReturn(
+    	`function a() { switch(a) { case 5: if (a) return 6; if (b) return 5; } b(); }`,
+    	`function a() { switch(a) { case 5: if (a) return 6; if (b) return 5; } b(); }`
+    );
+    assertCombineReturn(
+    	`function a() { switch(a) { case 5: if (a) return 6; if (b) return 5; } }`,
+    	`function a() { switch(a) { case 5: return a ? 6 : b ? 5 : void 0 } }`
+    );
+    assertCombineReturn(
+    	`function a() { switch(a) { case 5: if (a) return 6; if (b) return 5; return 7; } }`,
+    	`function a() { switch(a) { case 5: return a ? 6 : b ? 5 : 7 } }`
+    );
+    assertCombineReturn(
+    	`function a() { for(;;) { if (a) return 6; if (b) return 5; } }`,
+    	`function a() { for(;;) { if (a) return 6; if (b) return 5; } }`
+    );
+    assertCombineReturn(
+    	`function a() { for(;;) { if (a) return 6; if (b) return 5; return 7; } }`,
+    	`function a() { for(;;) return a ? 6 : b ? 5 : 7 }`
+    );
+    assertCombineReturn(
+    	`function a() { while(true) { if (a) return 6; if (b) return 5; } }`,
+    	`function a() { while(true) { if (a) return 6; if (b) return 5; } }`
+    );
+    assertCombineReturn(
+    	`function a() { while(true) { if (a) return 6; if (b) return 5; return 7; } }`,
+    	`function a() { while(true) return a ? 6 : b ? 5 : 7 }`
+    );
+    assertCombineReturn(
+    	`function a() { do { if (a) return 6; if (b) return 5; } while(true); }`,
+    	`function a() { do { if (a) return 6; if (b) return 5; } while(true); }`
+    );
+    assertCombineReturn(
+    	`function a() { do { if (a) return 6; if (b) return 5; return 7; } while(true); }`,
+    	`function a() { do return a ? 6 : b ? 5 : 7; while(true); }`
+    );
+    assertCombineReturn(
+    	`function a() { if (a && c) return bla; if (b && d) return alb } a();`,
+		"function a() { return a && c ? bla : b && d ? alb : void 0 } a();"
+    );
 	// TODO: this doesn't work since we start at the end looking for the maximum length of ifs/returns statements of at least size 2, and d() fails that
 	// to fix it we need to skip any expressions at the end, which we will combine with the void 0 later on
 	//assertCombineReturn(
 	//	`function cd() { if (a) { return 7; } if (b) return 5; d(); }`,
-	//	`function cd() { return a ? 7 : b ? 5 : (d(),void 0) }`
+	//	`function cd() { return a ? 7 : b ? 5 : void(d()) }`
 	//);
 	//
 	//	/// This is more a else return empty optimisation

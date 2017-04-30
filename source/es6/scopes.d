@@ -22,7 +22,8 @@ module es6.scopes;
 import es6.nodes;
 import es6.utils;
 import std.format : formattedWrite;
-import std.algorithm : each, countUntil;
+import std.algorithm : each, countUntil, remove;
+import std.array : insertInPlace;
 import option;
 
 version (unittest)
@@ -40,7 +41,7 @@ version (unittest)
 	}
 	void assertGlobals(Scope s, string[] expecteds, in string file = __FILE__, in size_t line = __LINE__) @trusted
 	{
-		expecteds.length.shouldEqual(s.globals.length,file,line);
+		s.globals.length.shouldEqual(expecteds.length,file,line);
 		foreach(got, expected; lockstep(s.globals,expecteds))
 			got.node.assertIdentifierEqual(expected,file,line);
 	}
@@ -57,7 +58,8 @@ struct Variable
 {
 	IdentifierType type;
 	IdentifierNode node;
-	Node[] references;
+	Node[] references; //TODO: we always assume the references to be in the order they appear in the tree depth-first. Ergo, we need to make this private and ensure the assumption always holds.
+	Node definition; // will only be set when variable is redeclared (e.g. var a; var a;)
 	this(IdentifierNode n, IdentifierType t, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.format;
@@ -65,6 +67,50 @@ struct Variable
 		type = t;
 		node = n;
 	}
+	void insertReference(Node reference)
+	{
+		// The references array is sorted in the order the references appear in the AST tree (depth-first).
+		// Some algorithms assume this is always the case. Therefor when inserting a new reference,
+		// we need to determine its place in the sorted array.
+
+		// To do that we determine the index in the references array where the reference to be inserted
+		// comes before the item in the reference array at that index. Where before is defined depth-first.
+
+		// To determine whether a reference comes before another we need to find their common parent
+		// and compare indices in their common parent children array.
+
+		size_t depth = reference.calcDepth(node.branch.scp.entry);
+					import std.stdio;
+
+		size_t idx = references.countUntil!((r){
+			Node item = reference;
+			size_t d = r.calcDepth(node.branch.scp.entry);
+			if (d > depth)
+				r = r.getNthParent(d-depth);
+			else if (depth > d)
+				item = item.getNthParent(depth-d);
+
+			while(r.parent !is item.parent)
+			{
+				assert(r.parent);
+				assert(item.parent);
+				r = r.parent;
+				item = item.parent;
+			}
+
+			return item.getIndex() < r.getIndex();
+		});
+
+		if (idx == -1)
+			references ~= reference;
+		else
+			references.insertInPlace(idx, reference);
+	}
+}
+bool isLocal(ref Variable v)
+{
+	import std.algorithm : any;
+	return !v.references.any!(r => r.branch.scp !is v.node.branch.scp);
 }
 struct Identifier
 {
@@ -125,9 +171,34 @@ class Scope
 		this.children ~= s;
 		return s;
 	}
-	void addVariable(Variable v)
+	void remove()
 	{
-		variables ~= v;
+		if (parent is null)
+			return;
+		parent.removeChild(this);
+		parent = null;
+	}
+	void removeChild(Scope child)
+	{
+		import std.algorithm : countUntil;
+		import std.algorithm : remove;
+		auto idx = children.countUntil!(c=>c is child);
+		assert(idx != -1);
+		children.remove(idx);
+		children = children[0..$-1];
+	}
+	void addVariable(Variable v, bool prepend = false)
+	{
+		auto idx = variables.countUntil!(a => a.node.identifier == v.node.identifier);
+		if (idx != -1)
+		{
+			v.definition = variables[idx].node;
+			variables[idx].references ~= v.node;
+		}
+		if (prepend)
+			variables.insertInPlace(0,v);
+		else
+			variables ~= v;
 	}
 	void addIdentifier(Identifier i)
 	{
@@ -143,9 +214,26 @@ class Scope
 	}
 	void removeVariable(Node node)
 	{
-		import std.algorithm : remove;
 		variables = variables.remove!(v => v.node is node);
-		node.detach();
+		node.detach(); // TODO: this should already have happened
+	}
+	void removeIdentifier(Node node)
+	{
+		auto idx = identifiers.countUntil!(i => i.node is node);
+		if (idx == -1)
+			return;
+		if (identifiers[idx].definition !is null)
+			identifiers[idx].definition.branch.scp.removeReference(identifiers[idx]);
+		identifiers = identifiers.remove(idx);
+	}
+	void removeReference(ref Identifier iden)
+	{
+		import std.algorithm : find, remove;
+		auto definition = iden.definition;
+		if (definition is null)
+			return;
+		foreach(ref var; variables.find!((ref v) => v.node is definition))
+			var.references = var.references.remove!(n => n is iden.node);
 	}
 	// only works after analyses
 	bool isGlobal(string identifier)
@@ -227,7 +315,7 @@ class Branch
 	{
 		return (hints & h) == h;
 	}
-	void addHint(Hint h)
+	void addHint(int h)
 	{
 		hints |= h;
 	}
@@ -287,20 +375,27 @@ class Branch
 	}
 	Node getParentBranchEntry()
 	{
-		switch(entry.parent.type)
+		Node helper()
 		{
-			case NodeType.SwitchStatementNode:
-				return entry.parent.parent;
-			case NodeType.IfStatementNode:
-			case NodeType.ForStatementNode:
-			case NodeType.DoWhileStatementNode:
-			case NodeType.WhileStatementNode:
-				return entry.parent;
-			case NodeType.DefaultNode:
-				return entry.parent.parent;
-			case NodeType.CaseNode:
-				return entry.parent.parent; default: assert(0);
+			switch(entry.parent.type)
+			{
+				case NodeType.SwitchStatementNode:
+					return entry.parent.parent;
+				case NodeType.IfStatementNode:
+				case NodeType.ForStatementNode:
+				case NodeType.DoWhileStatementNode:
+				case NodeType.WhileStatementNode:
+					return entry.parent;
+				case NodeType.DefaultNode:
+					return entry.parent.parent;
+				case NodeType.CaseNode:
+					return entry.parent.parent; default: assert(0);
+			}
 		}
+		auto parentEntry = helper;
+		if (parentEntry.parent.type == NodeType.LabelledStatementNode)
+			return parentEntry.parent;
+		return parentEntry;
 	}
 }
 void linkIdentifierToDefinitions(Scope scp)
@@ -318,7 +413,7 @@ void findGlobals(Scope scp)
 		s.globals
 			.each!(id=>scp.globals ~= id);
 	}
-	foreach(g; scp.identifiers.filter!(i=>i.definition is null))
+	foreach(g; scp.identifiers.filter!(i=>i.definition is null || i.definition.branch.scp.parent is null))
 		scp.globals ~= g;
 }
 @("findGlobals")
@@ -327,8 +422,8 @@ unittest
 	getScope(`var a,b,c;`).assertGlobals([]);
 	getScope(`a,b,c;`).assertGlobals(["a","b","c"]);
 	auto s = getScope(`var a,b; function e(c){ var d; return a*b*c*d; }`);
-	s.assertGlobals([]);
-	s.children[0].assertGlobals([]);
+	s.assertGlobals(["a","b"]);
+	s.children[0].assertGlobals(["a","b"]);
 	s = getScope(`function e(c){ var d; return a*b*c*d; }`);
 	s.assertGlobals(["a","b"]);
 	s.children[0].assertGlobals(["a","b"]);
@@ -336,6 +431,29 @@ unittest
 	s.assertGlobals(["b"]);
 	s.children[0].assertGlobals(["b"]);
 	s.children[0].children[0].assertGlobals(["b"]);
+}
+string getFreeIdentifier(Scope s, ref int cnt)
+{
+	bool isUsedIdentifier(Scope s, string id)
+	{
+		import std.algorithm : any;
+		if (s.identifiers.any!(i => i.node.identifier == cast(const(ubyte)[])id))
+			return true;
+		if (s.variables.any!(i => i.node.identifier == cast(const(ubyte)[])id))
+			return true;
+		foreach (c; s.children)
+			if (isUsedIdentifier(c, id))
+				return true;
+		return false;
+	}
+	string id;
+	for(;;cnt++)
+	{
+		id = generateValidIdentifier(cnt);
+		if (!isUsedIdentifier(s, id))
+			break;
+	}
+	return id;
 }
 @("isGlobal")
 unittest
@@ -364,6 +482,8 @@ unittest
 	assertGlobals(s.children[0],["b"]);
 	assertNonGlobals(s.children[0],["a","d"]);
 	assertGlobals(s.children[0].children[0],["a","d","b"]);
+	s = getScope(`function bla(){for (var a in b);}`);
+	assertGlobals(s.children[0],["b"]);
 }
 
 @("linkToDefinition")
@@ -380,43 +500,74 @@ unittest
 	s.children[0].identifiers.length.shouldEqual(1);
 	assert(s.variables[0].node is s.children[0].identifiers[0].definition);
 	s.variables[0].references.length.shouldEqual(1);
-	assert(s.variables[0].references[0] is s.children[0].identifiers[0].node);	
+	assert(s.variables[0].references[0] is s.children[0].identifiers[0].node);
 
 	s = getScope(`function c(a) { return a; }`);
 	s.children[0].identifiers.length.shouldEqual(1);
 	auto ss = s.children[0];
 	assert(ss.variables[0].node is ss.identifiers[0].definition);
 	ss.variables[0].references.length.shouldEqual(1);
-	assert(ss.variables[0].references[0] is ss.identifiers[0].node);	
-}
+	assert(ss.variables[0].references[0] is ss.identifiers[0].node);
 
-// TODO: we can use the other generateIdentifier from one of es5-min's branches
-string generateIdentifier(int idx)
+	s = getScope(`function c(a) { return a*c(); } c();`);
+	s.identifiers.length.shouldEqual(1);
+	ss = s.children[0];
+	assert(s.variables[0].node is ss.identifiers[1].definition);
+	s.variables.length.shouldEqual(1);
+	s.variables[0].type.shouldEqual(IdentifierType.Function);
+	s.variables[0].node.identifier.shouldEqual("c");
+	s.variables[0].references.length.shouldEqual(2);
+	s.identifiers.length.shouldEqual(1);
+	s.identifiers[0].node.identifier.shouldEqual("c");
+	assert(s.identifiers[0].definition is s.variables[0].node);
+	assert(s.variables[0].references[0] is s.identifiers[0].node);
+
+	s = getScope(`function b() { for (var a in b) p(a); }`);
+	s.children[0].identifiers.length.shouldEqual(3);
+	s.children[0].identifiers[0].node.identifier.shouldEqual("b");
+	s.children[0].variables[0].node.identifier.shouldEqual("a");
+	s.children[0].variables[0].references.length.shouldEqual(1);
+	assert(s.children[0].variables[0].references[0] is s.children[0].identifiers[2].node);
+
+	s = getScope(`function b() { var a; var a; }`);
+	s.children[0].variables[0].definition.shouldBeNull();
+	assert(s.children[0].variables[1].definition is s.children[0].variables[0].node);
+
+	s = getScope(`function b(a) { var a; var a; }`);
+	s.children[0].variables[0].definition.shouldBeNull();
+	assert(s.children[0].variables[1].definition is s.children[0].variables[0].node);
+	assert(s.children[0].variables[2].definition is s.children[0].variables[0].node);
+
+	s = getScope(`function b(a) { for (var a in b); }`);
+	s.children[0].variables[0].definition.shouldBeNull();
+	assert(s.children[0].variables[1].definition is s.children[0].variables[0].node);
+}
+string generateIdentifier(int idx, string charMap = "nterioaucslfhpdgvmybwxkjqzNTERIOAUCSLFHPDGVMYBWXKJQZ_$")
 {
+	auto len = charMap.length;
 	import std.conv : to;
-	if (idx < 26)
-		return (cast(char)('a'+idx)).to!(string);
-	if (idx < 52)
-		return (cast(char)('A'+(idx-26))).to!string;
-	return generateIdentifier(cast(int)((idx / 52)-1))~generateIdentifier(idx % 52);
+	if (idx < len)
+		return charMap[idx..idx+1];
+
+	return generateIdentifier(cast(int)((idx / (len+0))-1), charMap)~generateIdentifier(cast(int)(idx % (len+0)), charMap);
 }
 bool isValidIdentifier(string id)
 {
 	import es6.lexer;
 	return !isReservedKeyword(cast(const(ubyte)[])id);
 }
-string generateValidIdentifier(int start)
+string generateValidIdentifier(int start, string charMap = "nterioaucslfhpdgvmybwxkjqzNTERIOAUCSLFHPDGVMYBWXKJQZ_$")
 {
 	import std.range : iota, front;
 	import std.algorithm : find, map;
-	return iota(start,int.max).map!(generateIdentifier).find!(isValidIdentifier).front();
+	return iota(start,int.max).map!(idx => generateIdentifier(idx, charMap)).find!(isValidIdentifier).front();
 }
 @("generateIdentifier")
 unittest
 {
 	void assertGeneratedName(int idx, string expected, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		generateIdentifier(idx).shouldEqual(expected,file,line);
+		generateIdentifier(idx,"abcdefghijklmnopqrstuvwxywABCDEFGHIJKLMNOPQRSTUVWXYZ").shouldEqual(expected,file,line);
 	}
 	assertGeneratedName(0,		"a");
 	assertGeneratedName(1,		"b");
@@ -435,7 +586,7 @@ unittest
 @("generateValidIdentifier")
 unittest
 {
-	generateIdentifier((4*52)+14).shouldEqual("do");
-	generateValidIdentifier((4*52)+14).shouldEqual("dp");
+	generateIdentifier((4*52)+14,"abcdefghijklmnopqrstuvwxywABCDEFGHIJKLMNOPQRSTUVWXYZ").shouldEqual("do");
+	generateValidIdentifier((4*52)+14,"abcdefghijklmnopqrstuvwxywABCDEFGHIJKLMNOPQRSTUVWXYZ").shouldEqual("dp");
 
 }

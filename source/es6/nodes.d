@@ -217,7 +217,8 @@ enum Hint {
 	ReturnValue = 1 << 1,
 	NonExpression = 1 << 2,
 	Or = 1 << 3,
-	HasAssignment = 1 << 4
+	HasAssignment = 1 << 4,
+	Visited = 1 << 5 // Special hint used in testing to flag node having been visited
 }
 struct Hints
 {
@@ -247,6 +248,9 @@ struct Hints
 	bool has(int v)
 	{
 		return (hs & v) != 0;
+	}
+	void add(int h) {
+		hs |= h;
 	}
 }
 struct PrettyPrintSink
@@ -291,7 +295,7 @@ class Node
 	private NodeType _type;
 	@property NodeType type() pure const { return _type; }
 	private Hints _hints;
-	@property Hints hints() { return _hints; }
+	@property ref Hints hints() { return _hints; }
 	@property void hints(int hs) { _hints = Hints(hs); }
 	this(NodeType t)
 	{
@@ -351,7 +355,7 @@ class Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		return Diff.No;
 	}
@@ -399,6 +403,7 @@ class Node
 	}
 	auto getIndex()
 	{
+		version (unittest){ if (parent is null) throw new UnitTestException([format("Expected parent pointer to be !null.\n%s",this)]); }
 		assert(parent);
 		return parent.getIndexOfChild(this);
 	}
@@ -419,10 +424,14 @@ class Node
 		child.parent = this;
 		child.assignBranch(branch);
 	}
+	void insertInPlace(size_t idx, Node[] children)
+	{
+		this.children.insertInPlace(idx,children);
+		children.each!((c){c.parent = this; c.assignBranch(branch);});
+	}
 	void prependChildren(Node[] children)
 	{
-		this.children.insertInPlace(0,children);
-		children.each!((c){c.parent = this; c.assignBranch(branch);});
+		insertInPlace(0,children);
 	}
 	void addChildren(Option!(Node[]) children)
 	{
@@ -560,7 +569,7 @@ final class ErrorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!ErrorNode();
 		return o.value == value && o.line == line && o.column == column ? Diff.No : Diff.Content;
@@ -578,7 +587,7 @@ final class BooleanNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -595,14 +604,14 @@ final class SheBangNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s \"%s\"\n",_type,cast(const(char)[])value);
+		sink.formattedWrite("%s \"%s\" %s\n",_type,cast(const(char)[])value,_hints);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -619,14 +628,14 @@ final class StringLiteralNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s \"%s\"\n",_type,cast(const(char)[])value);
+		sink.formattedWrite("%s \"%s\" %s\n",_type,cast(const(char)[])value,_hints);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -644,7 +653,7 @@ final class BinaryLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -662,7 +671,7 @@ final class OctalLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -680,11 +689,17 @@ final class DecimalLiteralNode : Node
 	{
 		return "DecimalLiteralNode ("~cast(immutable(char)[])value~")";
 	}
+	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
+	{
+		sink.indent(level);
+		sink.formattedWrite("%s %s %s\n",type,cast(const(char)[])value,_hints);
+		sink.print(children,level+1);
+	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -702,7 +717,7 @@ final class HexLiteralNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -730,14 +745,14 @@ final class TemplateNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,cast(const(char)[])value);
+		sink.formattedWrite("%s %s %s\n",type,cast(const(char)[])value,_hints);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -754,14 +769,14 @@ final class RegexLiteralNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,cast(const(char)[])value);
+		sink.formattedWrite("%s %s %s\n",type,cast(const(char)[])value,_hints);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.value == value ? Diff.No : Diff.Content;
@@ -779,7 +794,7 @@ final class KeywordNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.keyword == keyword ? Diff.No : Diff.Content;
@@ -796,13 +811,13 @@ class IdentifierNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,cast(const(char)[])identifier);
+		sink.formattedWrite("%s %s %s\n",type,cast(const(char)[])identifier,_hints);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.identifier == identifier ? Diff.No : Diff.Content;
@@ -884,14 +899,14 @@ final class PrefixExpressionNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,prefix);
+		sink.formattedWrite("%s %s %s\n",type,prefix,_hints);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.prefix == prefix ? Diff.No : Diff.Content;
@@ -906,7 +921,7 @@ final class SuperPropertyNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s super\n",type);
+		sink.formattedWrite("%s super %s\n",type,_hints);
 		sink.print(children,level+1);
 	}
 }
@@ -921,14 +936,14 @@ final class AccessorNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s %s\n",type,cast(const(char)[])identifier);
+		sink.formattedWrite("%s %s %s\n",type,cast(const(char)[])identifier,_hints);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.identifier == identifier ? Diff.No : Diff.Content;
@@ -978,7 +993,7 @@ final class NewExpressionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.news == news ? Diff.No : Diff.Content;
@@ -996,7 +1011,7 @@ final class CallExpressionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.news == news ? Diff.No : Diff.Content;
@@ -1014,7 +1029,7 @@ final class UnaryExpressionNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("%s\n",type);
+		sink.formattedWrite("%s %s\n",type,_hints);
 		sink.print(prefixs,level+1);
 		sink.print(children,level+1);
 	}
@@ -1022,7 +1037,7 @@ final class UnaryExpressionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		if (prefixs.length != o.prefixs.length)
@@ -1048,7 +1063,7 @@ final class ExpressionOperatorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.operator == operator ? Diff.No : Diff.Content;
@@ -1108,6 +1123,12 @@ final class ConditionalExpressionNode : Node
 	{
 		return this.children[2];
 	}
+	void swapPaths()
+	{
+		auto tmp = this.children[1];
+		this.children[1] = this.children[2];
+		this.children[2] = tmp;
+	}
 }
 final class AssignmentExpressionNode : Node
 {
@@ -1142,7 +1163,7 @@ final class AssignmentOperatorNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.assignment == assignment ? Diff.No : Diff.Content;
@@ -1176,16 +1197,16 @@ final class EmptyStatementNode : Node
 final class LabelledStatementNode : Node
 {
 	const(ubyte)[] label;
-	this(const(ubyte)[] l)
+	this(const(ubyte)[] l, Node stmt)
 	{
 		label = l;
-		super(NodeType.LabelledStatementNode);
+		super(NodeType.LabelledStatementNode, stmt);
 	}
 	override Diff diff(Node other)
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.label == label ? Diff.No : Diff.Content;
@@ -1207,6 +1228,22 @@ final class VariableStatementNode : Node
 	{
 		super(NodeType.VariableStatementNode,children);
 	}
+	void sortOnUnitializedUsage() @trusted
+	{
+		// Note: actually makes gzipped minified file a little larger on average...
+		// Todo: maybe if put initialized vars with most usage at the front...
+		/*import std.algorithm : schwartzSort;
+		import std.typecons : tuple;
+		children.schwartzSort!(c => tuple!("index","node")(c.getIndex(),c.as!VariableDeclarationNode),
+			(a,b){
+				if (a.node.children.length == 1 && b.node.children.length == 2)
+					return true;
+				if (b.node.children.length == 1 && a.node.children.length == 2)
+					return false;
+				return a.index < b.index;
+			}
+		);*/
+	}
 }
 final class ReturnStatementNode : Node
 {
@@ -1227,6 +1264,12 @@ final class BlockStatementNode : Node
 		auto idx = children.countUntil!(c => c is node);
 		if (idx == -1)
 			return;
+		import std.range : retro;
+		foreach(c; children[idx..$].retro)
+		{
+			c.detach();
+			c.shread();
+		}
 		children = children[0..idx];
 	}
 	void dropAllFrom(NodeType type)
@@ -1235,6 +1278,12 @@ final class BlockStatementNode : Node
 		auto idx = children.countUntil!(c => c.type == type);
 		if (idx == -1)
 			return;
+		import std.range : retro;
+		foreach(c; children[idx..$].retro)
+		{
+			c.detach();
+			c.shread();
+		}
 		children = children[0..idx];
 	}
 	void insertAfter(Node sibling, Node[] children)
@@ -1294,10 +1343,15 @@ struct IfPath
 	void clearStatements()
 	{
 		if (isBlockStatement)
+		{
+			node.children.shread();
 			node.children = node.children[0..0];
+		}
 		else
 		{
+			auto old = node;
 			node = node.replaceWith(new BlockStatementNode([]));
+			shread(old);
 		}
 	}
 	void addStatements(Node[] children)
@@ -1503,7 +1557,7 @@ final class ForStatementNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.loopType == loopType ? Diff.No : Diff.Content;
@@ -1584,7 +1638,7 @@ final class ClassDeclarationNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		return Diff.No;
 	}
@@ -1601,7 +1655,7 @@ final class ClassGetterNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
@@ -1619,7 +1673,7 @@ final class ClassMethodNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
@@ -1637,7 +1691,7 @@ final class ClassGeneratorMethodNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
@@ -1655,7 +1709,7 @@ final class ClassSetterNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.isStatic == isStatic ? Diff.No : Diff.Content;
@@ -1786,7 +1840,7 @@ final class ElisionNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.cnt == cnt ? Diff.No : Diff.Content;
@@ -1827,7 +1881,7 @@ final class LexicalDeclarationNode : Node
 	{
 		if (other.type != type)
 			return Diff.Type;
-		if (other.hints != hints)
+		if ((other.hints ^ hints) & ~Hint.Visited)
 			return Diff.Hints;
 		auto o = other.as!(typeof(this));
 		return o.declaration == declaration ? Diff.No : Diff.Content;
@@ -2005,7 +2059,12 @@ enum Diff
 	BranchChildren,
 	BranchEntryTypes,
 	BranchHints,
-	Hints
+	Hints,
+	StrictMode,
+	VariablesCount,
+	Variable,
+	VariableReferencesCount,
+	IdentifiersCount
 }
 struct DiffResult
 {
@@ -2030,9 +2089,19 @@ string getDiffMessage(DiffResult d)
 		case Diff.BranchEntryTypes:
 			return format("Branch a has entry\n%swhile branch b has\n%s--%s++%s",d.a,d.b,d.a.branch,d.b.branch);
 		case Diff.BranchHints:
-			return format("Branch a has hints\n%swhile branch b has\n%s",d.a.branch.hints,d.b.branch.hints);
+			return format("Branch a has hints\n%s\nwhile branch b has\n%s\n%s\n%s",d.a.branch.hints,d.b.branch.hints,d.a.branch,d.b.branch);
 		case Diff.Hints:
 			return format("Node a has hints\n%swhile node b has\n%s",d.a,d.b);
+		case Diff.StrictMode:
+			return format("Scope a has strictMode=%s, b has strictMode=%s",d.a.branch.scp.strictMode,d.b.branch.scp.strictMode);
+		case Diff.VariablesCount:
+			return format("something VariablesCount, something");
+		case Diff.Variable:
+			return format("something Variable, something");
+		case Diff.VariableReferencesCount:
+			return format("yadayada, references");
+		case Diff.IdentifiersCount:
+			return format("oops, IdentifiersCount");
 	}
 }
 version (unittest)
@@ -2110,7 +2179,7 @@ private DiffResult diffBranch(Branch a, Branch b, Node c, Node d)
 		return DiffResult(c,d,Diff.BranchChildren);
 	if (a.entry.type != b.entry.type)
 		return DiffResult(c,d,Diff.BranchEntryTypes);
-	if (a.hints != b.hints)
+	if ((a.hints & ~Hint.Visited) != (b.hints & ~Hint.Visited))
 		return DiffResult(c,d,Diff.BranchHints);
 
 	//foreach(ca,cb; lockstep(a.children,b.children))
@@ -2121,6 +2190,31 @@ private DiffResult diffBranch(Branch a, Branch b, Node c, Node d)
 	//}
 	return DiffResult(c,d,Diff.No);
 
+}
+private DiffResult diffScope(Scope a, Scope b, Node c, Node d) @trusted
+{
+	import std.algorithm : sort, setDifference, cmp;
+	import std.range : lockstep;
+	if (a.strictMode != b.strictMode)
+		return DiffResult(c,d,Diff.StrictMode);
+	if (a.variables.length != b.variables.length)
+		return DiffResult(c,d,Diff.VariablesCount);
+	auto varsA = a.variables.dup.sort!((a,b) => cmp(a.node.identifier,b.node.identifier) < 0);
+	auto varsB = b.variables.dup.sort!((a,b) => cmp(a.node.identifier,b.node.identifier) < 0);
+	auto diffs = setDifference!("a.node.identifier < b.node.identifier")(varsA,varsB);
+	if (!diffs.empty)
+		return DiffResult(c,d,Diff.Variable);
+	foreach(ref a, ref b; varsA.lockstep(varsB))
+	{
+		if (a.references.length != b.references.length)
+		{
+			return DiffResult(c,d,Diff.VariableReferencesCount);
+		}
+	}
+	if (a.identifiers.length != b.identifiers.length){
+		return DiffResult(c,d,Diff.IdentifiersCount);
+	}
+	return DiffResult(c,d,Diff.No);
 }
 DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = __LINE__) @trusted
 {
@@ -2139,6 +2233,9 @@ DiffResult diffTree(Node a, Node b, in string file = __FILE__, in size_t line = 
 
 	assert(a.branch !is null && b.branch !is null);
 	auto r = diffBranch(a.branch,b.branch,a,b);
+	if (r.type != Diff.No)
+		return r;
+	r = diffScope(a.branch.scp,b.branch.scp,a,b);
 	if (r.type != Diff.No)
 		return r;
 	foreach(ca,cb; lockstep(a.children,b.children))
@@ -2164,7 +2261,7 @@ unittest
   StringLiteralNode \"s\"
   BinaryLiteralNode
   OctalLiteralNode
-  DecimalLiteralNode
+  DecimalLiteralNode 10
   HexLiteralNode
   TemplateLiteralNode
     TemplateNode t
@@ -2191,6 +2288,7 @@ unittest
     AssignmentOperatorNode HasAssignment
     IdentifierReferenceNode d
   LabelledStatementNode NonExpression
+    EmptyStatementNode
   ForStatement ExprCStyle NonExpression
     SemicolonNode
     SemicolonNode
@@ -2276,6 +2374,20 @@ bool isStatementLike(Node node)
 	}
 }
 
+Node getStatementItem(Node node)
+{
+	switch (node.parent.type)
+	{
+		case NodeType.BlockStatementNode:
+		case NodeType.FunctionBodyNode:
+		case NodeType.ModuleNode:
+			return node;
+		default:
+			break;
+	}
+	return node.parent.getStatementItem();
+}
+
 template getNodeType(AstNode : Node)
 {
 	mixin("alias getNodeType = NodeType."~AstNode.stringof~";");
@@ -2318,6 +2430,43 @@ auto assignmentToExpressionOperator(Assignment a)
 
 bool canHaveSideEffects(Node node)
 {
-	return true; // TODO: We need to introduce a hint that keeps track of side effects
+	switch (node.type)
+	{
+		case NodeType.DecimalLiteralNode:
+		case NodeType.StringLiteralNode:
+		case NodeType.IdentifierReferenceNode:
+			return false;
+		default:
+			return true;
+	}
 }
 
+bool inLoop(Node node)
+{
+	switch(node.type)
+	{
+		case NodeType.ForStatementNode:
+		case NodeType.DoWhileStatementNode:
+		case NodeType.WhileStatementNode:
+			return true;
+		case NodeType.FunctionBodyNode:
+			return false;
+		default:
+			return node.parent.inLoop();
+	}
+}
+
+auto calcDepth(Node node, Node root = null)
+{
+	size_t i;
+	for(; node !is root; i++)
+		node = node.parent;
+	return i;
+}
+
+auto getNthParent(Node node, size_t d)
+{
+	for(;d != 0;d--)
+		node = node.parent;
+	return node;
+}

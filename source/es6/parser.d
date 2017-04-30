@@ -245,6 +245,7 @@ final class Parser
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
 				case Type.LineTerminator:
+				case Type.Semicolon:
 					scanAndSkipCommentsAndTerminators();
 					break;
 				case Type.SheBang:
@@ -1301,13 +1302,6 @@ final class Parser
 	bool isIdentifierReservedKeyword(const(ubyte)[] identifier)
 	{
 		return identifier.isReservedKeyword();
-		//return (i.identifier == "break" || i.identifier == "do" || i.identifier == "in" || i.identifier == "typeof" || i.identifier == "case" || i.identifier == "else" ||
-		//	i.identifier == "instanceof" || i.identifier == "var" || i.identifier == "catch" || i.identifier == "export" || i.identifier == "new" ||
-		//	i.identifier == "void" || i.identifier == "class" || i.identifier == "extends" || i.identifier == "return" || i.identifier == "while" || i.identifier == "const" ||
-		//	i.identifier == "finally" || i.identifier == "super" || i.identifier == "with" || i.identifier == "continue" || i.identifier == "for" || i.identifier == "switch" ||
-		//	i.identifier == "yield" || i.identifier == "debugger" || i.identifier == "function" || i.identifier == "this" || i.identifier == "default" || i.identifier == "if" ||
-		//	i.identifier == "throw" || i.identifier == "delete" || i.identifier == "import" || i.identifier == "try" || i.identifier == "enum" || i.identifier == "await" ||
-		//	i.identifier == "null" || i.identifier == "true" || i.identifier == "false");
 	}
 	Node parseIdentifier(int attributes = 0)
 	{
@@ -1382,14 +1376,13 @@ final class Parser
 			}
 			if (token.type == Type.CloseParenthesis)
 			{
-				auto node = make!(ArgumentsNode)(args.data);
-				attributes |= Attribute.NoRegex;
-				scanToken(attributes.toGoal);
-				return node;
+				goto end;
 			}
 			if (token.type == Type.Comma)
 			{
-				scanToken(attributes.toGoal);
+				scanAndSkipCommentsAndTerminators(attributes.toGoal);
+				if (token.type == Type.CloseParenthesis)
+					goto end;
 				args.put(parseAssignmentExpression(Attribute.In | attributes));
 				// TODO what if parse fails ?
 			} else {
@@ -1401,6 +1394,10 @@ final class Parser
 				// TODO what if parse fails ?
 			}
 		}
+		end: auto node = make!(ArgumentsNode)(args.data);
+		attributes |= Attribute.NoRegex;
+		scanToken(attributes.toGoal);
+		return node;
 	}
 	Node parseArrayIndexing(int attributes = 0)
 	{
@@ -1472,12 +1469,7 @@ final class Parser
 				return make!(EmptyStatementNode)();
 			default: node = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield,Attribute.Return)); break;
 		}
-		if (token.type == Type.Semicolon)
-		{
-			scanToken(attributes.toGoal);
-			return node;
-		}
-		if (node.type == NodeType.ErrorNode)
+		if (token.type == Type.Semicolon || node.type == NodeType.ErrorNode)
 		{
 			scanToken(attributes.toGoal);
 			return node;
@@ -1497,8 +1489,13 @@ final class Parser
 					{
 						auto idNode = cast(IdentifierReferenceNode)node;
 						assert(idNode !is null);
-						scanToken(attributes.toGoal);
-						return make!(LabelledStatementNode)(idNode.identifier);
+						scanAndSkipCommentsAndTerminators(attributes.toGoal);
+						Node child;
+						if (token.type == Type.Identifier && token.match == "function")
+							child = parseFunctionDeclaration(attributes);
+						else
+							child = parseStatementListItem(attributes);
+						return make!(LabelledStatementNode)(idNode.identifier, child);
 					}
 					return error("Unexpected colon in Statement");
 				case Type.Semicolon:
@@ -1514,7 +1511,7 @@ final class Parser
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.match == "return");
 		scanToken();
-		if (token.type == Type.LineTerminator || isEndOfExpression)
+		if (token.type == Type.LineTerminator || isEndOfExpression || token.type == Type.SingleLineComment || lexer.tokenLines != 0)
 			return make!(ReturnStatementNode)();
 		auto expr = parseExpression(Attribute.In | attributes);
 		return make!(ReturnStatementNode)(expr);
@@ -1526,7 +1523,7 @@ final class Parser
 		scanAndSkipCommentsAndTerminators();
 		Node[] children = parseStatementList(attributes);
 		if (token.type != Type.CloseCurlyBrace)
-			return error("Expected closing curly brace");
+			return error(children, "Expected closing curly brace");
 		scanAndSkipCommentsAndTerminators();
 		return make!(BlockStatementNode)(children);
 	}
@@ -1543,6 +1540,7 @@ final class Parser
 				case Type.LineTerminator:
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
+				case Type.Semicolon:
 					scanAndSkipCommentsAndTerminators();
 					continue;
 				default:
@@ -1568,7 +1566,8 @@ final class Parser
 					break;
 				case Keyword.Let:
 				case Keyword.Const:
-					node = parseLexicalDeclaration(Attribute.In | attributes.mask!(Attribute.Yield));
+					if (lexer.lookAheadForAny!(Type.Identifier,Type.OpenSquareBrackets,Type.OpenCurlyBrace))
+						node = parseLexicalDeclaration(Attribute.In | attributes.mask!(Attribute.Yield));
 					break;
 				default:
 					break;
@@ -1806,6 +1805,7 @@ final class Parser
 		assert(token.type == Type.Identifier && token.match == "do");
 		scanAndSkipCommentsAndTerminators();
 		Node[] children = [parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return))];
+		skipCommentsAndLineTerminators();
 		if (token.type != Type.Identifier || token.match != "while")
 			return error("Expected while keyword");
 		scanAndSkipCommentsAndTerminators();
@@ -2219,6 +2219,12 @@ final class Parser
 				case Type.LineTerminator:
 					scanAndSkipCommentsAndTerminators();
 					continue;
+				case Type.StringLiteral:
+				case Type.OpenSquareBrackets:
+					methods ~= parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield));
+					if (methods[$-1].type == NodeType.ErrorNode)
+						return methods[$-1];
+					break;
 				default:
 					return error("Expected keyword static, class method, class generator, setter or getter");
 			}
@@ -2600,6 +2606,16 @@ unittest
 	auto n = parser.parseLeftHandSideExpression();
 	n.shouldBeOfType!IdentifierReferenceNode;
 }
+@("parseArguments")
+unittest
+{
+	alias parseArguments = parseNode!("parseArguments",ArgumentsNode);
+	parseArguments(`()`);
+	parseArguments(`(a)`).children.length.shouldEqual(1);
+	parseArguments(`(a,b,c)`).children.length.shouldEqual(3);
+	parseArguments(`(a,b,c,)`).children.length.shouldEqual(3);
+	parseArguments("(a\n,\nb\n,\nc\n,\n)").children.length.shouldEqual(3);
+}
 @("parseRightHandSideExpression")
 unittest
 {
@@ -2656,6 +2672,7 @@ unittest
 
 	parseConditionalExpression!(IdentifierReferenceNode)("abc");
 	parseConditionalExpression("abc ? 6 : 7");
+	parseConditionalExpression("abc\n?\n6\n:\n7");
 	parseConditionalExpression("abc ?").shouldThrow();
 	parseConditionalExpression("abc ? 6").shouldThrow();
 	parseConditionalExpression("abc ? 6 :").shouldThrow();
@@ -2736,9 +2753,12 @@ unittest
 	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n;");
 	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n // \n;");
 	parseStatement!(IdentifierReferenceNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n;");
-	parseStatement!(LabelledStatementNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n:");
+	parseStatement!(LabelledStatementNode)("abc  \n\r\n /* multi \n line \r\n comment */ \n:;");
 	parseStatement!(ContinueStatementNode)("continue label;").label.shouldEqual("label");
 	parseStatement!(BreakStatementNode)("break label;").label.shouldEqual("label");
+	parseStatement!(LabelledStatementNode)("bla: var a = 0;").children[0].shouldBeOfType!(VariableStatementNode);
+	parseStatement!(LabelledStatementNode)("bla\n:\nvar a = 0;").children[0].shouldBeOfType!(VariableStatementNode);
+	parseStatement!(LabelledStatementNode)("bla\n:\n{ var a = 0; }").children[0].shouldBeOfType!(BlockStatementNode);
 }
 @("parseVariableStatement")
 unittest
@@ -2812,6 +2832,10 @@ unittest
 	parseForStatement("for (var a of b) {}").loopType.shouldEqual(ForLoop.VarOf);
 	parseForStatement("for (a in b) {}").loopType.shouldEqual(ForLoop.ExprIn);
 	parseForStatement("for (a of b) {}").loopType.shouldEqual(ForLoop.ExprOf);
+	//parseForStatement("for (let in b) {}").loopType.shouldEqual(ForLoop.ExprIn); //TODO: these are valid (except maybe "of")
+	//parseForStatement("for (let of b) {}").loopType.shouldEqual(ForLoop.ExprOf);
+	//parseForStatement("for (const in b) {}").loopType.shouldEqual(ForLoop.ExprIn);
+	//parseForStatement("for (const of b) {}").loopType.shouldEqual(ForLoop.ExprOf);
 }
 @("parseObjectLiteral")
 unittest
@@ -2895,6 +2919,7 @@ unittest
 	alias parseDoWhileStatement = parseNode!("parseDoWhileStatement",DoWhileStatementNode);
 
 	parseDoWhileStatement("do a;while(true)");
+	parseDoWhileStatement("do\na;\nwhile\n(true)");
 }
 @("parseStatementList")
 unittest
@@ -2906,8 +2931,8 @@ unittest
 		return parser.parseStatementList();
 	}
 
-	parseStatementList(";")[0].shouldBeOfType!(EmptyStatementNode);
 	parseStatementList("").length.shouldEqual(0);
+	parseStatementList(";").length.shouldEqual(0);
 }
 @("parseIdentifier")
 unittest
@@ -2945,6 +2970,8 @@ unittest
 	parseClassDeclaration("class abc{static set m(abc){}}").methods[0].shouldBeOfType!(ClassSetterNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
 	parseClassDeclaration("class abc{static get m(){}}").methods.length.shouldEqual(1);
 	parseClassDeclaration("class abc{static get m(){}}").methods[0].shouldBeOfType!(ClassGetterNode).children[0].shouldBeOfType!(IdentifierNameNode).identifier.shouldEqual("m");
+	parseClassDeclaration(`class abc{"bla"(){}}`).methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(StringLiteralNode).value.shouldEqual("bla");
+	parseClassDeclaration(`class abc{[bla](){}}`).methods[0].shouldBeOfType!(ClassMethodNode).children[0].shouldBeOfType!(ComputedPropertyNameNode).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("bla");
 	parseClassDeclaration("class name { a(){}/*comment*/b(){}\nc(){} // comment \nd(){}; ;; }");
 	parseClassDeclaration("class {}").shouldThrowSaying("Expected Identifier as part of ClassDeclaration");
 	parseClassDeclaration("class name").shouldThrowSaying("Expected opening brace as part of class declaration");
@@ -2995,13 +3022,16 @@ unittest
 		.findFirst(NodeType.ClassDeclarationNode).shouldNotBeNull;
 	// TODO: this fails!
 	// parseModule("id \n ++c").findFirst(NodeType.UnaryExpressionNode).as!(UnaryExpressionNode).children[0].as!(IdentifierReferenceNode).identifier.shouldEqual(cast(const(ubyte)[])"c");
-	 parseModule(`function * abc() { for (var i = 0; i < 5; i++) { yield i; } }`);
+	parseModule(`function * abc() { for (var i = 0; i < 5; i++) { yield i; } }`);
+	parseModule(`function * abc() { for (var i = 0; i < 5; i++) { yield i; } }`);
 }
 @("Node flag")
 unittest
 {
 	alias parseModule = parseNode!("parseModule",ModuleNode, Parser.Flags.Node);
 	parseModule(`return 66;`).findFirst(NodeType.ReturnStatementNode).shouldNotBeNull;
+	parseModule("return //bla bla\nvar a = 6;");
+	parseModule("return /*bla bla\n*/var a = 6;");
 }
 @("parseImportDeclaration")
 unittest

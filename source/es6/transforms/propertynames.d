@@ -55,7 +55,9 @@ bool shortenLiteralPropertyNames(PropertyDefinitionNode node, out Node replacedW
 
 	if (raw2.type == ValueType.Numeric)
 	{
-		node.name.replaceWith(new DecimalLiteralNode(strLit.value));
+		if (strLit.value[0] == '-' || strLit.value[0] == '+')
+			return false;
+		node.name.replaceWith(new DecimalLiteralNode(strLit.value)).hints.add(Hint.Visited);
 		return true;
 	}
 
@@ -74,7 +76,7 @@ bool shortenLiteralPropertyNames(PropertyDefinitionNode node, out Node replacedW
 		idx += len;
 	}
 
-	node.name.replaceWith(new IdentifierNameNode(strLit.value));
+	node.name.replaceWith(new IdentifierNameNode(strLit.value)).hints.add(Hint.Visited);
 	return true;
 }
 @("shortenLiteralPropertyNames")
@@ -83,8 +85,8 @@ unittest
 	alias assertShortenLiteralPropname = assertTransformations!(shortenLiteralPropertyNames);
 
 	assertShortenLiteralPropname(
-		`var a = {"123":123, "": 65, "123b": 77, "abc": "abc", "null": null };`,
-		`var a = { 123: 123, "": 65, "123b": 77, abc: "abc", null: null };`
+		`var a = {"123":123, "": 65, "123b": 77, "abc": "abc", "null": null, "Ä": 5, "a€": 6, "€": 9 };`,
+		`var a = { 123: 123, "": 65, "123b": 77, abc: "abc", null: null, Ä: 5, "a€": 6, "€": 9 };`
 	);
 	assertShortenLiteralPropname(
 		"var a = {
@@ -108,5 +110,4 @@ unittest
 			\"stuff-with-nonchars\": 4
         }",
 	);
-
 }

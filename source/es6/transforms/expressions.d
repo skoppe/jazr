@@ -20,6 +20,7 @@ module es6.transforms.expressions;
 import es6.nodes;
 import es6.scopes;
 import es6.transforms.conditionals;
+import es6.transforms.returns : createVoid0Node;
 import option;
 import es6.analyse;
 import es6.eval;
@@ -108,10 +109,10 @@ unittest {
 		auto diff = diffTree(astA,expected);
 		got.assertTreeInternals(file,line);
 
-		if (diff.type == Diff.No)
+		if (diff.type == Diff.No || diff.type == Diff.IdentifiersCount)
 			return;
 
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emit(got.getRoot()).shouldEqual(emit(expected), file, line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertCombineExpressions(`a`,`b`,`a or b`).shouldThrow();
 	assertCombineExpressions(`a`,`b`,`a && b`);
@@ -243,7 +244,12 @@ bool simplifyUnaryExpressions(UnaryExpressionNode node, out Node replacedWith)
 		case ValueType.NaN:
 		case ValueType.Bool:
 		case ValueType.String:
-			replacedWith = node.replaceWith(raw.toUnaryExpression());
+			if (node.children[0].type == NodeType.IdentifierReferenceNode)
+				node.children[0].shread();
+			auto expr = raw.toUnaryExpression();
+			if (expr.type == NodeType.IdentifierReferenceNode)
+				node.branch.scp.addIdentifier(Identifier(expr.as!IdentifierNode));
+			replacedWith = node.replaceWith(expr);
 			return true;
 		default: return false;
 	}
@@ -436,6 +442,7 @@ unittest
 
 void convertHexToDecimalLiterals(HexLiteralNode node, out Node replacedWith)
 {
+	import std.conv : to;
 	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
 	if (node.value.length > 8)
@@ -561,6 +568,7 @@ void invertBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 				opNode.operator = opNode.operator == ExpressionOperator.LogicalAnd ? ExpressionOperator.LogicalOr : ExpressionOperator.LogicalAnd;
 				opNode.reanalyseHints();
 			}
+			replacedWith = node;
 		} else
 		{
 			unary.replaceWith(unary.children[0]);
@@ -792,4 +800,96 @@ unittest
 		//`t.type === a.Token.Keyword && t.value === e || this.throwUnexpectedToken(t)`
 	//);
 
+bool convertUndefinedToVoid0(Scope scp)
+{
+	import std.algorithm : remove;
+	size_t off = 0;
+	foreach(idx, iden; scp.identifiers.dup)
+	{
+		if (iden.definition !is null)
+			continue;
+		if (iden.node.identifier != "undefined")
+			continue;
 
+		iden.node.replaceWith(createVoid0Node());
+
+		scp.identifiers = scp.identifiers.remove(idx-off);
+		off++;
+	}
+	return off != 0;
+}
+
+@("convertUndefinedToVoid0")
+unittest
+{
+	alias assertToVoid0 = assertTransformations!(convertUndefinedToVoid0);
+
+	assertToVoid0(
+		`undefined;`,
+		`void 0;`
+	);
+	assertToVoid0(
+		`var a = undefined;`,
+		`var a = void 0;`
+	);
+	assertToVoid0(
+		`if (undefined) b = undefined;`,
+		`if (void 0) b = void 0;`
+	);
+	assertToVoid0(
+		`a = {undefined: 6};`,
+		`a = {undefined: 6};`
+	);
+	assertToVoid0(
+		`var undefined; a = undefined;`,
+		`var undefined; a = undefined;`
+	);
+}
+
+bool convertInfinityTo1div0(Scope scp)
+{
+	import std.algorithm : remove;
+	size_t off = 0;
+	foreach(idx, iden; scp.identifiers.dup)
+	{
+		if (iden.definition !is null)
+			continue;
+		if (iden.node.identifier != "Infinity")
+			continue;
+
+		iden.node.replaceWith(
+			new BinaryExpressionNode([new DecimalLiteralNode(cast(const(ubyte)[])"1"),new ExpressionOperatorNode(ExpressionOperator.Division),new DecimalLiteralNode(cast(const(ubyte)[])"0")])
+		);
+
+		scp.identifiers = scp.identifiers.remove(idx-off);
+		off++;
+	}
+	return off != 0;
+}
+
+@("convertInfinityTo1div0")
+unittest
+{
+	alias assertTo1div0 = assertTransformations!(convertInfinityTo1div0);
+
+	assertTo1div0(
+		`Infinity;`,
+		`1/0;`
+	);
+	assertTo1div0(
+		`var a = Infinity;`,
+		`var a = 1/0;`
+	);
+	assertTo1div0(
+		`if (Infinity) b = Infinity;`,
+		`if (1/0) b = 1/0;`
+	);
+	assertTo1div0(
+		`a = {Infinity: 6};`,
+		`a = {Infinity: 6};`
+	);
+	assertTo1div0(
+		`var Infinity; a = Infinity;`,
+		`var Infinity; a = Infinity;`
+	);
+}
