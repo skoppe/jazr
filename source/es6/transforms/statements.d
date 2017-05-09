@@ -148,7 +148,6 @@ unittest
 		`if (a) for (;;) { if (b) bla(); } else doo();`,
 		`if (a) for (;;) { if (b) bla(); } else doo();`
 	);
-	// TODO: these dont work yet due to low ROI
 	assertRemoveRedundantBlockStatements(
 		`if (a) { if (b) { if (c) for(;;); } else i = 7; } else d = 6;`,
 		`if (a) if (b) { if (c) for(;;); } else i = 7; else d = 6;`
@@ -160,5 +159,49 @@ unittest
 	assertRemoveRedundantBlockStatements(
 		`if (a) { if (b) { if (c) for(;;); } else for(;;); if (b) k = 7; } else d = 6;`,
 		`if (a) { if (b) { if (c) for(;;); } else for(;;); if (b) k = 7; } else d = 6;`
+	);
+}
+
+void minifyLabels(Scope scp)
+{
+	int cnt = 0;
+	foreach(ref l; scp.labels)
+	{
+		string id = generateValidIdentifier(cnt++);
+		l.definition.label = cast(const(ubyte)[])id;
+		foreach(r; l.references)
+		{
+			switch (r.type)
+			{
+				case NodeType.BreakStatementNode:
+					auto n = r.as!BreakStatementNode;
+					n.label = cast(const(ubyte)[])id;
+					break;
+				case NodeType.ContinueStatementNode:
+					auto n = r.as!ContinueStatementNode;
+					n.label = cast(const(ubyte)[])id;
+					break;
+				default: assert(false);
+			}
+		}
+	}
+}
+
+@("minifyLabels")
+unittest
+{
+	alias assertMinifyLabels = assertTransformations!(minifyLabels);
+
+	assertMinifyLabels(
+		`bla: for(;bla;) { continue bla; }`,
+		`n: for(;bla;) { continue n; }`
+	);
+	assertMinifyLabels(
+		`bla: for(;bla;) { break bla; }`,
+		`n: for(;bla;) { break n; }`
+	);
+	assertMinifyLabels(
+		`bla: for(;bla;) { break bla; }; hup: for(;hup;) { continue hup; }`,
+		`n: for(;bla;) { break n; }; t: for(;hup;) { continue t; }`
 	);
 }

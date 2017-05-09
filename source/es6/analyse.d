@@ -519,7 +519,7 @@ private void analyseArrowFunctionParams(Node node, Scope s)
 		}
 	}
 }
-private int calcHints(Node node)
+private byte calcHints(Node node)
 {
 	switch (node.type)
 	{
@@ -574,7 +574,7 @@ private int calcHints(Node node)
 			return Hint.None;
 	}
 }
-private int getHintMask(Node n)
+private byte getHintMask(Node n)
 {
 	switch (n.type)
 	{
@@ -597,7 +597,7 @@ private int getHintMask(Node n)
 			return ~(Hint.None);
 	}
 }
-private int getParentHintMask(Node n)
+private byte getParentHintMask(Node n)
 {
 	switch (n.type)
 	{
@@ -612,7 +612,7 @@ void reanalyseHints(Node node)
 	auto start = node;
 	import std.algorithm : reduce, map;
 	while(node !is null) {
-		int hints = calcHints(node);
+		byte hints = calcHints(node);
 		hints |= (node.getHintMask() & reduce!((a,b)=>a|b) (cast(int)Hint.None,node.children.map!(c => c.getParentHintMask() & c.hints.get)) );
 		if (start !is node && node.hints.get == hints)
 			return;
@@ -751,17 +751,17 @@ void handleUseStrict(Scope scp, Node node)
 	}
 }			
 
-private int analyse(Node node, Scope s = null, Branch b = null)
+private byte analyse(Node node, Scope s = null, Branch b = null)
 {
 	if (s is null)
 		s = new Scope(node);
 	if (b is null)
 		b = s.branch;
 	node.branch = b;
-	int hints;
-	int analyseChildren(Node[] ns, Scope s, Branch b = null)
+	byte hints;
+	byte analyseChildren(Node[] ns, Scope s, Branch b = null)
 	{
-		int hints = Hint.None;
+		byte hints = Hint.None;
 		foreach(idx, n; ns)
 		{
 			assert(n !is null);
@@ -771,6 +771,20 @@ private int analyse(Node node, Scope s = null, Branch b = null)
 	}
 	switch (node.type)
 	{
+		case NodeType.ContinueStatementNode:
+			auto n = node.as!ContinueStatementNode;
+			if (n.label !is null)
+				s.linkToLabel(node, n.label);
+			break;
+		case NodeType.BreakStatementNode:
+			auto n = node.as!BreakStatementNode;
+			if (n.label !is null)
+				s.linkToLabel(node, n.label);
+			break;
+		case NodeType.LabelledStatementNode:
+			auto n = node.as!LabelledStatementNode;
+			s.addLabel(n);
+			goto default;
 		case NodeType.FunctionDeclarationNode:
 		case NodeType.FunctionExpressionNode:
 		case NodeType.GeneratorDeclarationNode:

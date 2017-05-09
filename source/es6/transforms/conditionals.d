@@ -622,3 +622,126 @@ unittest
 		`function a(b){k=6;return b instanceof a?b:(this instanceof a)?void(this._wrapped=b,b=5,e=6,p=8):new a(b)}`
 	);
 }
+
+bool simplifyVoid0Conditionals(ConditionalExpressionNode node, out Node replacedWith)
+{
+	if (!node.isExpressionStatement)
+		return false;
+	if (node.truthPath.isVoid0)
+	{
+		auto oper = new ExpressionOperatorNode(ExpressionOperator.LogicalOr);
+		if (node.condition.type == NodeType.BinaryExpressionNode)
+		{
+			replacedWith = node.replaceWith(node.condition);
+			replacedWith.addChild(oper);
+		} else
+			replacedWith = node.replaceWith(new BinaryExpressionNode([node.condition,oper]));
+		if (node.elsePath.type == NodeType.BinaryExpressionNode)
+			replacedWith.addChildren(node.elsePath.children);
+		else
+			replacedWith.addChild(node.elsePath);
+		oper.reanalyseHints();
+	} else if (node.elsePath.isVoid0)
+	{
+		auto oper = new ExpressionOperatorNode(ExpressionOperator.LogicalAnd);
+		if (node.condition.type == NodeType.BinaryExpressionNode)
+		{
+			if (node.condition.hints.has(Hint.Or))
+				replacedWith = node.replaceWith(new BinaryExpressionNode([node.condition.parenthesizeExpression()]));
+			else
+				replacedWith = node.replaceWith(node.condition);
+			replacedWith.addChild(oper);
+		} else
+			replacedWith = node.replaceWith(new BinaryExpressionNode([node.condition,oper]));
+		if (node.truthPath.type == NodeType.BinaryExpressionNode)
+			replacedWith.addChildren(node.truthPath.children);
+		else
+			replacedWith.addChild(node.truthPath);
+		oper.parent.reanalyseHints();
+	} else
+		return false;
+	return true;
+}
+
+@("simplifyVoid0Conditionals")
+unittest
+{
+	alias assertSimplifyVoid0Conditionals = assertTransformations!(simplifyVoid0Conditionals);
+
+	assertSimplifyVoid0Conditionals(
+		`a ? void 0 : b();`,
+		`a || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a ? b() : void 0;`,
+		`a && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a && c ? void 0 : b();`,
+		`a && c || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a && c ? b() : void 0;`,
+		`a && c && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a || c ? void 0 : b();`,
+		`a || c || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a || c ? b() : void 0;`,
+		`(a || c) && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a ? void 0 : d && b();`,
+		`a || d && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a ? d && b() : void 0;`,
+		`a && d && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a && c ? void 0 : d && b();`,
+		`a && c || d && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a && c ? d && b() : void 0;`,
+		`a && c && d && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a || c ? void 0 : d && b();`,
+		`a || c || d && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a || c ? d && b() : void 0;`,
+		`(a || c) && d && b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a ? void 0 : d || b();`,
+		`a || d || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a ? d || b() : void 0;`,
+		`a && d || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a && c ? void 0 : d || b();`,
+		`a && c || d || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a && c ? d || b() : void 0;`,
+		`a && c && d || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a || c ? void 0 : d || b();`,
+		`a || c || d || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`a || c ? d || b() : void 0;`,
+		`(a || c) && d || b();`
+	);
+	assertSimplifyVoid0Conditionals(
+		`bla(a || c ? d || b() : void 0);`,
+		`bla(a || c ? d || b() : void 0);`
+	);
+}

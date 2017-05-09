@@ -29,6 +29,7 @@ import es6.allocator;
 import std.array : appender;
 import es6.bench;
 
+version = customallocator;
 version(chatty)
 {
 	version = tracing;
@@ -96,12 +97,6 @@ int filter(Ts...)(int attr)
 	enum mask = orAttributes!Ts;
 	return attr & ~mask;
 }
-Goal toGoal(int attr)
-{
-	if ((attr & Attribute.NoRegex) == Attribute.NoRegex)
-		return Goal.ProhibitRegex;
-	return Goal.All;
-}
 private bool has(alias a)(int attribute)
 {
 	return (attribute & a) == a;
@@ -109,17 +104,17 @@ private bool has(alias a)(int attribute)
 @("Attribute")
 unittest
 {
-	int a = Attribute.In | Attribute.Yield | Attribute.Return | Attribute.Default;
-	a.has!(Attribute.In).shouldBeTrue;
-	a.has!(Attribute.Yield).shouldBeTrue;
-	a.has!(Attribute.Return).shouldBeTrue;
-	a.has!(Attribute.Default).shouldBeTrue;
-	orAttributes!(Attribute.In,Attribute.Yield).shouldEqual(Attribute.In | Attribute.Yield);
-	a.mask!(Attribute.In).has!(Attribute.In).shouldBeTrue;
-	a.mask!(Attribute.In).has!(Attribute.Yield).shouldBeFalse;
-	a.mask!(Attribute.In,Attribute.Yield).has!(Attribute.Yield).shouldBeTrue;
-	a.mask!(Attribute.In,Attribute.Yield).has!(Attribute.Return).shouldBeFalse;
-	a.mask!(Attribute.In,Attribute.Yield,Attribute.Return).has!(Attribute.Return).shouldBeTrue;
+	int a = Goal.In | Goal.Yield | Goal.Return | Goal.Default;
+	a.has!(Goal.In).shouldBeTrue;
+	a.has!(Goal.Yield).shouldBeTrue;
+	a.has!(Goal.Return).shouldBeTrue;
+	a.has!(Goal.Default).shouldBeTrue;
+	orAttributes!(Goal.In,Goal.Yield).shouldEqual(Goal.In | Goal.Yield);
+	a.mask!(Goal.In).has!(Goal.In).shouldBeTrue;
+	a.mask!(Goal.In).has!(Goal.Yield).shouldBeFalse;
+	a.mask!(Goal.In,Goal.Yield).has!(Goal.Yield).shouldBeTrue;
+	a.mask!(Goal.In,Goal.Yield).has!(Goal.Return).shouldBeFalse;
+	a.mask!(Goal.In,Goal.Yield,Goal.Return).has!(Goal.Return).shouldBeTrue;
 }
 final class Parser
 {
@@ -135,6 +130,7 @@ final class Parser
 		ulong _nodeCnt;
 		version(customallocator)
 		{
+			pragma(msg, "Using Custom Allocator");
 			PointerBumpAllocator allocator;
 		}
 		auto make(T, Args...)(auto ref Args args)
@@ -164,14 +160,15 @@ final class Parser
 			import std.array : array;
 			return ' '.repeat(traceDepth*2).array.to!string;
 		}
-		void traceEnter(string fun)
+		auto traceEnter(string fun)
 		{
 			version (chatty) { writeln(traceIndent,fun); }
 			traceDepth++;
+			return startCounter(fun);
 		}
-		void traceExit(string fun, TickDuration a)
+		void traceExit(string fun, long a)
 		{
-			timingCounter(fun, a);
+			stopCounter(fun, a);
 			version (chatty) { writefln("%s%s: (%susecs)",traceIndent,fun,a.usecs); }
 			traceDepth--;
 		}
@@ -181,11 +178,9 @@ final class Parser
 		version (tracing) {
 			import std.datetime : StopWatch;
 			enum traceFunction = 
-				`traceEnter("` ~ fun ~ `");
-				auto sw = StopWatch();
-				sw.start();
+				`auto start = traceEnter("` ~ fun ~ `");
 				scope(exit) {
-					traceExit("`~fun~`",sw.peek);
+					traceExit("`~fun~`",start);
 				}`;
 		} else enum traceFunction = "";
 	}
@@ -195,12 +190,22 @@ final class Parser
 		lexer = Lexer(s);
 		flags = f;
 		if (flags & Flags.Node)
-			rootAttributes = rootAttributes | Attribute.Return;
+			rootAttributes = rootAttributes | Goal.Return;
 	}
-	Token scanToken(Goal goal = Goal.All)
+	version (unittest)
 	{
-		token = lexer.scanToken(goal);
-		return token;
+		Token scanToken(int goal = Goal.None, in size_t at = __LINE__)
+		{
+			token = lexer.scanToken(cast(Goal)goal,__FILE__,at);
+			return token;
+		}
+	} else
+	{
+		Token scanToken(int goal = Goal.None)
+		{
+			token = lexer.scanToken(cast(Goal)goal);
+			return token;
+		}
 	}
 	Node error(const(char)[] message, in size_t at = __LINE__)
 	{
@@ -399,24 +404,24 @@ final class Parser
 			switch(token.keyword)
 			{
 				case Keyword.Function:
-					decl = make!(ExportDefaultDeclarationNode)(parseFunctionDeclaration(Attribute.Default));
+					decl = make!(ExportDefaultDeclarationNode)(parseFunctionDeclaration(Goal.Default));
 					break;
 				case Keyword.Class:
-					decl = make!(ExportDefaultDeclarationNode)(parseClassDeclaration(Attribute.Default));
+					decl = make!(ExportDefaultDeclarationNode)(parseClassDeclaration(Goal.Default));
 					break;
 				default:
-					decl = make!(ExportDefaultDeclarationNode)(parseAssignmentExpression(Attribute.In));
+					decl = make!(ExportDefaultDeclarationNode)(parseAssignmentExpression(Goal.In));
 					break;
 			}
 		} else if (token.match == "var")
 		{
 			decl = make!(ExportDeclarationNode)(parseVariableStatement());
 		} else if (token.match == "function")
-			decl = make!(ExportDeclarationNode)(parseFunctionDeclaration(Attribute.Default));
+			decl = make!(ExportDeclarationNode)(parseFunctionDeclaration(Goal.Default));
 		else if (token.match == "class")
-			decl = make!(ExportDeclarationNode)(parseClassDeclaration(Attribute.Default));
+			decl = make!(ExportDeclarationNode)(parseClassDeclaration(Goal.Default));
 		else if (token.match == "let" || token.match == "const")
-			decl = make!(ExportDeclarationNode)(parseLexicalDeclaration(Attribute.In));
+			decl = make!(ExportDeclarationNode)(parseLexicalDeclaration(Goal.In));
 		else
 			return error(format("Invalid %s as part of ExportDeclaration",token.type));
 
@@ -476,7 +481,7 @@ final class Parser
 		}
 		if (token.type != Type.OpenParenthesis)
 			return error("Expected opening parenthesis as part of function declaration");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		auto params = parseFormalParameterList();
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseParenthesis)
@@ -485,9 +490,9 @@ final class Parser
 		if (token.type != Type.OpenCurlyBrace)
 			return error("Expected opening brace");
 		scanAndSkipCommentsAndTerminators();
-		int attr = Attribute.Return;
+		int attr = Goal.Return;
 		if (generator)
-			attr |= Attribute.Yield;
+			attr |= Goal.Yield;
 		auto funcBody = parseFunctionBody(attr);
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
@@ -523,9 +528,9 @@ final class Parser
 			if (token.type == Type.SpreadOperator)
 			{
 				scanAndSkipCommentsAndTerminators();
-				children.put(make!(SpreadElementNode)(parseAssignmentExpression(Attribute.In | attributes)));
+				children.put(make!(SpreadElementNode)(parseAssignmentExpression(Goal.In | attributes)));
 			} else
-				children.put(parseAssignmentExpression(Attribute.In | attributes));
+				children.put(parseAssignmentExpression(Goal.In | attributes));
 			if (token.type != Type.Comma)
 				break;
 
@@ -586,13 +591,13 @@ final class Parser
 					skipCommentsAndLineTerminators();
 					if (token.type == Type.OpenParenthesis)
 					{
-						children.put(parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield),name));
+						children.put(parseClassMethod(staticAttr,attributes.mask!(Goal.Yield),name));
 						break;
 					}
 					if (token.type != Type.Colon)
 						return error("Expected colon as part of PropertyDefinition");
 					scanAndSkipCommentsAndTerminators();
-					auto expr = parseAssignmentExpression(Attribute.In | attributes);
+					auto expr = parseAssignmentExpression(Goal.In | attributes);
 					children.put(make!(PropertyDefinitionNode)(name,expr));
 					break;
 				case Type.Identifier:
@@ -601,12 +606,12 @@ final class Parser
 						case Keyword.Set:
 							if (lexer.lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon,Type.OpenParenthesis))
 								goto default;
-							children.put(parseClassSetter(staticAttr,attributes.mask!(Attribute.Yield)));
+							children.put(parseClassSetter(staticAttr,attributes.mask!(Goal.Yield)));
 							break;
 						case Keyword.Get:
 							if (lexer.lookAheadForAny!(Type.Comma,Type.CloseCurlyBrace,Type.Colon,Type.OpenParenthesis))
 								goto default;
-							children.put(parseClassGetter(staticAttr,attributes.mask!(Attribute.Yield)));
+							children.put(parseClassGetter(staticAttr,attributes.mask!(Goal.Yield)));
 							break;
 						default:
 							auto name = parsePropertyName(attributes);
@@ -614,13 +619,13 @@ final class Parser
 							if (token.type == Type.Colon)
 							{
 								scanAndSkipCommentsAndTerminators();
-								auto expr = parseAssignmentExpression(Attribute.In | attributes);
+								auto expr = parseAssignmentExpression(Goal.In | attributes);
 								children.put(make!(PropertyDefinitionNode)(name,expr));
 								break;
 							}
 							if (token.type == Type.OpenParenthesis)
 							{
-								children.put(parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield),name));
+								children.put(parseClassMethod(staticAttr,attributes.mask!(Goal.Yield),name));
 								break;
 							}
 							auto iden = cast(IdentifierNameNode)name;
@@ -630,7 +635,7 @@ final class Parser
 							if (token.type == Type.Assignment)
 							{
 								scanAndSkipCommentsAndTerminators();
-								auto init = parseAssignmentExpression(Attribute.In | attributes);
+								auto init = parseAssignmentExpression(Goal.In | attributes);
 								children.put(make!(CoverInitializedName)(iden,init));
 								break;
 							}
@@ -639,7 +644,7 @@ final class Parser
 					}
 					break;
 				case Type.Multiply:
-					children.put(parseClassGeneratorMethod(staticAttr,attributes.mask!(Attribute.Yield)));
+					children.put(parseClassGeneratorMethod(staticAttr,attributes.mask!(Goal.Yield)));
 					break;
 				case Type.CloseCurlyBrace:
 					goto end;
@@ -664,7 +669,7 @@ final class Parser
 
 		while (1) // this loop can't run forever
 		{
-			auto expr = parseExpression(Attribute.In | attributes);
+			auto expr = parseExpression(Goal.In | attributes);
 			// TODO: do something with errornode here
 			children ~= expr;
 			if (expr.type == NodeType.ErrorNode)
@@ -686,7 +691,7 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenParenthesis);
-		scanToken(attributes.filter!(Attribute.NoRegex).toGoal);
+		scanToken(attributes.filter!(Goal.NoRegex));
 		if (token.type == Type.CloseParenthesis)
 		{
 			auto node = make!(ParenthesisNode)();
@@ -695,7 +700,7 @@ final class Parser
 		}
 		if (token.type == Type.SpreadOperator)
 		{
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			skipCommentsAndLineTerminators();
 			auto spreadNode = make!(SpreadElementNode)(parseIdentifier(attributes));
 			auto node = make!(ParenthesisNode)(spreadNode);
@@ -706,7 +711,7 @@ final class Parser
 			return node;
 		}
 
-		attributes = attributes.mask!(Attribute.Yield,Attribute.In).filter!(Attribute.NoRegex);
+		attributes = attributes.mask!(Goal.Yield,Goal.In).filter!(Goal.NoRegex);
 		bool comma = false;
 		Node[] children;
 		while(1)
@@ -717,7 +722,7 @@ final class Parser
 					return error("Expected AssignmentExpression before eof");
 				if (children.length == 0)
 				{
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					return error("Expected Expression before eof");
 				}
 				if (children.length == 1)
@@ -731,12 +736,12 @@ final class Parser
 					if (comma)
 						return error("Expected AssignmentExpression instead got comma");
 					comma = true;
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.MultiLineComment:
 				case Type.SingleLineComment:
 				case Type.LineTerminator:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.SpreadOperator:
 					scanAndSkipCommentsAndTerminators();
@@ -747,14 +752,14 @@ final class Parser
 					auto exprNode = make!(ExpressionNode)(children);
 					return make!(ParenthesisNode)([exprNode,spread]);
 				case Type.CloseParenthesis:
-					scanAndSkipCommentsAndTerminators(Attribute.NoRegex);
+					scanAndSkipCommentsAndTerminators(Goal.NoRegex);
 					if (children.length == 1)
 						return make!(ParenthesisNode)(children[0]);
 					auto exprNode = make!(ExpressionNode)(children);
 					return make!(ParenthesisNode)(exprNode);
 				default:
 					comma = false;
-					auto expr = parseAssignmentExpression(Attribute.In | attributes);
+					auto expr = parseAssignmentExpression(Goal.In | attributes);
 					if (expr.type == NodeType.ErrorNode)
 						scanToken();
 					children ~= expr;
@@ -766,7 +771,7 @@ final class Parser
 	Node parsePrimaryExpression(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
-		attributes = attributes.mask!(Attribute.Yield | Attribute.NoRegex);
+		attributes = attributes.mask!(Goal.Yield | Goal.NoRegex);
 		switch (token.type)
 		{
 			/* Note: this Type.Identifier is inlined in the parseLeftHandSideExpression */
@@ -783,23 +788,23 @@ final class Parser
 						auto node = parseIdentifier(attributes);
 						return node;
 				}
-			case Type.StringLiteral: auto node = make!(StringLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.BinaryLiteral: auto node = make!(BinaryLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.OctalLiteral: auto node = make!(OctalLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.DecimalLiteral: auto node = make!(DecimalLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.HexLiteral: auto node = make!(HexLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
+			case Type.StringLiteral: auto node = make!(StringLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.BinaryLiteral: auto node = make!(BinaryLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.OctalLiteral: auto node = make!(OctalLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.DecimalLiteral: auto node = make!(DecimalLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.HexLiteral: auto node = make!(HexLiteralNode)(token.match); scanToken(attributes); return node;
 			case Type.OpenSquareBrackets: return parseArrayLiteral(attributes);
 			case Type.OpenCurlyBrace: return parseObjectLiteral(attributes);
-			case Type.TemplateHead: return parseTemplateTail(attributes.mask!(Attribute.Yield));
+			case Type.TemplateHead: return parseTemplateTail(attributes.mask!(Goal.Yield));
 			case Type.Template: //todo there is also a possible yield attribute here
 				auto tmplNode = make!(TemplateNode)(token.match);
-				auto node = make!(TemplateLiteralNode)(tmplNode); scanToken(attributes.toGoal); return node;
-			case Type.Regex: auto node = make!(RegexLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
+				auto node = make!(TemplateLiteralNode)(tmplNode); scanToken(attributes); return node;
+			case Type.Regex: auto node = make!(RegexLiteralNode)(token.match); scanToken(attributes); return node;
 			case Type.OpenParenthesis: return parseParenthesisExpression(attributes);
 			default:
 				auto node = error(format("unexpected %s token (%s)",token.type,cast(const(char)[])token.match));
 				// TODO: resync primary expression
-				scanToken(attributes.toGoal);
+				scanToken(attributes);
 				return node;
 		}
 	}
@@ -816,7 +821,7 @@ final class Parser
 	Node parseExpression(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
-		attributes = attributes.mask!(Attribute.Yield,Attribute.In);
+		attributes = attributes.mask!(Goal.Yield,Goal.In);
 		bool comma = true;
 		Node[] children;
 		while(1)
@@ -840,12 +845,12 @@ final class Parser
 					if (comma)
 						return error("Expected AssignmentExpression instead got comma");
 					comma = true;
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.MultiLineComment:
 				case Type.SingleLineComment:
 				case Type.LineTerminator:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				default:
 					if (!comma) {
@@ -867,7 +872,7 @@ final class Parser
 		mixin(traceFunction!(__FUNCTION__));
 		if (token.type == Type.OpenCurlyBrace)
 		{
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			auto funcBody = parseFunctionBody();
 			if (token.type != Type.CloseCurlyBrace)
 				return error("Expected closing curly brace");
@@ -880,9 +885,9 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		Node cond;
-		if (token.match == "yield" && attributes.has!(Attribute.Yield))
+		if (token.match == "yield" && attributes.has!(Goal.Yield))
 		{
-			return parseYieldExpression(attributes.filter!(Attribute.Yield));
+			return parseYieldExpression(attributes.filter!(Goal.Yield));
 		} else
 		{
 			cond = parseConditionalExpression(attributes);
@@ -892,17 +897,16 @@ final class Parser
 			if (cond.type == NodeType.IdentifierReferenceNode && token.type == Type.Arrow)
 			{
 				scanAndSkipCommentsAndTerminators();
-				return make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
+				return make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Goal.In)));
 			}
 			if (cond.type == NodeType.ParenthesisNode && token.type == Type.Arrow)
 			{
 				scanAndSkipCommentsAndTerminators();
-				return make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In)));
+				return make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Goal.In)));
 			}
 		}
 		if (cond.type == NodeType.ErrorNode)
 			return cond;
-		// todo what if cond in an errornode
 		if (cond.type == NodeType.UnaryExpressionNode || cond.type == NodeType.BinaryExpressionNode)
 			return cond;
 
@@ -937,10 +941,10 @@ final class Parser
 				children.put(cond);
 			}
 			children.put(child);
-			scanToken(attributes.toGoal);
-			if (token.match == "yield" && attributes.has!(Attribute.Yield))
+			scanToken(attributes);
+			if (token.match == "yield" && attributes.has!(Goal.Yield))
 			{
-				children.put(parseYieldExpression(attributes.filter!(Attribute.Yield)));
+				children.put(parseYieldExpression(attributes.filter!(Goal.Yield)));
 				break;
 			}
 			cond = parseConditionalExpression(attributes);
@@ -951,15 +955,15 @@ final class Parser
 			}
 			if (cond.type == NodeType.IdentifierReferenceNode && token.type == Type.Arrow)
 			{
-				scanAndSkipCommentsAndTerminators(attributes.toGoal);
-				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In))));
+				scanAndSkipCommentsAndTerminators(attributes);
+				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Goal.In))));
 				return make!(AssignmentExpressionNode)(children.data);
 			}
 			// TODO this idea in the if below is correct, but there might be Comments between the parenthesis and the arrow (which are allowed, as long as the arrow is on the same line as the closing parenthesis)
 			if (cond.type == NodeType.ParenthesisNode && token.type == Type.Arrow)
 			{
-				scanAndSkipCommentsAndTerminators(attributes.toGoal);
-				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Attribute.In))));
+				scanAndSkipCommentsAndTerminators(attributes);
+				children.put(make!(ArrowFunctionNode)(cond,parseArrowFunctionBody(attributes.mask!(Goal.In))));
 				return make!(AssignmentExpressionNode)(children.data);
 			}
 			children.put(cond);
@@ -1013,16 +1017,17 @@ final class Parser
 	Node parseConditionalExpression(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
-		auto rhs = parseRightHandSideExpression(attributes);
+		//auto rhs = parseRightHandSideExpression(attributes);
+		auto rhs = parseRightHandSideExpressionBottomUp(attributes);
 		if (token.type != Type.QuestionMark)
 			return rhs;
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		if (lexer.empty)
 			return error(format("Expected AssignmentExpression as part of an ConditionalExpression before eof"));
-		auto yeah = parseAssignmentExpression(Attribute.In | attributes);
+		auto yeah = parseAssignmentExpression(Goal.In | attributes);
 		if (token.type != Type.Colon)
 			return error([rhs,yeah],format("Expected colon as part of ConditionalExpression, instead got %s token %s",token.type,cast(const(ubyte)[])token.match));
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		if (lexer.empty)
 			return error(format("Expected AssignmentExpression as part of an ConditionalExpression before eof"));
 		auto nay = parseAssignmentExpression(attributes);
@@ -1034,7 +1039,7 @@ final class Parser
 		ArrayBuilder!Node children;
 		while (1) // this loop won't run forever
 		{
-			Node unary = parseUnaryExpression(attributes.mask!(Attribute.Yield | Attribute.NoRegex));
+			Node unary = parseUnaryExpression(attributes.mask!(Goal.Yield | Goal.NoRegex));
 			Node child;
 			switch (token.type)
 			{
@@ -1045,7 +1050,7 @@ final class Parser
 							child = make!(ExpressionOperatorNode)(ExpressionOperator.InstanceOf);
 							break;
 						case Keyword.In:
-							if (!attributes.has!(Attribute.In))
+							if (!attributes.has!(Goal.In))
 							{
 								if (children.length == 0)
 									return unary;
@@ -1062,7 +1067,7 @@ final class Parser
 					}
 					children.put(unary);
 					children.put(child);
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					continue;
 				case Type.LogicalAnd: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalAnd); break;
 				case Type.LogicalOr: 		child = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalOr); break;
@@ -1093,8 +1098,8 @@ final class Parser
 			}
 			children.put(unary);
 			children.put(child);
-			attributes &= ~Attribute.NoRegex;
-			scanToken(attributes.toGoal);
+			attributes &= ~Goal.NoRegex;
+			scanToken(attributes);
 		}
 	}
 	Node parseUnaryExpression(int attributes = 0)
@@ -1128,24 +1133,25 @@ final class Parser
 				default:
 					goto doLHS;
 			}
-			scanToken(attributes.toGoal);			
+			scanToken(attributes);			
 		}
 		return error("Found end of file before parsing UnaryExpression");
 		doLHS:
-		attributes |= Attribute.NoRegex;
+		attributes |= Goal.NoRegex;
+		auto lineNr = lexer.line;
 		auto lhsexpr = parseLeftHandSideExpression(attributes);
-		// TODO: BUG: we cannot parse a Increment or Decrement if there is new line after the lhsexpr (even if that newline is part of a single or multi-line comment) 
-		if (token.type == Type.Increment)
+		bool postFixOnSameLine = lineNr == lexer.line;
+		if (postFixOnSameLine && token.type == Type.Increment)
 		{
 			auto node = make!(UnaryExpressionNode)(prefixExprs,lhsexpr);
 			node.postfix = Postfix.Increment;
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			return node;
-		} else if (token.type == Type.Decrement)
+		} else if (postFixOnSameLine && token.type == Type.Decrement)
 		{
 			auto node = make!(UnaryExpressionNode)(prefixExprs,lhsexpr);
 			node.postfix = Postfix.Decrement;
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			return node;
 		} else if (prefixExprs.length > 0)
 			return make!(UnaryExpressionNode)(prefixExprs,lhsexpr);
@@ -1155,7 +1161,7 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Dot);
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 
 		while (1) // won't run forever
 		{
@@ -1164,11 +1170,11 @@ final class Parser
 				case Type.LineTerminator:
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.Identifier:
 					auto node = make!(AccessorNode)(token.match);
-					attributes |= Attribute.NoRegex;
+					attributes |= Goal.NoRegex;
 					scanAndSkipCommentsAndTerminators(attributes);
 					return node;
 				default:
@@ -1178,10 +1184,284 @@ final class Parser
 			}
 		}
 	}
-	Node parseLeftHandSideExpression(int attributes = 0)
+	Node parseRightHandSideExpressionBottomUp(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
-		size_t news = 0, args = 0;
+		ArrayBuilder!(Node,4) prefixs;
+		Node primary;
+		Node lhs;
+		Node unary;
+		Node binChild;
+		ArrayBuilder!(Node,4) lhsChildren;
+		ArrayBuilder!(Node,4) binaryChildren;
+		Postfix postfix = Postfix.None;
+		int unaryAttr = attributes.mask!(Goal.Yield | Goal.NoRegex);
+		int lhsAttr = unaryAttr | Goal.NoRegex;
+		int primAttr = lhsAttr.mask!(Goal.Yield | Goal.NoRegex);
+		int news, args;
+		bool hadNewLine = false;
+		lhsChildren.put(null); // preserve space for primary later on
+	unary:
+		while(1)
+		{
+			switch (token.type)
+			{
+				case Type.Identifier:
+					switch (token.keyword)
+					{
+						case Keyword.Delete: prefixs.put(make!(PrefixExpressionNode)(Prefix.Delete)); break;
+						case Keyword.Void: prefixs.put(make!(PrefixExpressionNode)(Prefix.Void)); break;
+						case Keyword.Typeof: prefixs.put(make!(PrefixExpressionNode)(Prefix.Typeof)); break;
+						case Keyword.This: scanToken(); primary = make!(KeywordNode)(Keyword.This); goto member;
+						case Keyword.Null: scanToken(); primary = make!(KeywordNode)(Keyword.Null); goto member;
+						case Keyword.True: scanToken(); primary = make!(BooleanNode)(true); goto member;
+						case Keyword.False: scanToken(); primary = make!(BooleanNode)(false); goto member;
+						case Keyword.Function: primary = parseFunctionExpression(); goto member;
+						case Keyword.Class: primary = parseClassExpression(primAttr); goto member;
+						case Keyword.Super:
+					unarySuper:
+							if (lexer.lookAheadForAny!(Type.OpenParenthesis))
+							{
+								primary = new IdentifierReferenceNode(cast(const(ubyte)[])"super");
+								args++;
+								scanAndSkipCommentsAndTerminators();
+								lhsChildren.put(parseArguments(lhsAttr.mask!(~Goal.NoRegex)));
+								goto member;
+							}
+							primary = parseSuperProperty(lhsAttr);
+							goto member;
+						case Keyword.New:
+							news++;
+							scanToken(lhsAttr);
+							while (token.type == Type.Identifier && token.keyword == Keyword.New)
+							{
+								news++;
+								scanToken(lhsAttr);
+							}
+							if (token.type == Type.Dot)
+							{
+								scanToken(lhsAttr);
+								if (token.type == Type.Identifier && token.match == "target")
+								{
+									news--;
+									primary = make!(NewTargetNode)();
+									scanToken(lhsAttr);
+								} else
+								{
+									primary = error("The only valid meta property for new is new.target");
+									scanToken(lhsAttr);
+								}
+								goto member;
+							}
+							if (token.type == Type.Identifier && token.keyword == Keyword.Super)
+								goto unarySuper;
+							primary = parseLeftHandSideExpression(lhsAttr,news);
+							news = 0;
+							goto member;
+						default:
+							auto lineNr = lexer.line;
+							primary = parseIdentifier(primAttr);
+							hadNewLine = lineNr != lexer.line;
+							goto member;
+					}
+					break;
+				case Type.Increment: prefixs.put(make!(PrefixExpressionNode)(Prefix.Increment)); break;
+				case Type.Decrement: prefixs.put(make!(PrefixExpressionNode)(Prefix.Decrement)); break;
+				case Type.Add: prefixs.put(make!(PrefixExpressionNode)(Prefix.Positive)); break;
+				case Type.Minus: prefixs.put(make!(PrefixExpressionNode)(Prefix.Negative)); break;
+				case Type.Tilde: prefixs.put(make!(PrefixExpressionNode)(Prefix.Tilde)); break;
+				case Type.Negation: prefixs.put(make!(PrefixExpressionNode)(Prefix.Negation)); break;
+				case Type.StringLiteral: primary = make!(StringLiteralNode)(token.match); scanToken(primAttr); goto member;
+				case Type.BinaryLiteral: primary = make!(BinaryLiteralNode)(token.match); scanToken(primAttr); goto member;
+				case Type.OctalLiteral: primary = make!(OctalLiteralNode)(token.match); scanToken(primAttr); goto member;
+				case Type.DecimalLiteral: primary = make!(DecimalLiteralNode)(token.match); scanToken(primAttr); goto member;
+				case Type.HexLiteral: primary = make!(HexLiteralNode)(token.match); scanToken(primAttr); goto member;
+				case Type.OpenSquareBrackets: primary = parseArrayLiteral(primAttr); goto member;
+				case Type.OpenCurlyBrace: primary = parseObjectLiteral(primAttr); goto member;
+				case Type.TemplateHead: primary = parseTemplateTail(primAttr.mask!(Goal.Yield)); goto member;
+				case Type.Template: //todo there is also a possible yield attribute here
+					auto tmplNode = make!(TemplateNode)(token.match);
+					primary = make!(TemplateLiteralNode)(tmplNode); scanToken(primAttr); goto member;
+				case Type.Regex: primary = make!(RegexLiteralNode)(token.match); scanToken(primAttr); goto member;
+				case Type.OpenParenthesis: primary = parseParenthesisExpression(primAttr); goto member;
+				case Type.LineTerminator:
+				case Type.SingleLineComment:
+				case Type.MultiLineComment:
+					// TODO: multiline comment might not have had newline
+					hadNewLine = true;
+					scanToken(unaryAttr);
+					continue;
+				default:
+					primary = error(format("unexpected %s token (%s)",token.type,cast(const(char)[])token.match));
+					scanToken(primAttr);
+					goto end;
+				case Type.EndOfFile:
+					primary = error(format("expected PrimaryExpression before eof"));
+					goto end;
+			}
+			hadNewLine = false;
+			scanToken(unaryAttr);
+		}
+	member:
+		while(1)
+		{
+			switch (token.type)
+			{
+				case Type.Dot:
+					args++;
+					auto child = parseAccessor();
+					lhsChildren.put(child);
+					/*if (child.type == NodeType.AccessorNode && child.as!(AccessorNode).identifier == "target")
+					{
+						// assert lhsChildren is empty // else error
+						goto binary;
+					}*/
+					break;
+				case Type.Template:
+					args++;
+					auto tmplNode = make!(TemplateNode)(token.match);
+					auto child = make!(TemplateLiteralNode)(tmplNode);
+					lhsChildren.put(child);
+					scanToken(lhsAttr);
+					break;
+				case Type.TemplateHead:
+					args++;
+					auto child = parseTemplateTail(lhsAttr);
+					lhsChildren.put(child);
+					break;
+				case Type.OpenParenthesis:
+					args++;
+					auto child = parseArguments(lhsAttr.mask!(~Goal.NoRegex));
+					lhsChildren.put(child);
+					break;
+				case Type.OpenSquareBrackets:
+					args++;
+					auto child = parseArrayIndexing(Goal.In | unaryAttr);
+					lhsChildren.put(child);
+					break;
+				case Type.LineTerminator:
+				case Type.SingleLineComment:
+				case Type.MultiLineComment:
+					// TODO: multiline comment might not have newline
+					hadNewLine = true;
+					scanToken(unaryAttr);
+					continue;
+				case Type.Increment:
+					if (hadNewLine)
+						goto binary;
+					postfix = Postfix.Increment;
+					scanToken(lhsAttr);
+					goto binary;
+				case Type.Decrement:
+					if (hadNewLine)
+						goto binary;
+					postfix = Postfix.Decrement;
+					scanToken(lhsAttr);
+					goto binary;
+				case Type.EndOfFile:
+					goto binary;
+				default:
+					goto binary;
+			}
+			hadNewLine = false;
+		}
+	binary:
+		if (news == 0 && args == 0)
+		{
+			lhs = primary;
+		} else 
+		{
+			auto children = lhsChildren.data;
+			children[0] = primary;
+			if (news > args)
+			{
+				lhs = make!(NewExpressionNode)(news,children);
+				lhsChildren.clear();
+				lhsChildren.put(null);
+			} else
+			{
+				lhs = make!(CallExpressionNode)(news,children);
+				lhsChildren.clear();
+				lhsChildren.put(null);
+			}
+		}
+		news = 0;
+		args = 0;
+		if (prefixs.length > 0 || postfix != Postfix.None)
+		{
+			unary = make!(UnaryExpressionNode)(prefixs.data,lhs,postfix);
+			postfix = Postfix.None;
+			prefixs.clear();
+		} else
+		{
+			unary = lhs;
+		}
+	onnewline:
+		switch (token.type)
+		{
+			case Type.Identifier:
+				switch (token.keyword)
+				{
+					case Keyword.Instanceof:
+						binChild = make!(ExpressionOperatorNode)(ExpressionOperator.InstanceOf);
+						break;
+					case Keyword.In:
+						if (!attributes.has!(Goal.In))
+							goto end;
+						binChild = make!(ExpressionOperatorNode)(ExpressionOperator.In);
+						break;
+					default:
+						goto end;
+				}
+				break;
+			case Type.LogicalAnd: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalAnd); break;
+			case Type.LogicalOr: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.LogicalOr); break;
+			case Type.BitwiseAnd: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseAnd); break;
+			case Type.BitwiseOr: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseOr); break;
+			case Type.BitwiseXor: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.BitwiseXor); break;
+			case Type.StrictEqual: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.StrictEqual); break;
+			case Type.Equal: 			binChild = make!(ExpressionOperatorNode)(ExpressionOperator.Equal); break;
+			case Type.StrictNotEqual: 	binChild = make!(ExpressionOperatorNode)(ExpressionOperator.StrictNotEqual); break;
+			case Type.NotEqual: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.NotEqual); break;
+			case Type.LessOrEqual: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.LessOrEqual); break;
+			case Type.LessThan: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.LessThan); break;
+			case Type.GreaterOrEqual: 	binChild = make!(ExpressionOperatorNode)(ExpressionOperator.GreaterOrEqual); break;
+			case Type.GreaterThan: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.GreaterThan); break;
+			case Type.LeftShift: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.LeftShift); break;
+			case Type.TripleRightSift: 	binChild = make!(ExpressionOperatorNode)(ExpressionOperator.TripleRightSift); break;
+			case Type.RightShift: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.RightShift); break;
+			case Type.Add:		 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.Add); break;
+			case Type.Minus: 			binChild = make!(ExpressionOperatorNode)(ExpressionOperator.Minus); break;
+			case Type.Multiply: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.Multiply); break;
+			case Type.Division: 		binChild = make!(ExpressionOperatorNode)(ExpressionOperator.Division); break;
+			case Type.Mod: 				binChild = make!(ExpressionOperatorNode)(ExpressionOperator.Mod); break;
+			case Type.LineTerminator:
+			case Type.SingleLineComment:
+			case Type.MultiLineComment:
+				scanToken(attributes);
+				goto onnewline;
+			default:
+				goto end;
+		}
+		binaryChildren.put(unary);
+		binaryChildren.put(binChild);
+		unaryAttr &= ~Goal.NoRegex;
+		scanToken(unaryAttr);
+		goto unary;
+	end:
+		if (unary is null)
+			return primary;
+		if (binaryChildren.length > 0)
+		{
+			binaryChildren.put(unary);
+			return make!(BinaryExpressionNode)(binaryChildren.data);
+		}
+		return unary;
+	}
+	Node parseLeftHandSideExpression(int attributes = 0, size_t news = 0)
+	{
+		mixin(traceFunction!(__FUNCTION__));
+		size_t args = 0;
 		Node content;
 		ArrayBuilder!Node calls;
 		while (1)  // TODO: this one might loop forever with invalid input, not sure, need to check
@@ -1201,22 +1481,22 @@ final class Parser
 								if (calls.length == 0)
 									calls.put(content);
 								scanAndSkipCommentsAndTerminators();
-								calls.put(parseArguments(attributes.mask!(~Attribute.NoRegex)));
+								calls.put(parseArguments(attributes.mask!(~Goal.NoRegex)));
 								break;								
 							}
 							content = parseSuperProperty(attributes);
 							break;
 						case Keyword.New:
 							news++;
-							scanToken(attributes.toGoal);
+							scanToken(attributes);
 							break;
 				 		case Keyword.This: scanToken(); content = make!(KeywordNode)(Keyword.This); break;
 						case Keyword.Null: scanToken(); content = make!(KeywordNode)(Keyword.Null); break;
 						case Keyword.True: scanToken(); content = make!(BooleanNode)(true); break;
 						case Keyword.False: scanToken(); content = make!(BooleanNode)(false); break;
 						case Keyword.Function: content = parseFunctionExpression(); break;
-						case Keyword.Class: content = parseClassExpression(attributes.mask!(Attribute.Yield | Attribute.NoRegex)); break;
-						default: content = parseIdentifier(attributes.mask!(Attribute.Yield | Attribute.NoRegex)); break;
+						case Keyword.Class: content = parseClassExpression(attributes.mask!(Goal.Yield | Goal.NoRegex)); break;
+						default: content = parseIdentifier(attributes.mask!(Goal.Yield | Goal.NoRegex)); break;
 					}
 					break;
 				case Type.Dot:
@@ -1230,11 +1510,11 @@ final class Parser
 					}
 					if (news == 0)
 						return error("Invalid dot in LeftHandSideExpression");
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					if (token.type != Type.Identifier || token.match != "target")
 						return error("The only valid meta property for new is new.target");
 					content = make!(NewTargetNode)();
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.Template:
 					if (content is null)
@@ -1244,7 +1524,7 @@ final class Parser
 						calls.put(content);
 					auto tmplNode = make!(TemplateNode)(token.match);
 					calls.put(make!(TemplateLiteralNode)(tmplNode));
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.TemplateHead:
 					if (content is null)
@@ -1257,7 +1537,7 @@ final class Parser
 				case Type.LineTerminator:
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.OpenParenthesis:
 					if (content is null)
@@ -1265,7 +1545,7 @@ final class Parser
 					args++;
 					if (calls.length == 0)
 						calls.put(content);
-					calls.put(parseArguments(attributes.mask!(~Attribute.NoRegex)));
+					calls.put(parseArguments(attributes.mask!(~Goal.NoRegex)));
 					break;
 				case Type.OpenSquareBrackets:
 					if (content is null)
@@ -1273,7 +1553,7 @@ final class Parser
 					args++;
 					if (calls.length == 0)
 						calls.put(content);
-					calls.put(parseArrayIndexing(Attribute.In | attributes));
+					calls.put(parseArrayIndexing(Goal.In | attributes));
 					break;
 				case Type.EndOfFile:
 					if (content is null)
@@ -1312,7 +1592,7 @@ final class Parser
 		auto keyword = token.keyword;
 		if (keyword == Keyword.Yield)
 		{
-			if (!attributes.has!(Attribute.Yield))
+			if (!attributes.has!(Goal.Yield))
 				return error("keyword yield cannot be used in this context");
 
 		} else if (keyword.isReservedKeyword)
@@ -1333,17 +1613,17 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "super");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 
 		if (token.type == Type.Dot)
 		{
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			if (token.type != Type.Identifier)
 				return error("Expected Identifier after .");
 			return make!(SuperPropertyNode)(parseIdentifierName());
 		} else if (token.type == Type.OpenSquareBrackets)
 		{
-			return make!(SuperPropertyNode)(parseArrayIndexing(Attribute.In | attributes));
+			return make!(SuperPropertyNode)(parseArrayIndexing(Goal.In | attributes));
 		}
 		return error("Expected . or array index after super keyword");
 	}
@@ -1351,7 +1631,7 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenParenthesis);
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 
 		ArrayBuilder!(Node,4) args;
 		if (token.type == Type.Comma)
@@ -1362,13 +1642,13 @@ final class Parser
 				token.type == Type.SingleLineComment ||
 				token.type == Type.LineTerminator)
 			{
-				scanToken(attributes.toGoal);
+				scanToken(attributes);
 				continue;
 			}
 			if (token.type == Type.SpreadOperator)
 			{
 				scanAndSkipCommentsAndTerminators();
-				args.put(make!(SpreadElementNode)(parseAssignmentExpression(Attribute.In | attributes)));
+				args.put(make!(SpreadElementNode)(parseAssignmentExpression(Goal.In | attributes)));
 				if (token.type != Type.CloseParenthesis)
 					return error("Expected closing parenthesis");
 				scanAndSkipCommentsAndTerminators();
@@ -1380,23 +1660,23 @@ final class Parser
 			}
 			if (token.type == Type.Comma)
 			{
-				scanAndSkipCommentsAndTerminators(attributes.toGoal);
+				scanAndSkipCommentsAndTerminators(attributes);
 				if (token.type == Type.CloseParenthesis)
 					goto end;
-				args.put(parseAssignmentExpression(Attribute.In | attributes));
+				args.put(parseAssignmentExpression(Goal.In | attributes));
 				// TODO what if parse fails ?
 			} else {
 				if (args.length != 0)
 				{
 					return error("Expected Comma or CloseParenthesis");
 				}
-				args.put(parseAssignmentExpression(Attribute.In | attributes));
+				args.put(parseAssignmentExpression(Goal.In | attributes));
 				// TODO what if parse fails ?
 			}
 		}
 		end: auto node = make!(ArgumentsNode)(args.data);
-		attributes |= Attribute.NoRegex;
-		scanToken(attributes.toGoal);
+		attributes |= Goal.NoRegex;
+		scanToken(attributes);
 		return node;
 	}
 	Node parseArrayIndexing(int attributes = 0)
@@ -1409,7 +1689,8 @@ final class Parser
 		if (token.type != Type.CloseSquareBrackets)
 			return error("Expected closing square bracket");
 
-		scanAndSkipCommentsAndTerminators(Attribute.NoRegex);
+		//scanAndSkipCommentsAndTerminators(Goal.NoRegex);
+		scanToken(Goal.NoRegex);
 		return make!(ArrayIndexNode)(expr);
 	}
 	Node parseStatement(int attributes = 0)
@@ -1423,29 +1704,29 @@ final class Parser
 			case Type.Identifier:
 				switch (token.keyword)
 				{
-					case Keyword.Var: node = parseVariableStatement(attributes.mask!(Attribute.Yield)); break;
+					case Keyword.Var: node = parseVariableStatement(attributes.mask!(Goal.Yield)); break;
 					case Keyword.If: node = parseIfStatement(attributes); break;
 					case Keyword.Switch: node = parseSwitchStatement(attributes); break;
 					case Keyword.Do: node = parseDoWhileStatement(attributes); break;
 					case Keyword.While: node = parseWhileStatement(attributes); break;
 					case Keyword.For: node = parseForStatement(attributes); break;
 					case Keyword.Continue: 
-						scanToken(attributes.toGoal);
+						scanToken(attributes);
 						const(ubyte)[] label;
 						if (token.type == Type.Identifier)
 						{
 							label = token.match;
-							scanToken(attributes.toGoal);
+							scanToken(attributes);
 						}
 						node = make!(ContinueStatementNode)(label);
 						break;
 					case Keyword.Break: 
-						scanToken(attributes.toGoal);
+						scanToken(attributes);
 						const(ubyte)[] label;
 						if (token.type == Type.Identifier)
 						{
 							label = token.match;
-							scanToken(attributes.toGoal);
+							scanToken(attributes);
 						}
 						node = make!(BreakStatementNode)(label);
 						break;
@@ -1454,24 +1735,24 @@ final class Parser
 					case Keyword.Try: node = parseTryStatement(attributes); break;
 					case Keyword.Debugger: node = parseDebuggerStatement(); break;
 					case Keyword.Return:
-						if (!attributes.has!(Attribute.Return))
+						if (!attributes.has!(Goal.Return))
 						{
 							scanAndSkipCommentsAndTerminators();
 							return error("return keyword not allowed in this context");
 						}
-						node = parseReturnStatement(attributes.mask!(Attribute.Yield));
+						node = parseReturnStatement(attributes.mask!(Goal.Yield));
 						break;
-					default: node = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield,Attribute.Return)); break;
+					default: node = parseExpression(Goal.In | attributes.mask!(Goal.Yield,Goal.Return)); break;
 				}
 				break;
 			case Type.Semicolon:
 				scanAndSkipCommentsAndTerminators();
 				return make!(EmptyStatementNode)();
-			default: node = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield,Attribute.Return)); break;
+			default: node = parseExpression(Goal.In | attributes.mask!(Goal.Yield,Goal.Return)); break;
 		}
 		if (token.type == Type.Semicolon || node.type == NodeType.ErrorNode)
 		{
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			return node;
 		}
 		// this while loop can't run forever
@@ -1482,14 +1763,14 @@ final class Parser
 				case Type.MultiLineComment:
 				case Type.SingleLineComment:
 				case Type.LineTerminator:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.Colon:
 					if (node.type == NodeType.IdentifierReferenceNode)
 					{
 						auto idNode = cast(IdentifierReferenceNode)node;
 						assert(idNode !is null);
-						scanAndSkipCommentsAndTerminators(attributes.toGoal);
+						scanAndSkipCommentsAndTerminators(attributes);
 						Node child;
 						if (token.type == Type.Identifier && token.match == "function")
 							child = parseFunctionDeclaration(attributes);
@@ -1499,7 +1780,7 @@ final class Parser
 					}
 					return error("Unexpected colon in Statement");
 				case Type.Semicolon:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					return node;
 				default: return node;
 			}
@@ -1513,7 +1794,7 @@ final class Parser
 		scanToken();
 		if (token.type == Type.LineTerminator || isEndOfExpression || token.type == Type.SingleLineComment || lexer.tokenLines != 0)
 			return make!(ReturnStatementNode)();
-		auto expr = parseExpression(Attribute.In | attributes);
+		auto expr = parseExpression(Goal.In | attributes);
 		return make!(ReturnStatementNode)(expr);
 	}
 	Node parseBlockStatement(int attributes = 0)
@@ -1559,15 +1840,15 @@ final class Parser
 			switch(token.keyword)
 			{
 				case Keyword.Class:
-					node = parseClassDeclaration(attributes.mask!(Attribute.Yield));
+					node = parseClassDeclaration(attributes.mask!(Goal.Yield));
 					break;
 				case Keyword.Function:
-					node = parseFunctionDeclaration(attributes.mask!(Attribute.Yield));
+					node = parseFunctionDeclaration(attributes.mask!(Goal.Yield));
 					break;
 				case Keyword.Let:
 				case Keyword.Const:
 					if (lexer.lookAheadForAny!(Type.Identifier,Type.OpenSquareBrackets,Type.OpenCurlyBrace))
-						node = parseLexicalDeclaration(Attribute.In | attributes.mask!(Attribute.Yield));
+						node = parseLexicalDeclaration(Goal.In | attributes.mask!(Goal.Yield));
 					break;
 				default:
 					break;
@@ -1579,22 +1860,37 @@ final class Parser
 			scanAndSkipCommentsAndTerminators();
 		return node;
 	}
-	void skipCommentsAndLineTerminators(int attributes = 0)
+	version (unittest)
 	{
-		while(token.type == Type.MultiLineComment || token.type == Type.SingleLineComment || token.type == Type.LineTerminator)
-			scanToken(attributes.toGoal);
-	}
-	void scanAndSkipCommentsAndTerminators(int attributes = 0)
+		void skipCommentsAndLineTerminators(int attributes = 0, in size_t line = __LINE__)
+		{
+			while(token.type == Type.MultiLineComment || token.type == Type.SingleLineComment || token.type == Type.LineTerminator)
+				scanToken(attributes, line);
+		}
+		void scanAndSkipCommentsAndTerminators(int attributes = 0, in size_t line = __LINE__)
+		{
+			scanToken(attributes, line);
+			skipCommentsAndLineTerminators(attributes, line);
+		}
+	} else
 	{
-		scanToken(attributes.toGoal);
-		skipCommentsAndLineTerminators(attributes.toGoal);
+		void skipCommentsAndLineTerminators(int attributes = 0)
+		{
+			while(token.type == Type.MultiLineComment || token.type == Type.SingleLineComment || token.type == Type.LineTerminator)
+				scanToken(attributes);
+		}
+		void scanAndSkipCommentsAndTerminators(int attributes = 0)
+		{
+			scanToken(attributes);
+			skipCommentsAndLineTerminators(attributes);
+		}
 	}
 	Node parseVariableStatement(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "var");
 		scanAndSkipCommentsAndTerminators();
-		return parseVariableDeclarationList(Attribute.In | attributes);
+		return parseVariableDeclarationList(Goal.In | attributes);
 	}
 	Node parseVariableDeclarationList(int attributes = 0)
 	{
@@ -1606,9 +1902,9 @@ final class Parser
 			Node lhs = null;
 			switch (token.type)
 			{
-				case Type.OpenSquareBrackets: lhs = parseArrayBindingPattern(attributes.mask!(Attribute.Yield)); break;
-				case Type.OpenCurlyBrace: lhs = parseObjectBindingPattern(attributes.mask!(Attribute.Yield)); break;
-				case Type.Identifier: lhs = parseIdentifier(attributes.mask!(Attribute.Yield)); break;
+				case Type.OpenSquareBrackets: lhs = parseArrayBindingPattern(attributes.mask!(Goal.Yield)); break;
+				case Type.OpenCurlyBrace: lhs = parseObjectBindingPattern(attributes.mask!(Goal.Yield)); break;
+				case Type.Identifier: lhs = parseIdentifier(attributes.mask!(Goal.Yield)); break;
 				default:
 					return error(format("Expected ArrayBindingPattern, ObjectBindingPattern or Identifier, instead got %s",token.type));
 			}
@@ -1616,7 +1912,7 @@ final class Parser
 			if (token.type == Type.Assignment)
 			{
 				scanAndSkipCommentsAndTerminators();
-				init = parseAssignmentExpression(attributes.mask!(Attribute.In,Attribute.Yield));
+				init = parseAssignmentExpression(attributes.mask!(Goal.In,Goal.Yield));
 			}
 			children.put(make!(VariableDeclarationNode)(lhs,init));
 			skipCommentsAndLineTerminators();
@@ -1701,7 +1997,7 @@ final class Parser
 				else
 				{
 					scanAndSkipCommentsAndTerminators();
-					auto init = parseAssignmentExpression(Attribute.In | attributes);
+					auto init = parseAssignmentExpression(Goal.In | attributes);
 					children ~= make!(SingleNameBindingNode)(iden,init);
 				}
 			}
@@ -1724,7 +2020,7 @@ final class Parser
 		if (token.type != Type.OpenParenthesis)
 			return error("expected parenthesis as part of IfStatement");
 		scanAndSkipCommentsAndTerminators();
-		Node cond = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+		Node cond = parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of IfStatement");
@@ -1744,14 +2040,14 @@ final class Parser
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.OpenParenthesis)
 			return error("expected parenthesis as part of SwitchStatement");
-		scanToken(attributes.toGoal);
-		Node[] children = [parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+		scanToken(attributes);
+		Node[] children = [parseExpression(Goal.In | attributes.mask!(Goal.Yield))];
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of SwitchStatement");
 		scanAndSkipCommentsAndTerminators();
 		if (token.type != Type.OpenCurlyBrace)
 			return error("Expected opening curly brace as part of SwitchStatement");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		while(1)
 		{
 			switch(token.type)
@@ -1760,8 +2056,8 @@ final class Parser
 					switch(token.keyword)
 					{
 						case Keyword.Case:
-							scanToken(attributes.toGoal);
-							Node condition = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+							scanToken(attributes);
+							Node condition = parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 							Node[] caseChildren = [];
 							if (token.type != Type.Colon)
 								return error("Expected colon");
@@ -1782,17 +2078,17 @@ final class Parser
 							children ~= make!(DefaultNode)(bodyNode);
 							break;
 						default:
-							scanToken(attributes.toGoal);
+							scanToken(attributes);
 							return error("Expected case keyword");
 					}
 					break;
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
 				case Type.LineTerminator:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					break;
 				case Type.CloseCurlyBrace:
-					scanToken(attributes.toGoal);
+					scanToken(attributes);
 					return make!(SwitchStatementNode)(children);
 				default:
 					return error(children,format("Unexpected token %s as part of SwitchStatement",token.type));
@@ -1804,7 +2100,7 @@ final class Parser
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "do");
 		scanAndSkipCommentsAndTerminators();
-		Node[] children = [parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return))];
+		Node[] children = [parseStatement(attributes.mask!(Goal.Yield,Goal.Return))];
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.Identifier || token.match != "while")
 			return error("Expected while keyword");
@@ -1812,7 +2108,7 @@ final class Parser
 		if (token.type != Type.OpenParenthesis)
 			return error("expected parenthesis as part of DoWhileStatement");
 		scanAndSkipCommentsAndTerminators();
-		children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+		children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of DoWhileStatement");
 		scanAndSkipCommentsAndTerminators();
@@ -1825,19 +2121,19 @@ final class Parser
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "while");
 		// todo eat lineterminators/comments
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		if (token.type != Type.OpenParenthesis)
 			return error("expected parenthesis as part of DoWhileStatement");
-		scanToken(attributes.toGoal);
-		Node expr = parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+		scanToken(attributes);
+		Node expr = parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis as part of DoWhileStatement");
 
-		scanAndSkipCommentsAndTerminators(attributes.toGoal);
+		scanAndSkipCommentsAndTerminators(attributes);
 		Node stmt = parseStatement(attributes);
 
 		if (token.type == Type.Semicolon)
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 		return make!(WhileStatementNode)([expr,stmt]);
 	}
 	Node parseForStatement(int attributes = 0)
@@ -1855,7 +2151,7 @@ final class Parser
 			children ~= make!(SemicolonNode)();
 			if (token.type != Type.Semicolon)
 			{
-				children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+				children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 			}
 			if (token.type != Type.Semicolon)
 				return error(format("Expected semicolon, got %s",token.type));
@@ -1863,12 +2159,12 @@ final class Parser
 			children ~= make!(SemicolonNode)();
 			if (token.type != Type.CloseParenthesis)
 			{
-				children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+				children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 				if (token.type != Type.CloseParenthesis)
 					return error("Expected closing parenthesis");
 			}
 			scanAndSkipCommentsAndTerminators();
-			children ~= parseStatement(attributes.mask!(Attribute.Return,Attribute.Yield));
+			children ~= parseStatement(attributes.mask!(Goal.Return,Goal.Yield));
 			return make!(ForStatementNode)(ForLoop.ExprCStyle,children);
 		}
 		assert(token.type == Type.Identifier && token.match == "for");
@@ -1887,27 +2183,27 @@ final class Parser
 					{
 						case Keyword.Var:
 							scanAndSkipCommentsAndTerminators();
-							auto varStmt = parseVariableDeclarationList(attributes.mask!(Attribute.Yield));
+							auto varStmt = parseVariableDeclarationList(attributes.mask!(Goal.Yield));
 							// todo what abour error
 							if (varStmt.children.length == 1 && varStmt.children[0].children.length == 1 && token.type == Type.Identifier)
 							{
 								if (token.match == "in")
 								{
 									scanAndSkipCommentsAndTerminators();
-									Node[] children = [varStmt.children[0].children[0],parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+									Node[] children = [varStmt.children[0].children[0],parseExpression(Goal.In | attributes.mask!(Goal.Yield))];
 									if (token.type != Type.CloseParenthesis)
 										return error("Expect closing parenthesis");
 									scanAndSkipCommentsAndTerminators();
-									children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+									children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 									return make!(ForStatementNode)(ForLoop.VarIn,children);
 								} else if (token.match == "of")
 								{
 									scanAndSkipCommentsAndTerminators();
-									Node[] children = [varStmt.children[0].children[0],parseAssignmentExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+									Node[] children = [varStmt.children[0].children[0],parseAssignmentExpression(Goal.In | attributes.mask!(Goal.Yield))];
 									if (token.type != Type.CloseParenthesis)
 										return error("Expect closing parenthesis");
 									scanAndSkipCommentsAndTerminators();
-									children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+									children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 									return make!(ForStatementNode)(ForLoop.VarOf,children);
 								}
 							}
@@ -1917,7 +2213,7 @@ final class Parser
 							Node[] children = [varStmt,make!(SemicolonNode)()];
 							if (token.type != Type.Semicolon)
 							{
-								children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+								children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 							}
 							if (token.type != Type.Semicolon)
 								return error(format("Expected semicolon, got %s",token.type));
@@ -1925,37 +2221,37 @@ final class Parser
 							children ~= make!(SemicolonNode)();
 							if (token.type != Type.CloseParenthesis)
 							{
-								children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+								children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 								if (token.type != Type.CloseParenthesis)
 									return error("Expected closing parenthesis");
 							}
 							scanAndSkipCommentsAndTerminators();
-							children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+							children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 							return make!(ForStatementNode)(ForLoop.VarCStyle,children);
 						case Keyword.Let:
 						case Keyword.Const:
 							bool constDecl = token.match == "const";
-							auto lexDecl = parseLexicalDeclaration(attributes.mask!(Attribute.Yield));
+							auto lexDecl = parseLexicalDeclaration(attributes.mask!(Goal.Yield));
 							if (lexDecl.children.length == 1 && lexDecl.children[0].children.length == 1 && token.type == Type.Identifier)
 							{
 								if (token.match == "in")
 								{
 									scanAndSkipCommentsAndTerminators();
-									Node[] children = [lexDecl.children[0].children[0],parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+									Node[] children = [lexDecl.children[0].children[0],parseExpression(Goal.In | attributes.mask!(Goal.Yield))];
 									if (token.type != Type.CloseParenthesis)
 										return error("Expect closing parenthesis");
 									scanAndSkipCommentsAndTerminators();
-									children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+									children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 									auto loopType = constDecl ? ForLoop.ConstIn : ForLoop.LetIn;
 									return make!(ForStatementNode)(loopType,children);
 								} else if (token.match == "of")
 								{
 									scanAndSkipCommentsAndTerminators();
-									Node[] children = [lexDecl.children[0].children[0],parseAssignmentExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+									Node[] children = [lexDecl.children[0].children[0],parseAssignmentExpression(Goal.In | attributes.mask!(Goal.Yield))];
 									if (token.type != Type.CloseParenthesis)
 										return error("Expect closing parenthesis");
 									scanAndSkipCommentsAndTerminators();
-									children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+									children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 									auto loopType = constDecl ? ForLoop.ConstOf : ForLoop.LetOf;
 									return make!(ForStatementNode)(loopType,children);
 								}
@@ -1966,7 +2262,7 @@ final class Parser
 							Node[] children = [lexDecl,make!(SemicolonNode)()];
 							if (token.type != Type.Semicolon)
 							{
-								children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+								children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 							}
 							if (token.type != Type.Semicolon)
 								return error(format("Expected semicolon, got %s",token.type));
@@ -1974,12 +2270,12 @@ final class Parser
 							children ~= make!(SemicolonNode)();
 							if (token.type != Type.CloseParenthesis)
 							{
-								children ~= parseExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+								children ~= parseExpression(Goal.In | attributes.mask!(Goal.Yield));
 								if (token.type != Type.CloseParenthesis)
 									return error("Expected closing parenthesis");
 							}
 							scanAndSkipCommentsAndTerminators();
-							children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+							children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 							auto loopType = constDecl ? ForLoop.ConstCStyle : ForLoop.LetCStyle;
 							return make!(ForStatementNode)(loopType,children);
 						default:
@@ -1994,7 +2290,7 @@ final class Parser
 				case Type.Semicolon:
 					return parseOldSchoolForStatement(null,attributes);
 				default:
-					auto expr = parseExpression(attributes.mask!(Attribute.Yield));
+					auto expr = parseExpression(attributes.mask!(Goal.Yield));
 					skipCommentsAndLineTerminators();
 					if (token.type == Type.Identifier)
 					{
@@ -2003,24 +2299,24 @@ final class Parser
 						if (token.match == "in")
 						{
 							scanAndSkipCommentsAndTerminators();
-							Node[] children = [expr,parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+							Node[] children = [expr,parseExpression(Goal.In | attributes.mask!(Goal.Yield))];
 							//todo eat comments and lineterminators
 							if (token.type != Type.CloseParenthesis)
 								return error("Expected closing parenthesis");
 							scanAndSkipCommentsAndTerminators();
 							//todo eat comments and lineterminators
-							children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+							children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 							return make!(ForStatementNode)(ForLoop.ExprIn,children);
 						} else if (token.match == "of")
 						{
 							scanAndSkipCommentsAndTerminators();
-							Node[] children = [expr,parseAssignmentExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+							Node[] children = [expr,parseAssignmentExpression(Goal.In | attributes.mask!(Goal.Yield))];
 							//todo eat comments and lineterminators
 							if (token.type != Type.CloseParenthesis)
 								return error("Expected closing parenthesis");
 							scanAndSkipCommentsAndTerminators();
 							//todo eat comments and lineterminators
-							children ~= parseStatement(attributes.mask!(Attribute.Yield,Attribute.Return));
+							children ~= parseStatement(attributes.mask!(Goal.Yield,Goal.Return));
 							return make!(ForStatementNode)(ForLoop.ExprOf,children);
 						} else
 							return error("Expected either 'of' or 'in' keyword");
@@ -2051,16 +2347,16 @@ final class Parser
 			bool requiresAssignment = false;
 			switch (token.type)
 			{
-				case Type.OpenSquareBrackets: requiresAssignment = true; lhs = parseArrayBindingPattern(Attribute.Yield); break;
-				case Type.OpenCurlyBrace: requiresAssignment = true; lhs = parseObjectBindingPattern(Attribute.Yield); break;
-				case Type.Identifier: lhs = parseIdentifier(attributes.mask!(Attribute.Yield)); break;
+				case Type.OpenSquareBrackets: requiresAssignment = true; lhs = parseArrayBindingPattern(Goal.Yield); break;
+				case Type.OpenCurlyBrace: requiresAssignment = true; lhs = parseObjectBindingPattern(Goal.Yield); break;
+				case Type.Identifier: lhs = parseIdentifier(attributes.mask!(Goal.Yield)); break;
 				default:
 					return error(format("Expected ArrayBindingPattern, ObjectBindingPattern or Identifier, instead got %s",token.type));
 			}
 			if (token.type == Type.Assignment)
 			{
 				scanAndSkipCommentsAndTerminators();
-				init = parseAssignmentExpression(attributes.mask!(Attribute.In,Attribute.Yield));
+				init = parseAssignmentExpression(attributes.mask!(Goal.In,Goal.Yield));
 			} /*else if (requiresAssignment)
 			{
 				scanAndSkipCommentsAndTerminators();
@@ -2070,7 +2366,7 @@ final class Parser
 			skipCommentsAndLineTerminators();
 			if (token.type != Type.Comma)
 				break;
-			scanAndSkipCommentsAndTerminators(attributes.toGoal);
+			scanAndSkipCommentsAndTerminators(attributes);
 		}
 		if (children.length == 0)
 			return error("Expected at least on lexical declaration");
@@ -2085,7 +2381,7 @@ final class Parser
 		if (token.type != Type.OpenParenthesis)
 			return error("Expected parenthesis");
 		scanAndSkipCommentsAndTerminators();
-		Node[] children = [parseExpression(Attribute.In | attributes.mask!(Attribute.Yield))];
+		Node[] children = [parseExpression(Goal.In | attributes.mask!(Goal.Yield))];
 		if (token.type != Type.CloseParenthesis)
 			return error("Expected closing parenthesis");
 		scanAndSkipCommentsAndTerminators();
@@ -2096,8 +2392,8 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.Identifier && token.match == "throw");
-		scanToken(attributes.toGoal);
-		return make!(ThrowStatementNode)(parseExpression(Attribute.In | attributes.mask!(Attribute.Yield)));
+		scanToken(attributes);
+		return make!(ThrowStatementNode)(parseExpression(Goal.In | attributes.mask!(Goal.Yield)));
 	}
 	Node parseTryStatement(int attributes = 0)
 	{
@@ -2116,13 +2412,13 @@ final class Parser
 			switch(token.type)
 			{
 				case Type.OpenCurlyBrace:
-					catchChildren ~= parseObjectBindingPattern(attributes.mask!(Attribute.Yield));
+					catchChildren ~= parseObjectBindingPattern(attributes.mask!(Goal.Yield));
 					break;
 				case Type.OpenSquareBrackets:
-					catchChildren ~= parseArrayBindingPattern(attributes.mask!(Attribute.Yield));
+					catchChildren ~= parseArrayBindingPattern(attributes.mask!(Goal.Yield));
 					break;
 				case Type.Identifier:
-					catchChildren ~= parseIdentifier(attributes.mask!(Attribute.Yield));
+					catchChildren ~= parseIdentifier(attributes.mask!(Goal.Yield));
 					break;
 				default:
 					return error("Expected ObjectBindingPattern, ArrayBindingPattern or Identifier");
@@ -2157,13 +2453,13 @@ final class Parser
 		Node name;
 		if (token.type == Type.Identifier)
 			name = parseIdentifier();
-		else if (!attributes.has!(Attribute.Default))
+		else if (!attributes.has!(Goal.Default))
 			return error("Expected Identifier as part of ClassDeclaration");
 		Node base;
 		if (token.type == Type.Identifier && token.match == "extends")
 		{
 			scanAndSkipCommentsAndTerminators();
-			base = parseLeftHandSideExpression(attributes.mask!(Attribute.Yield));
+			base = parseLeftHandSideExpression(attributes.mask!(Goal.Yield));
 		}
 		if (token.type != Type.OpenCurlyBrace)
 			return error("Expected opening brace as part of class declaration");
@@ -2186,19 +2482,19 @@ final class Parser
 						case Keyword.Set:
 							if (lexer.lookAheadForAny!(Type.OpenParenthesis))
 								goto default;
-							methods ~= parseClassSetter(staticAttr,attributes.mask!(Attribute.Yield));
+							methods ~= parseClassSetter(staticAttr,attributes.mask!(Goal.Yield));
 							if (methods[$-1].type == NodeType.ErrorNode)
 								return methods[$-1];
 							break;
 						case Keyword.Get:
 							if (lexer.lookAheadForAny!(Type.OpenParenthesis))
 								goto default;
-							methods ~= parseClassGetter(staticAttr,attributes.mask!(Attribute.Yield));
+							methods ~= parseClassGetter(staticAttr,attributes.mask!(Goal.Yield));
 							if (methods[$-1].type == NodeType.ErrorNode)
 								return methods[$-1];
 							break;
 						default:
-							methods ~= parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield));
+							methods ~= parseClassMethod(staticAttr,attributes.mask!(Goal.Yield));
 							if (methods[$-1].type == NodeType.ErrorNode)
 								return methods[$-1];
 							break;
@@ -2206,7 +2502,7 @@ final class Parser
 					staticAttr = false;
 					break;
 				case Type.Multiply:
-					methods ~= parseClassGeneratorMethod(staticAttr,attributes.mask!(Attribute.Yield));
+					methods ~= parseClassGeneratorMethod(staticAttr,attributes.mask!(Goal.Yield));
 					staticAttr = false;
 					break;
 				case Type.Semicolon:
@@ -2221,7 +2517,7 @@ final class Parser
 					continue;
 				case Type.StringLiteral:
 				case Type.OpenSquareBrackets:
-					methods ~= parseClassMethod(staticAttr,attributes.mask!(Attribute.Yield));
+					methods ~= parseClassMethod(staticAttr,attributes.mask!(Goal.Yield));
 					if (methods[$-1].type == NodeType.ErrorNode)
 						return methods[$-1];
 					break;
@@ -2255,7 +2551,7 @@ final class Parser
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
 			return error("Expected closing curly brace");
-		scanAndSkipCommentsAndTerminators(attributes.toGoal);
+		scanAndSkipCommentsAndTerminators(attributes);
 		return make!(ClassGetterNode)(isStatic,name,funcBody);
 	}
 	Node parseClassSetter(bool isStatic, int attributes = 0)
@@ -2267,7 +2563,7 @@ final class Parser
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.OpenParenthesis)
 			return error("Expected opening parenthesis as part of class setter");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		auto param = parseBindingElement();
 		if (param.type == NodeType.ErrorNode)
 			return param;
@@ -2282,7 +2578,7 @@ final class Parser
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
 			return error("Expected closing curly brace");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		return make!(ClassSetterNode)(isStatic,name,param,funcBody);
 	}
 	Node parseBindingElement(int attributes = 0)
@@ -2297,7 +2593,7 @@ final class Parser
 				if (token.type != Type.Assignment)
 					return pattern;
 				scanAndSkipCommentsAndTerminators();
-				auto expr = parseAssignmentExpression(Attribute.In | attributes);
+				auto expr = parseAssignmentExpression(Goal.In | attributes);
 				return make!(BindingElementNode)(pattern,expr);
 			case Type.OpenSquareBrackets:
 				auto pattern = parseArrayBindingPattern(attributes);
@@ -2305,7 +2601,7 @@ final class Parser
 				if (token.type != Type.Assignment)
 					return pattern;
 				scanAndSkipCommentsAndTerminators();
-				auto expr = parseAssignmentExpression(Attribute.In | attributes);
+				auto expr = parseAssignmentExpression(Goal.In | attributes);
 				return make!(BindingElementNode)(pattern,expr);
 			case Type.Identifier:
 				auto name = parseIdentifier(attributes);
@@ -2313,7 +2609,7 @@ final class Parser
 				if (token.type != Type.Assignment)
 					return name;
 				scanAndSkipCommentsAndTerminators();
-				auto expr = parseAssignmentExpression(Attribute.In | attributes);
+				auto expr = parseAssignmentExpression(Goal.In | attributes);
 				return make!(SingleNameBindingNode)(name,expr);
 			default:
 				return error(format("Expected BindingElement, instead got %s",token));
@@ -2342,7 +2638,7 @@ final class Parser
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
 			return error("Expected closing curly brace");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		return make!(ClassMethodNode)(isStatic,name,params,funcBody);
 	}
 	Node parseFormalParameterList(int attributes = 0)
@@ -2375,7 +2671,7 @@ final class Parser
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.OpenParenthesis)
 			return error("Expected opening parenthesis as part of class method");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		auto params = parseFormalParameterList(attributes);
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseParenthesis)
@@ -2384,11 +2680,11 @@ final class Parser
 		if (token.type != Type.OpenCurlyBrace)
 			return error("Expected opening brace");
 		scanAndSkipCommentsAndTerminators();
-		auto funcBody = parseFunctionBody(Attribute.Yield);
+		auto funcBody = parseFunctionBody(Goal.Yield);
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
 			return error("Expected closing curly brace");
-		scanToken(attributes.toGoal);
+		scanToken(attributes);
 		return make!(ClassGeneratorMethodNode)(isStatic,name,params,funcBody);
 	}
 	Node parsePropertyName(int attributes = 0)
@@ -2396,9 +2692,9 @@ final class Parser
 		mixin(traceFunction!(__FUNCTION__));
 		if (token.type == Type.OpenSquareBrackets)
 		{
-			scanToken(attributes.toGoal);
+			scanToken(attributes);
 			skipCommentsAndLineTerminators();
-			auto expr = parseAssignmentExpression(Attribute.In | attributes.mask!(Attribute.Yield));
+			auto expr = parseAssignmentExpression(Goal.In | attributes.mask!(Goal.Yield));
 			if (token.type != Type.CloseSquareBrackets)
 				return error("Expected closing square brace after ComputedPropertyName");
 			scanAndSkipCommentsAndTerminators();
@@ -2407,11 +2703,11 @@ final class Parser
 		switch(token.type)
 		{
 			case Type.Identifier: return parseIdentifierName();
-			case Type.StringLiteral: auto node = make!(StringLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.BinaryLiteral: auto node = make!(BinaryLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.OctalLiteral: auto node = make!(OctalLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.DecimalLiteral: auto node = make!(DecimalLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
-			case Type.HexLiteral: auto node = make!(HexLiteralNode)(token.match); scanToken(attributes.toGoal); return node;
+			case Type.StringLiteral: auto node = make!(StringLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.BinaryLiteral: auto node = make!(BinaryLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.OctalLiteral: auto node = make!(OctalLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.DecimalLiteral: auto node = make!(DecimalLiteralNode)(token.match); scanToken(attributes); return node;
+			case Type.HexLiteral: auto node = make!(HexLiteralNode)(token.match); scanToken(attributes); return node;
 			default:
 				return error(format("Unexpected token %s in PropertyName",token.type));
 		}
@@ -2428,7 +2724,7 @@ final class Parser
 			scanAndSkipCommentsAndTerminators();
 		}
 		Node name = null;
-		if (attributes.has!(Attribute.Default))
+		if (attributes.has!(Goal.Default))
 		{
 			if (token.type != Type.OpenParenthesis)
 			{
@@ -2451,7 +2747,7 @@ final class Parser
 		if (token.type != Type.OpenCurlyBrace)
 			return error("Expected opening brace");
 		scanAndSkipCommentsAndTerminators();
-		auto funcBody = generator ? parseFunctionBody(Attribute.Yield) : parseFunctionBody();
+		auto funcBody = generator ? parseFunctionBody(Goal.Yield) : parseFunctionBody();
 		skipCommentsAndLineTerminators();
 		if (token.type != Type.CloseCurlyBrace)
 			return error([funcBody],"Expected closing curly brace");
@@ -2463,7 +2759,7 @@ final class Parser
 	Node parseFunctionBody(int attributes = 0)
 	{
 		mixin(traceFunction!(__FUNCTION__));
-		return make!(FunctionBodyNode)(parseStatementList(Attribute.Return | attributes));
+		return make!(FunctionBodyNode)(parseStatementList(Goal.Return | attributes));
 	}
 }
 
@@ -2517,9 +2813,9 @@ unittest
 {
 	alias parseUnaryExpression(Type = UnaryExpressionNode) = parseNode!("parseUnaryExpression",Type);
 
-	void assertUnaryExpressionPrefix(string r, Prefix[] prefixs, Postfix postfix = Postfix.None, in string file = __FILE__, in size_t line = __LINE__)
+	void assertUnaryExpressionPrefix(bool remains = true)(string r, Prefix[] prefixs, Postfix postfix = Postfix.None, in string file = __FILE__, in size_t line = __LINE__)
 	{
-		auto unExpr = parseUnaryExpression(r,true,file,line);
+		auto unExpr = parseUnaryExpression(r,remains,file,line);
 		unExpr.prefixs.length.shouldEqual(prefixs.length,file,line);
 		foreach(idx, prefix; prefixs)
 			unExpr.prefixs[idx].shouldBeOfType!(PrefixExpressionNode).prefix.shouldEqual(prefix);
@@ -2538,7 +2834,10 @@ unittest
 	assertUnaryExpressionPrefix("delete void++!abc",[Prefix.Delete,Prefix.Void,Prefix.Increment,Prefix.Negation]);
 	assertUnaryExpressionPrefix("typeof !abc",[Prefix.Typeof,Prefix.Negation]);
 	assertUnaryExpressionPrefix("typeof !abc++",[Prefix.Typeof,Prefix.Negation],Postfix.Increment);
-	assertUnaryExpressionPrefix("typeof //comment \n!\nabc /* multi \n line */\n--",[Prefix.Typeof,Prefix.Negation],Postfix.Decrement);
+	assertUnaryExpressionPrefix("typeof /**/abc /**/--",[Prefix.Typeof],Postfix.Decrement);
+	assertUnaryExpressionPrefix("typeof /*\n*/abc /**/--",[Prefix.Typeof],Postfix.Decrement);
+	assertUnaryExpressionPrefix!(false)("typeof /*\n*/abc /*\n*/--",[Prefix.Typeof]);
+	assertUnaryExpressionPrefix!(false)("typeof //comment \n!\nabc /* multi \n line */\n--",[Prefix.Typeof,Prefix.Negation]);
 	parseUnaryExpression!(BooleanNode)("true").value.shouldBeTrue();
 }
 @("parseLeftHandSideExpression")
@@ -2624,7 +2923,7 @@ unittest
 		import std.range : lockstep, stride, drop;
 		auto parser = parser(r);
 		parser.scanToken();
-		auto n = parser.parseRightHandSideExpression(Attribute.In);
+		auto n = parser.parseRightHandSideExpression(Goal.In);
 		if (!parser.lexer.empty)
 			throw new UnitTestException([format("Expected input to be empty, got %s",cast(const(ubyte)[])parser.lexer.s)],file,line);
 		auto t = shouldBeOfType!(BinaryExpressionNode)(n,file,line);
@@ -2718,7 +3017,6 @@ unittest
 unittest
 {
 	alias parseExpression(Type = ExpressionNode) = parseNode!("parseExpression",Type);
-
 	parseExpression!(IdentifierReferenceNode)("abc");
 	parseExpression!(ConditionalExpressionNode)("abc ? 7 : 6");
 	parseExpression!(UnaryExpressionNode)("!bla");
@@ -2759,6 +3057,10 @@ unittest
 	parseStatement!(LabelledStatementNode)("bla: var a = 0;").children[0].shouldBeOfType!(VariableStatementNode);
 	parseStatement!(LabelledStatementNode)("bla\n:\nvar a = 0;").children[0].shouldBeOfType!(VariableStatementNode);
 	parseStatement!(LabelledStatementNode)("bla\n:\n{ var a = 0; }").children[0].shouldBeOfType!(BlockStatementNode);
+
+
+	parseStatement!(BinaryExpressionNode)("a in a;");
+	parseStatement!(BinaryExpressionNode)(`a.bla in hup;`).children[$-1].shouldBeOfType!(IdentifierReferenceNode);
 }
 @("parseVariableStatement")
 unittest
@@ -3020,10 +3322,17 @@ unittest
 `).findFirst(NodeType.RegexLiteralNode).shouldNotBeNull;
 	parseModule(`class ParameterDefinition extends Definition { constructor(name, node, index, rest) { super(Variable.Parameter, name, node, null, index, null); } }`)
 		.findFirst(NodeType.ClassDeclarationNode).shouldNotBeNull;
-	// TODO: this fails!
-	// parseModule("id \n ++c").findFirst(NodeType.UnaryExpressionNode).as!(UnaryExpressionNode).children[0].as!(IdentifierReferenceNode).identifier.shouldEqual(cast(const(ubyte)[])"c");
+	parseModule("id \n ++c").findFirst(NodeType.UnaryExpressionNode).as!(UnaryExpressionNode).children[0].as!(IdentifierReferenceNode).identifier.shouldEqual(cast(const(ubyte)[])"c");
 	parseModule(`function * abc() { for (var i = 0; i < 5; i++) { yield i; } }`);
 	parseModule(`function * abc() { for (var i = 0; i < 5; i++) { yield i; } }`);
+	parseModule(`if ( event.target.bla === 3 ) {}`);
+
+	parseModule("function isIdentifierStart(code, astral) { if (b) return code >= 1 && 3\n return 4; }")
+		.findFirst(NodeType.BinaryExpressionNode).expect!((e){
+			e.children.length.shouldEqual(5);
+			e.children[$-1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("3");
+		});
+
 }
 @("Node flag")
 unittest
@@ -3032,6 +3341,174 @@ unittest
 	parseModule(`return 66;`).findFirst(NodeType.ReturnStatementNode).shouldNotBeNull;
 	parseModule("return //bla bla\nvar a = 6;");
 	parseModule("return /*bla bla\n*/var a = 6;");
+}
+@("parseRightHandSideExpressionBottomUp")
+unittest
+{
+	alias parseRHSBottomUp(Type) = parseNode!("parseRightHandSideExpressionBottomUp",Type, Parser.Flags.Node);
+	alias parseKeyword = parseRHSBottomUp!(KeywordNode);
+	alias parseBoolean = parseRHSBottomUp!(BooleanNode);
+	alias parseIdentifier = parseRHSBottomUp!(IdentifierReferenceNode);
+	alias parseFunction = parseRHSBottomUp!(FunctionExpressionNode);
+	alias parseGenerator = parseRHSBottomUp!(GeneratorExpressionNode);
+	alias parseClass = parseRHSBottomUp!(ClassDeclarationNode);
+	alias parseStringLiteral = parseRHSBottomUp!(StringLiteralNode);
+	alias parseBinaryLiteral = parseRHSBottomUp!(BinaryLiteralNode);
+	alias parseOctalLiteral = parseRHSBottomUp!(OctalLiteralNode);
+	alias parseDecimalLiteral = parseRHSBottomUp!(DecimalLiteralNode);
+	alias parseHexLiteral = parseRHSBottomUp!(HexLiteralNode);
+	alias parseArrayLiteral = parseRHSBottomUp!(ArrayLiteralNode);
+	alias parseObjectLiteral = parseRHSBottomUp!(ObjectLiteralNode);
+	alias parseTemplateLiteral = parseRHSBottomUp!(TemplateLiteralNode);
+	alias parseRegexLiteral = parseRHSBottomUp!(RegexLiteralNode);
+	alias parseParenthesis = parseRHSBottomUp!(ParenthesisNode);
+	alias parseSuperProperty = parseRHSBottomUp!(SuperPropertyNode);
+	alias parseNewTarget = parseRHSBottomUp!(NewTargetNode);
+	alias parseNewExpression = parseRHSBottomUp!(NewExpressionNode);
+	alias parseCallExpression = parseRHSBottomUp!(CallExpressionNode);
+	alias parseUnaryExpression = parseRHSBottomUp!(UnaryExpressionNode);
+	alias parseBinaryExpression = parseRHSBottomUp!(BinaryExpressionNode);
+
+	parseKeyword(`this`).keyword.shouldEqual(Keyword.This);
+	parseKeyword(`null`).keyword.shouldEqual(Keyword.Null);
+	parseBoolean(`true`).value.shouldBeTrue;
+	parseBoolean(`false`).value.shouldBeFalse;
+	parseIdentifier(`identifier`).identifier.shouldEqual("identifier");
+	parseFunction(`function fun(){}`).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("fun");
+	parseGenerator(`function* fun(){}`).children[0].shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("fun");
+	parseClass(`class bla extends hup {}`).name.shouldBeOfType!(IdentifierReferenceNode).identifier.shouldEqual("bla");
+	parseStringLiteral(`"string"`).value.shouldEqual("string");
+	parseStringLiteral(`'string'`).value.shouldEqual("string");
+	parseBinaryLiteral(`0b0011`).value.shouldEqual("0011");
+	parseOctalLiteral(`0o0011`).value.shouldEqual("0011");
+	parseDecimalLiteral(`567`).value.shouldEqual("567");
+	parseHexLiteral(`0x0011`).value.shouldEqual("0011");
+	parseArrayLiteral(`[a]`).children.length.shouldEqual(1);
+	parseObjectLiteral(`{a: 5}`).children.length.shouldEqual(1);
+	parseTemplateLiteral("`templ ${identifier}`").children.length.shouldEqual(3);
+	parseRegexLiteral(`/regex/`);
+	parseParenthesis(`(subExpr)`).children.length.shouldEqual(1);
+	parseSuperProperty("super[expr]");
+	parseSuperProperty("super.bla");
+	parseNewTarget("new.target");
+	parseCallExpression("identifier[expr]");
+	parseCallExpression("identifier[expr][snd]");
+	parseCallExpression("identifier.target.snd");
+	parseCallExpression("identifier(expr)(snd)");
+	parseCallExpression("identifier`tmpl``tt`");
+
+	parseCallExpression("super[expr][expr]");
+	parseCallExpression("super.bla[expr]");
+	parseCallExpression("new.target[expr]");
+	parseCallExpression("identifier.id");
+	parseCallExpression("super[expr].id");
+	parseCallExpression("super.bla.id");
+	parseCallExpression("new.target.id");
+	parseCallExpression("identifier`tmpl`");
+	parseCallExpression("super[expr]`tmpl`");
+	parseCallExpression("super.bla`tmpl`");
+	parseCallExpression("new.target`tmpl`");
+	parseCallExpression("identifier[expr].id`tmpl`");
+	parseCallExpression("super[expr][expr].id`tmpl`");
+	parseCallExpression("super.bla[expr].id`tmpl`");
+	parseCallExpression("new.target[expr].id`tmpl`");
+	parseCallExpression("new identifier()");	//shouldn't this be a new expression??
+	parseCallExpression("new super[expr]()");	// shouldn't this be a new expression??
+	parseCallExpression("new super.bla()"); // shouldn't this be a new expression??
+	parseCallExpression("new new.target()");
+	parseCallExpression("new identifier[expr]()");
+	parseCallExpression("new super[expr][expr]()");
+	parseCallExpression("new super.bla[expr]()");
+	parseCallExpression("new new.target[expr]()");
+	parseCallExpression("new identifier.id()");
+	parseCallExpression("new super[expr].id()");
+	parseCallExpression("new super.bla.id()");
+	parseCallExpression("new new.target.id()");
+	parseCallExpression("new identifier`tmpl`()");
+	parseCallExpression("new super[expr]`tmpl`()");
+	parseCallExpression("new super.bla`tmpl`()");
+	parseCallExpression("new new.target`tmpl`()");
+	parseCallExpression("new identifier[expr].id`tmpl`()");
+	parseCallExpression("new super[expr][expr].id`tmpl`()");
+	parseCallExpression("new super.bla[expr].id`tmpl`()");
+	parseCallExpression("new new.target[expr].id`tmpl`()");
+	parseNewExpression("new new identifier()");	//shouldn't this be a new expression??
+	parseNewExpression("new new super[expr]()");	// shouldn't this be a new expression??
+	parseNewExpression("new new super.bla()"); // shouldn't this be a new expression??
+	parseNewExpression("new new new.target()");
+	parseCallExpression("new new identifier[expr]()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super[expr][expr]()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super.bla[expr]()");	// shouldn't this be a new expression??
+	parseCallExpression("new new new.target[expr]()");	// shouldn't this be a new expression??
+	parseCallExpression("new new identifier.id()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super[expr].id()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super.bla.id()");	// shouldn't this be a new expression??
+	parseCallExpression("new new new.target.id()");	// shouldn't this be a new expression??
+	parseCallExpression("new new identifier`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super[expr]`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super.bla`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new new.target`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new identifier[expr].id`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super[expr][expr].id`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new super.bla[expr].id`tmpl`()");	// shouldn't this be a new expression??
+	parseCallExpression("new new new.target[expr].id`tmpl`()");	// shouldn't this be a new expression??
+	
+	parseUnaryExpression(`delete a`);
+	parseUnaryExpression(`void a`);
+	parseUnaryExpression(`typeof a`);
+	parseUnaryExpression(`-- a`);
+	parseUnaryExpression(`++ a`);
+	parseUnaryExpression(`+ a`);
+	parseUnaryExpression(`- a`);
+	parseUnaryExpression(`~ a`);
+	parseUnaryExpression(`! a`);
+	parseUnaryExpression(`a++`).postfix.shouldEqual(Postfix.Increment);
+	parseUnaryExpression(`a--`);
+
+	parseUnaryExpression(`!delete a`);
+	parseUnaryExpression(`!void a`);
+	parseUnaryExpression(`!typeof a`);
+	parseUnaryExpression(`!-- a`);
+	parseUnaryExpression(`!++ a`);
+	parseUnaryExpression(`!+ a`);
+	parseUnaryExpression(`!- a`);
+	parseUnaryExpression(`!~ a`);
+	parseUnaryExpression(`!! a`);
+	parseUnaryExpression(`!a++`);
+	parseUnaryExpression(`!a--`);
+
+	parseBinaryExpression(`a instanceof a`);
+	parseBinaryExpression(`a && a`);
+	parseBinaryExpression(`a || a`);
+	parseBinaryExpression(`a & a`);
+	parseBinaryExpression(`a | a`);
+	parseBinaryExpression(`a ^ a`);
+	parseBinaryExpression(`a === a`);
+	parseBinaryExpression(`a == a`);
+	parseBinaryExpression(`a !== a`);
+	parseBinaryExpression(`a != a`);
+	parseBinaryExpression(`a <= a`);
+	parseBinaryExpression(`a < a`);
+	parseBinaryExpression(`a >= a`);
+	parseBinaryExpression(`a > a`);
+	parseBinaryExpression(`a << a`);
+	parseBinaryExpression(`a >>> a`);
+	parseBinaryExpression(`a >> a`);
+	parseBinaryExpression(`a + a`);
+	parseBinaryExpression(`a - a`);
+	parseBinaryExpression(`a * a`);
+	parseBinaryExpression(`a / a`);
+	parseBinaryExpression(`a % a`);
+
+	parseBinaryExpression(`a && a || b`);
+	parseBinaryExpression(`event.target.bla === 3`);
+
+	parseBinaryExpression(`code >= 1 && 3`).expect!((e){
+		e.children.length.shouldEqual(5);
+		e.children[$-1].shouldBeOfType!(DecimalLiteralNode).value.shouldEqual("3");
+	});
+
+	parseBinaryExpression(`code >= 1 && return`).shouldThrowSaying("Invalid IdentifierReference return");
 }
 @("parseImportDeclaration")
 unittest

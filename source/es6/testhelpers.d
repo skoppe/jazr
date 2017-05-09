@@ -75,4 +75,11 @@ version(unittest)
 		if (errors.length > 0)
 			throw new UnitTestException([format("Expected no errors but got: [%s]",errors[0].value)],file,line);
 	}
+	template expect(alias fun)
+	{
+		void expect(T)(T t)
+		{
+			fun(t);
+		}
+	}
 }

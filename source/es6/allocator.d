@@ -142,10 +142,6 @@ struct ArrayBuilder(T, size_t Len = 8)
 {
     void put(T t) @trusted
     {
-        static if (is(T == class) || isPointer!T)
-            if (t is null)
-                return;
-
         if (arr !is null)
         {
             assert(arr.length > 0);
@@ -182,7 +178,11 @@ struct ArrayBuilder(T, size_t Len = 8)
         }
         return arr[0.._length];
     }
-
+    void clear()
+    {
+        _length = 0;
+        arr = [];
+    }
 private:
 
     T[Len] stackSpace;
@@ -208,4 +208,11 @@ unittest
     foreach(i; 0..48)
         arr.put(i);
     assert(arr.data == [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]);
+
+    arr = ArrayBuilder!int();
+    foreach(i; 0..10)
+        arr.put(i);
+    auto data = arr.data;
+    arr.clear();
+    assert(data == [0,1,2,3,4,5,6,7,8,9]);
 }

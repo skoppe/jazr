@@ -20,6 +20,7 @@ module es6.transforms.variables;
 import es6.nodes;
 import es6.scopes;
 import es6.analyse;
+import es6.transforms.expressions;
 import std.algorithm : map, countUntil, each, filter, remove;
 import std.array : array;
 import es6.bench;
@@ -888,7 +889,7 @@ bool reuseVariable(Scope scp)
 {
 	import std.range : enumerate;
 	import std.typecons : tuple;
-	size_t indexOnParent(Node child, Node parent)
+	long indexOnParent(Node child, Node parent)
 	{
 		assert(parent !is null);
 		assert(child.parent !is null);
@@ -900,22 +901,28 @@ bool reuseVariable(Scope scp)
 	{
 		Variable v;
 		size_t idx;
-		Node firstUse;
-		Node lastUse;
-		size_t firstIdx;
-		size_t lastIdx;
+		long firstIdx;
+		long lastIdx;
 		bool done;
 		bool breakUpVar;
 	}
 	auto items = scp.variables
 		.enumerate
-		.filter!(v=>v.value.type == IdentifierType.Variable && v.value.isLocal)
+		.filter!(v=>(v.value.type == IdentifierType.Variable || v.value.type == IdentifierType.Parameter) && v.value.isLocal)
 		.map!((v){
-			auto first = v.value.node;
-			auto last = v.value.references.length > 0 ? v.value.references[$-1] : v.value.node;
-			auto firstIdx = indexOnParent(first,scp.entry);
-			auto lastIdx = indexOnParent(last,scp.entry);
-			return Helper(v.value,v.index,first,last,firstIdx,lastIdx);
+			if (v.value.type == IdentifierType.Variable)
+			{
+				auto first = v.value.node;
+				auto last = v.value.references.length > 0 ? v.value.references[$-1] : v.value.node;
+				auto firstIdx = indexOnParent(first,scp.entry);
+				auto lastIdx = indexOnParent(last,scp.entry);
+				return Helper(v.value,v.index,firstIdx,lastIdx);
+			} else if (v.value.type == IdentifierType.Parameter)
+			{
+				auto firstIdx = -1;
+				long lastIdx = v.value.references.length > 0 ? indexOnParent(v.value.references[$-1], scp.entry) : -1;
+				return Helper(v.value,v.index,firstIdx,lastIdx,true);
+			} else assert(0);
 		}).array();
 
 	bool didWork = false;
@@ -924,7 +931,7 @@ bool reuseVariable(Scope scp)
 
 	foreach(idx, ref current; items[0..$-1])
 	{
-		if (current.done || current.v.definition !is null)
+		if ((current.done || current.v.definition !is null) && current.v.type == IdentifierType.Variable)
 			continue;
 		auto candidates = items[idx+1..$];
 		foreach(ref candidate; candidates)
@@ -999,7 +1006,7 @@ bool reuseVariable(Scope scp)
 				scp.variables[candidate.idx].references = [];
 
 				candidate.done = true;
-				break;
+				current.lastIdx = candidate.lastIdx;
 			}
 		}
 	}
@@ -1028,7 +1035,11 @@ unittest
 	);
 	assertReuseVariable(
 		`function b(d,e){ var a = 5; doBla(a); var b = 7; doBla(b); }`,
-		`function b(d,e){ var a = 5; doBla(a); a = 7; doBla(a); }`
+		`function b(d,e){ d=5; doBla(d); d=7; doBla(d) }`
+	);
+	assertReuseVariable(
+		`function b(d,e){ var a = 5; doBla(a); var b = 7; doBla(b); return d; }`,
+		`function b(d,e){ e=5; doBla(e); e=7; doBla(e); return d; }`
 	);
 	assertReuseVariable(
 		`function b(){ var a = 5; doBla(a); var b = 7, k = 5; doBla(b); }`,
@@ -1081,6 +1092,182 @@ unittest
 	);*/
 }
 
+bool inlineVariables(Scope scp)
+{
+	import std.range : enumerate;
+
+	auto singleUsedVars = scp.variables.enumerate.filter!(v => v.value.type == IdentifierType.Variable && v.value.references.length == 1);
+
+	bool didWork = false;
+	foreach(v; singleUsedVars)
+	{
+		if (v.value.node.parent.type == NodeType.ForStatementNode)
+			continue;
+		auto declStmt = v.value.node.parent.as!VariableDeclarationNode;
+		auto usage = v.value.references[0];
+		if (declStmt.children.length == 1)
+			continue;
+		auto init = declStmt.children[1];
+
+		/*the question is: are there any expressions/statements between init and usage that change or might change the init expression or any of its sub expressions?
+
+		var b = c * 5; c = 6; call(b);
+
+		put else: we need to find all expressions or statements that change or might change `c` and see if any of them are between init and usage.
+
+		Change is easy since we can just find all assignments, might change is alot harder. Essentially any function call or accessor (incl. ComputedPropertyNameNode).
+
+		we have to find out if init [is|can be] changed between init and usage
+
+		from init we go up and all the way to the last child, then up, last child, up... until parent is common parent between init and usage
+		from usage we go up and all the way to first previous child, then up, first child, up... until parent is common parent between init and usage
+			on each level we check if 
+		then we check if any statement between the to have any sideEffects*/
+
+		if (init.canHaveSideEffects())
+			continue;
+		if (!init.canBeMovedTo(usage))
+			continue;
+		if (declStmt.parent.type == NodeType.ForStatementNode)
+			continue;
+		if (usage.requiresLHS())
+			continue;
+
+		scp.removeVariable(declStmt.children[0]);
+		scp.removeIdentifier(usage);
+
+		Node declParent;
+
+		if (declStmt.parent.children.length == 1)
+		{
+			declParent = declStmt.parent.parent;
+			declStmt.parent.detach();
+		}
+		else
+		{
+			declParent = declStmt.parent;
+			declStmt.detach();
+		}
+
+		Node usageParent = usage.parent;
+		switch(usage.parent.type)
+		{
+			case NodeType.BinaryExpressionNode:
+				if (init.type == NodeType.BinaryExpressionNode)
+				{
+					if (init.hints.has(Hint.Or))
+						usage.replaceWith(init.parenthesizeExpression);
+					else
+						usage.parent.as!(BinaryExpressionNode).replaceChildWith(usage, init.as!BinaryExpressionNode);
+					break;
+				}
+				goto default;
+			case NodeType.ExpressionNode:
+				init = init.parenthesizeExpression();
+				usage.replaceWith(init);
+				break;
+			default:
+				usage.replaceWith(init);
+		}
+
+		usageParent.reanalyseHints();
+		declParent.reanalyseHints();
+
+		didWork = true;
+	}
+	return didWork;
+}
+
+@("inlineVariables")
+unittest
+{
+	alias assertInlineVariables = assertTransformations!(inlineVariables);
+
+	assertInlineVariables(
+		`var a = 6; bla(a);`,
+		`bla(6);`
+	);
+	assertInlineVariables(
+		`var a = g; bla(a);`,
+		`var a = g; bla(a);` 	// TODO: currently we cannot prove that the value of g cant change between the var init and the usage at bla()
+	);
+	assertInlineVariables(
+		`var a = g(); bla(a);`,
+		`var a = g(); bla(a);`
+	);
+	assertInlineVariables(
+		`var a = g[3]; bla(a);`,
+		`var a = g[3]; bla(a);`
+	);
+	assertInlineVariables(
+		`var a = g.b; bla(a);`,
+		`var a = g.b; bla(a);`
+	);
+	assertInlineVariables(
+		`var a = 6; bla(a++);`,
+		`var a = 6; bla(a++);`,
+	);
+	assertInlineVariables(
+		`var a = 6; bla(++a);`,
+		`var a = 6; bla(++a);`,
+	);
+	assertInlineVariables(
+		`var a = 6; bla(a,a);`,
+		`var a = 6; bla(a,a);`
+	);
+	assertInlineVariables(
+		`var a = null; bla(a);`,
+		`bla(null);`
+	);
+	assertInlineVariables(
+		`for(var a in b) bla(a);`,
+		`for(var a in b) bla(a);`
+	);
+	assertInlineVariables(
+		`var a = sideEffect(); bla(a,a);`,
+		`var a = sideEffect(); bla(a,a);`
+	);
+	assertInlineVariables(
+		`var a = 6; bla(a && c);`,
+		`bla(6 && c);`
+	);
+	assertInlineVariables(
+		`var a = (6, 7); bla(a && c);`,
+		`bla((6, 7) && c);`
+	);
+	assertInlineVariables(
+		`var a = 6 || e; bla(a && c);`,
+		`var a = 6 || e; bla(a && c);`	// TODO: currently we cannot prove that the value of g cant change between the var init and the usage at bla()
+	);
+	assertInlineVariables(
+		`var a = p && !e; bla(a && c);`,
+		`var a = p && !e; bla(a && c);`	// TODO: currently we cannot prove that the value of g cant change between the var init and the usage at bla()
+	);
+	assertInlineVariables(
+		`function b(f) { var a = p && !e; bla(a && c, f); }`,
+		`function b(f) { var a = p && !e; bla(a && c, f); }`	// TODO: currently we cannot prove that the value of g cant change between the var init and the usage at bla()
+	);
+	assertInlineVariables(
+		`var a = p; bla(a);`,
+		`bla(p);`
+	);
+	assertInlineVariables(
+		`var a = p; sideEffect(); bla(a);`,
+		`var a = p; sideEffect(); bla(a);`
+	);
+	assertInlineVariables(
+		`var a = p, b = sideEffect(); bla(a);`,
+		`var a = p, b = sideEffect(); bla(a);`
+	);
+	assertInlineVariables(
+		`var a = p; sideEffect(), bla(a);`,
+		`var a = p; sideEffect(), bla(a);`
+	);
+	assertInlineVariables(
+		`var a = p; bla(a), sideEffect();`,
+		`bla(p), sideEffect();`
+	);
+}
 
 
 

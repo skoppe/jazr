@@ -83,7 +83,7 @@ enum ExpressionOperator {
 	Division,
 	Mod
 }
-enum NodeType {
+enum NodeType: byte {
 	ErrorNode,
 	BooleanNode,
 	SheBangNode,
@@ -211,7 +211,7 @@ enum LexicalDeclaration
 	Let,
 	Const
 }
-enum Hint {
+enum Hint:byte {
 	None = 0,
 	Return = 1 << 0,
 	ReturnValue = 1 << 1,
@@ -222,9 +222,9 @@ enum Hint {
 }
 struct Hints
 {
-	private int hs = Hint.None;
+	private byte hs = Hint.None;
 	alias hs this;
-	this(int h)
+	this(byte h)
 	{
 		hs = h;
 	}
@@ -244,12 +244,12 @@ struct Hints
 			}
 		}
 	}
-	int get() { return hs; }
-	bool has(int v)
+	byte get() { return hs; }
+	bool has(byte v)
 	{
 		return (hs & v) != 0;
 	}
-	void add(int h) {
+	void add(byte h) {
 		hs |= h;
 	}
 }
@@ -287,16 +287,17 @@ struct PrettyPrintSink
 		}
 	}
 }
+
 class Node
 {
-	Branch branch;
 	Node[] children;
 	Node parent;
+	Branch branch;
 	private NodeType _type;
 	@property NodeType type() pure const { return _type; }
 	private Hints _hints;
 	@property ref Hints hints() { return _hints; }
-	@property void hints(int hs) { _hints = Hints(hs); }
+	@property void hints(byte hs) { _hints = Hints(hs); }
 	this(NodeType t)
 	{
 		_type = t;
@@ -340,7 +341,7 @@ class Node
 			if (r is null)
 				throw new UnitTestException([format("Tried to interpret as %s, but got %s",Type.stringof,this)],file,line);
 		}
-		assert(r !is null,format("Assertion this != %s. In %s @ %s",Type.stringof,file,line));
+		assert(r !is null,format("Assertion this(%s) != %s. In %s @ %s",this.type,Type.stringof,file,line));
 		return r;
 	}
 	auto opt(Type)()
@@ -363,7 +364,7 @@ class Node
 	{
 		if (branch)
 			return branch.scp.getRoot();
-		return this; // todo: could also return parent's getRoot but this is probably pointless...
+		return this;
 	}
 	Node replaceWith(Node other) @trusted
 	{
@@ -382,14 +383,24 @@ class Node
 		}
 		return other;
 	}
+	void replaceAt(size_t idx, Node other)
+	{
+		assert(idx < children.length);
+		children[idx].parent = null;
+		children[idx] = other;
+		other.parent = this;
+		if (other.branch !is branch)
+			other.assignBranch(branch);
+	}
 	void replaceChild(Node child, Node other) @trusted
 	{
+		// TODO: rewrite to use replaceAt
 		import std.algorithm : countUntil;
 		auto idx = children.countUntil!(c=>c is child);
 		assert(idx != -1);
 		children[idx] = other;
 		other.parent = this;
-		if (other.branch != child.branch)
+		if (other.branch !is child.branch)
 			other.assignBranch(child.branch);
 		if (child.parent is this)
 			child.parent = null;
@@ -1021,9 +1032,10 @@ final class UnaryExpressionNode : Node
 {
 	Node[] prefixs;
 	Postfix postfix = Postfix.None;
-	this(Node[] ps, Node n = null)
+	this(Node[] ps, Node n = null, Postfix postfix = Postfix.None)
 	{
 		prefixs = ps;
+		this.postfix = postfix;
 		super(NodeType.UnaryExpressionNode,n);
 	}
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
@@ -2430,12 +2442,23 @@ auto assignmentToExpressionOperator(Assignment a)
 
 bool canHaveSideEffects(Node node)
 {
+	import std.algorithm : any;
 	switch (node.type)
 	{
+		case NodeType.KeywordNode:
+			auto k = node.as!(KeywordNode).keyword;
+			return !(k == Keyword.Null || k == Keyword.This);
+		case NodeType.IdentifierReferenceNode:
 		case NodeType.DecimalLiteralNode:
 		case NodeType.StringLiteralNode:
-		case NodeType.IdentifierReferenceNode:
+		case NodeType.ExpressionOperatorNode:
+		case NodeType.RegexLiteralNode:
 			return false;
+		case NodeType.BinaryExpressionNode:
+		case NodeType.UnaryExpressionNode:
+		case NodeType.ExpressionNode:
+		case NodeType.ParenthesisNode:
+			return node.children.any!(canHaveSideEffects);
 		default:
 			return true;
 	}
@@ -2470,3 +2493,202 @@ auto getNthParent(Node node, size_t d)
 		node = node.parent;
 	return node;
 }
+
+auto requiresLHS(Node node)
+{
+	import std.algorithm : any;
+	switch(node.parent.type)
+	{
+		case NodeType.UnaryExpressionNode:
+			if (node.parent.as!(UnaryExpressionNode).postfix != Postfix.None)
+				return true;
+			if (node.parent.as!(UnaryExpressionNode).prefixs.map!(p => p.as!(PrefixExpressionNode).prefix).any!(p => p == Prefix.Increment || p == Prefix.Decrement))
+				return true;
+			return false;
+		default:
+			return false; // TODO: There are more cases a lhs is required (e.g. left hand side of assignment expression)
+	}
+}
+// This function determines if node `node` can be moved to `to` and would still evaluate the same, E.g. there is no expression between `node` and `to` that might change the `node` expression or any of its sub expressions.
+// TODO: this can be improved upon by dataflow analysis (but is a rabbit hole :)
+auto canBeMovedTo(Node node, Node to)
+{
+	import std.algorithm : any;
+	switch (node.type)
+	{
+		case NodeType.KeywordNode:
+			auto k = node.as!(KeywordNode).keyword;
+			return k == Keyword.Null || k == Keyword.This;
+		case NodeType.DecimalLiteralNode:
+		case NodeType.StringLiteralNode:
+		case NodeType.ExpressionOperatorNode:
+		case NodeType.RegexLiteralNode:
+			return true;
+		case NodeType.BinaryExpressionNode:
+		case NodeType.UnaryExpressionNode:
+		case NodeType.ExpressionNode:
+		case NodeType.ParenthesisNode:
+			return !node.children.any!(c => !canBeMovedTo(c,to));
+		default:
+			return false;
+	}
+}
+
+bool isVoid0(Node node)
+{
+	if (node.type != NodeType.UnaryExpressionNode)
+		return false;
+	auto un = node.as!UnaryExpressionNode;
+	if (un.prefixs.length != 1)
+		return false;
+	if (un.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Void)
+		return false;
+	if (un.children[0].type != NodeType.DecimalLiteralNode)
+		return false;
+	if (un.children[0].as!(DecimalLiteralNode).value != cast(const(ubyte)[])"0")
+		return false;
+	return true;
+}
+
+bool isUndefined(Node node)
+{
+	if (node.type != NodeType.IdentifierReferenceNode)
+		return false;
+	return node.as!(IdentifierReferenceNode).identifier == "undefined";
+}
+
+bool isLastInFunctionBody(Node node)
+{
+	if (node.branch.scp.entry.type != NodeType.FunctionBodyNode)
+		return false;
+	auto funBody = node.branch.scp.entry;
+	do
+	{
+		if (node.parent.children[$-1] !is node)
+			return false;
+		node = node.parent;
+	} while (node !is funBody);
+	return true;
+}
+bool isComparator(ExpressionOperator op)
+{
+	final switch (op)
+	{
+		case ExpressionOperator.InstanceOf:
+		case ExpressionOperator.In:
+		case ExpressionOperator.LogicalAnd:
+		case ExpressionOperator.LogicalOr:
+		case ExpressionOperator.BitwiseAnd:
+		case ExpressionOperator.BitwiseOr:
+		case ExpressionOperator.BitwiseXor:
+			return false;
+		case ExpressionOperator.StrictEqual:
+		case ExpressionOperator.Equal:
+		case ExpressionOperator.StrictNotEqual:
+		case ExpressionOperator.NotEqual:
+		case ExpressionOperator.LessOrEqual:
+		case ExpressionOperator.LessThan:
+		case ExpressionOperator.GreaterOrEqual:
+		case ExpressionOperator.GreaterThan:
+			return true;
+		case ExpressionOperator.LeftShift:
+		case ExpressionOperator.TripleRightSift:
+		case ExpressionOperator.RightShift:
+		case ExpressionOperator.Add:
+		case ExpressionOperator.Minus:
+		case ExpressionOperator.Multiply:
+		case ExpressionOperator.Division:
+		case ExpressionOperator.Mod:
+			return false;
+	}
+}
+
+bool isLogical(ExpressionOperator op)
+{
+	final switch (op)
+	{
+		case ExpressionOperator.InstanceOf:
+		case ExpressionOperator.In:
+			return false;
+		case ExpressionOperator.LogicalAnd:
+		case ExpressionOperator.LogicalOr:
+			return true;
+		case ExpressionOperator.BitwiseAnd:
+		case ExpressionOperator.BitwiseOr:
+		case ExpressionOperator.BitwiseXor:
+		case ExpressionOperator.StrictEqual:
+		case ExpressionOperator.Equal:
+		case ExpressionOperator.StrictNotEqual:
+		case ExpressionOperator.NotEqual:
+		case ExpressionOperator.LessOrEqual:
+		case ExpressionOperator.LessThan:
+		case ExpressionOperator.GreaterOrEqual:
+		case ExpressionOperator.GreaterThan:
+		case ExpressionOperator.LeftShift:
+		case ExpressionOperator.TripleRightSift:
+		case ExpressionOperator.RightShift:
+		case ExpressionOperator.Add:
+		case ExpressionOperator.Minus:
+		case ExpressionOperator.Multiply:
+		case ExpressionOperator.Division:
+		case ExpressionOperator.Mod:
+			return false;
+	}
+}
+
+bool isArithmetic(ExpressionOperator op)
+{
+	final switch (op)
+	{
+		case ExpressionOperator.InstanceOf:
+		case ExpressionOperator.In:
+		case ExpressionOperator.LogicalAnd:
+		case ExpressionOperator.LogicalOr:
+			return false;
+		case ExpressionOperator.BitwiseAnd:
+		case ExpressionOperator.BitwiseOr:
+		case ExpressionOperator.BitwiseXor:
+			return true;
+		case ExpressionOperator.StrictEqual:
+		case ExpressionOperator.Equal:
+		case ExpressionOperator.StrictNotEqual:
+		case ExpressionOperator.NotEqual:
+		case ExpressionOperator.LessOrEqual:
+		case ExpressionOperator.LessThan:
+		case ExpressionOperator.GreaterOrEqual:
+		case ExpressionOperator.GreaterThan:
+			return false;
+		case ExpressionOperator.LeftShift:
+		case ExpressionOperator.TripleRightSift:
+		case ExpressionOperator.RightShift:
+		case ExpressionOperator.Add:
+		case ExpressionOperator.Minus:
+		case ExpressionOperator.Multiply:
+		case ExpressionOperator.Division:
+		case ExpressionOperator.Mod:
+			return true;
+	}
+}
+bool partOfCondition(Node node)
+{
+	switch (node.parent.type)
+	{
+		case NodeType.IfStatementNode:
+			return node.parent.children[0] is node;
+		case NodeType.ConditionalExpressionNode:
+			return node.parent.children[0] is node;
+		case NodeType.ParenthesisNode:
+		case NodeType.ExpressionOperatorNode:
+			return node.parent.partOfCondition();
+		case NodeType.BinaryExpressionNode:
+		case NodeType.ModuleNode:
+		case NodeType.FunctionBodyNode:
+		case NodeType.BlockStatementNode:
+			return true;
+		default:
+			return false;
+	}
+}
+
+
+

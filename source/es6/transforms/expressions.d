@@ -283,6 +283,344 @@ unittest
 		`+Infinity`
 	);
 }
+
+bool simplifyComparisions(BinaryExpressionNode node, out Node replacedWith)
+{
+	import std.algorithm : remove;
+	bool didWork = false;
+	size_t off;
+	foreach (i, op; node.getOperators())
+	{
+		if (!op.operator.isComparator)
+			continue;
+
+		auto left = node.children[i*2-off].getRawValue();
+		if (left.type == ValueType.NotKnownAtCompileTime)
+			continue;
+		auto right = node.children[i*2+2-off].getRawValue();
+		if (right.type == ValueType.NotKnownAtCompileTime)
+			continue;
+
+		auto result = left.doOperator(right, op.operator);
+
+		if (result.type == ValueType.NotKnownAtCompileTime)
+			continue;
+
+		didWork = true;
+
+		auto expr = result.toUnaryExpression();
+		expr.hints.add(Hint.Visited);
+		node.replaceAt(i*2-off, expr);
+
+		node.children = node.children.remove(i*2-off+1,i*2-off+2);
+
+		off += 2;
+	}
+	if (node.children.length == 1)
+		replacedWith = node.replaceWith(node.children[0]);
+	if (didWork)
+		node.reanalyseHints();
+	return didWork;
+}
+
+@("simplifyComparisions")
+unittest
+{
+	alias assertSimplifyComparisions = assertTransformations!(simplifyComparisions);
+
+	assertSimplifyComparisions(
+		`'bla' == 'bla';`,
+		`true;`
+	);
+	assertSimplifyComparisions(
+		`6 > 8;`,
+		`false;`
+	);
+	assertSimplifyComparisions(
+		`a && 'bla' == 'bla';`,
+		`a && true;`
+	);
+	assertSimplifyComparisions(
+		`6 > 8 && b;`,
+		`false && b;`
+	);
+	assertSimplifyComparisions(
+		`a && 'bla' == 'bla' || c < 6 && 'hup' != 'hup';`,
+		`a && true || c < 6 && false;`
+	);
+	assertSimplifyComparisions(
+		`6 > 8 && b || 'bla' !== 'bla' && 6 < c`,
+		`false && b || false && 6 < c;`
+	);
+}
+
+bool simplifyLogicalOperations(BinaryExpressionNode node, out Node replacedWith)
+{
+	Node getOuterBinaryExprOperand(Node node)
+	{
+		switch (node.parent.type)
+		{
+			case NodeType.ParenthesisNode:
+				return getOuterBinaryExprOperand(node.parent);
+			case NodeType.ExpressionNode:
+				if (node.parent.children[$-1] is node)
+					return getOuterBinaryExprOperand(node.parent);
+				return null;
+			case NodeType.BinaryExpressionNode:
+				return node;
+			default:
+				return null;
+		}
+	}
+	import std.algorithm : remove;
+	if (!node.partOfCondition)
+		return false;
+	// we cannot apply transformation when this binaryexpr is part of another binaryexpression where there are arithmetic operators surrounding it (e.g. `a + (b || 0)`)
+	auto outerOperand = getOuterBinaryExprOperand(node);
+	if (outerOperand !is null)
+	{
+		auto ops = outerOperand.parent.as!(BinaryExpressionNode).getOperatorsSurrounding(outerOperand);
+		foreach(op; ops)
+		{
+			if (op.operator.isArithmetic())
+				return false;
+		}
+	}
+	bool didWork = false;
+	size_t off;
+	auto ops = node.getOperators();
+	foreach (i, op; ops)
+	{
+		if (!op.operator.isLogical)
+			continue;
+
+		// have to check whether prev and next operators are lower precedence
+		if (i*2 > 1+off)
+		{
+			auto prevOperator = node.children[i*2-1-off].as!ExpressionOperatorNode;
+			if (prevOperator.operator.compareExprOperatorPrecedence(op.operator) > 0)
+				continue;
+		}
+		if (i+1 < ops.length)
+		{
+			auto nextOperator = node.children[i*2+3-off].as!ExpressionOperatorNode;
+			if (op.operator.compareExprOperatorPrecedence(nextOperator.operator) < 0)
+				continue;
+		}
+		
+		auto left = node.children[i*2-off].getRawValue().coerceToTernary();
+		auto right = node.children[i*2+2-off].getRawValue().coerceToTernary();
+		if (left == Ternary.None && right == Ternary.None)
+			continue;
+
+		if (left != Ternary.None && right != Ternary.None)
+		{
+			auto leftRaw = node.children[i*2-off].getRawValue();
+			auto rightRaw = node.children[i*2+2-off].getRawValue();
+			auto result = leftRaw.doOperator(rightRaw, op.operator);
+
+			if (result.type == ValueType.NotKnownAtCompileTime)
+				continue;
+
+			auto expr = result.toUnaryExpression();
+			expr.hints.add(Hint.Visited);
+			node.replaceAt(i*2-off, expr);
+
+			node.children = node.children.remove(i*2-off+1,i*2-off+2);
+
+			off += 2;
+		} else
+		{
+			bool invert = false, keepRightAll = false;
+
+			if (right == Ternary.None)
+			{
+				invert = left == Ternary.True;
+			} else
+			{
+				invert = right == Ternary.False;
+				keepRightAll = true;
+			}
+
+			if (op.operator == ExpressionOperator.LogicalOr) 
+				invert = !invert;
+
+			if (invert)
+			{
+				if (keepRightAll)
+					continue;
+				// remove left and operator
+				auto leftNode = node.children[i*2-off];
+				node.children = node.children.remove(i*2-off,i*2+1-off);
+				leftNode.shread();
+			} else
+			{
+				// remove operator and right
+				auto rightNode = node.children[i*2+2-off];
+				node.children = node.children.remove(i*2+1-off,i*2+2-off);
+				rightNode.shread();
+			}
+
+			off += 2;
+		}
+		didWork = true;
+	}
+	if (node.children.length == 1)
+	{
+		replacedWith = node.replaceWith(node.children[0]);
+		if (replacedWith)
+			replacedWith.reanalyseHints();
+		else
+			node.reanalyseHints();
+		return true;
+	}
+	if (didWork)
+	{
+		simplifyLogicalOperations(node, replacedWith);
+		if (replacedWith)
+			replacedWith.reanalyseHints();
+		else
+			node.reanalyseHints();
+		return true;
+	}
+	return false;
+}
+
+@("simplifyLogicalOperations")
+unittest
+{
+	alias assertSimplifyLogical = assertTransformations!(simplifyLogicalOperations);
+
+	assertSimplifyLogical(
+		`true && b()`,
+		`b()`
+	);
+	assertSimplifyLogical(
+		`true || b()`,
+		`true`
+	);
+	assertSimplifyLogical(
+		`false && b()`,
+		`false`
+	);
+	assertSimplifyLogical(
+		`false || b()`,
+		`b()`
+	);
+	assertSimplifyLogical(
+		`b() && true`,
+		`b()`
+	);
+	assertSimplifyLogical(
+		`b() || true`,
+		`b() || true`
+	);
+	assertSimplifyLogical(
+		`b() && false`,
+		`b() && false`
+	);
+	assertSimplifyLogical(
+		`b() || false`,
+		`b()`
+	);
+	assertSimplifyLogical(
+		`true && false`,
+		`false`
+	);
+	assertSimplifyLogical(
+		`true || false`,
+		`true`
+	);
+	assertSimplifyLogical(
+		`false && true`,
+		`false`
+	);
+	assertSimplifyLogical(
+		`false || true`,
+		`true`
+	);
+	assertSimplifyLogical(
+		`true && false || true && false`,
+		`false`
+	);
+	assertSimplifyLogical(
+		`true || false && true || false`,
+		`true`
+	);
+	assertSimplifyLogical(
+		`false && true || false && true`,
+		`false`
+	);
+	assertSimplifyLogical(
+		`false || true && false || true`,
+		`true`
+	);
+	assertSimplifyLogical(
+		`bla === true && true === hup`,
+		`bla === true && true === hup`
+	);
+	assertSimplifyLogical(
+		`bla === true && true instanceof hup`,
+		`bla === true && true instanceof hup`
+	);
+	assertSimplifyLogical(
+		`bla >>> true && true === hup`,
+		`bla >>> true && true === hup`
+	);
+	assertSimplifyLogical(
+		`if (true || true && b);`,
+		`if (true);`
+	);
+	assertSimplifyLogical(
+		`false || true && c() ? b : void 0;`,
+		`c() ? b : void 0;`,
+	);
+	assertSimplifyLogical(
+		`(true || true && c()) ? b : void 0;`,
+		`(true) ? b : void 0;`,
+	);
+	assertSimplifyLogical(
+		`{ false || true && c() }`,
+		`{ c() }`,
+	);
+	assertSimplifyLogical(
+		`var a = b || null;`,
+		`var a = b || null;`
+	);
+	assertSimplifyLogical(
+		`foo(b || null);`,
+		`foo(b || null);`
+	);
+	assertSimplifyLogical(
+		`var a = {b: b || null};`,
+		`var a = {b: b || null};`
+	);
+	assertSimplifyLogical(
+		`a = t-(o||0)`,
+		`a = t-(o||0)`
+	);
+	assertSimplifyLogical(
+		`e._f = i+(s||'')+(l||'')`,
+		`e._f = i+(s||'')+(l||'')`
+	);
+	assertSimplifyLogical(
+		`a = (t||'')+r`,
+		`a = (t||'')+r`
+	);
+	assertSimplifyLogical(
+		`e[t] = (e[t]||0)*n`,
+		`e[t] = (e[t]||0)*n`
+	);
+	assertSimplifyLogical(
+		`C.access(r, t, (a||0)-1)`,
+		`C.access(r, t, (a||0)-1)`
+	);
+	assertSimplifyLogical(
+		`v[e] = (v[e]||0)/t`,
+		`v[e] = (v[e]||0)/t`
+	);
+}
+
 bool simplifyBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 {
 	auto raw = node.resolveBinaryExpression();
@@ -302,6 +640,10 @@ unittest
 	assertSimplifyBinaryExpr(
 		`var a = 123 + 123`,
 		`var a = 246`
+	);
+	assertSimplifyBinaryExpr(
+		`var a = 123e2 + 123e4`,
+		`var a = 1242300`
 	);
 	assertSimplifyBinaryExpr(
 		`var a = "some" + "stuff" + "concatenated" +
@@ -373,7 +715,7 @@ unittest
 	);
 }
 
-void moveStringComparisonToLeftOperand(BinaryExpressionNode binExpr, out Node replacedWith)
+void moveLiteralComparisonToLeftOperand(BinaryExpressionNode binExpr, out Node replacedWith)
 {
 	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
@@ -386,8 +728,45 @@ void moveStringComparisonToLeftOperand(BinaryExpressionNode binExpr, out Node re
 		auto leftOperand = binExpr.children[idx*2];
 		auto rightOperand = binExpr.children[(idx+1)*2];
 
-		if (leftOperand.type != NodeType.StringLiteralNode &&
-			rightOperand.type != NodeType.StringLiteralNode)
+		bool isCandidate(Node node)
+		{
+			switch (node.type)
+			{
+				case NodeType.KeywordNode:
+					auto n = node.as!(KeywordNode);
+					return n.keyword == Keyword.Null || n.keyword == Keyword.This;
+				case NodeType.IdentifierReferenceNode:
+					auto n = node.as!(IdentifierReferenceNode);
+					return n.identifier == "undefined" || n.identifier == "NaN" || n.identifier == "Infinity";
+				case NodeType.UnaryExpressionNode:
+					auto n = node.as!(UnaryExpressionNode);
+					if (n.prefixs.length != 1)
+						return false;
+					if (n.prefixs[0].as!(PrefixExpressionNode).prefix != Prefix.Void)
+						return false;
+					return isCandidate(node.children[0]);
+				case NodeType.DecimalLiteralNode:
+				case NodeType.OctalLiteralNode:
+				case NodeType.HexLiteralNode:
+				case NodeType.BinaryLiteralNode:
+				case NodeType.StringLiteralNode:
+					return true;
+				default:
+					return false;
+			}
+		}
+		bool isRightBetterCandidate(Node left, Node right)
+		{
+			if (!isCandidate(left))
+				return true;
+			if (left.type == right.type)
+				return false;
+			if (left.type == NodeType.IdentifierReferenceNode || left.type == NodeType.UnaryExpressionNode)
+				return false;
+			return true;
+		}
+		if (!isCandidate(leftOperand) &&
+			!isCandidate(rightOperand))
 			continue;
 
 		auto leftPrecedence = idx > 0 ? ops[idx-1].operator.getExprOperatorPrecedence() : 0;
@@ -397,30 +776,31 @@ void moveStringComparisonToLeftOperand(BinaryExpressionNode binExpr, out Node re
 		if (precedence <= leftPrecedence || precedence < rightPrecedence)
 			continue;
 
-		if (leftOperand.type != NodeType.StringLiteralNode)
+		if (isRightBetterCandidate(leftOperand,rightOperand))
 		{
 			binExpr.children[idx*2] = rightOperand;
 			binExpr.children[(idx+1)*2] = leftOperand;
 		}
 		
-		if (op.operator == ExpressionOperator.StrictEqual)
-			op.operator = ExpressionOperator.Equal;
-		else
-			op.operator = ExpressionOperator.NotEqual;
+		// TODO: this only applies if we know that both operands are the same type
+		//if (op.operator == ExpressionOperator.StrictEqual)
+		//	op.operator = ExpressionOperator.Equal;
+		//else
+		//	op.operator = ExpressionOperator.NotEqual;
 	}
 }
 
-@("moveStringComparisonToLeftOperand")
+@("moveLiteralComparisonToLeftOperand")
 unittest
 {
-	alias assertMoveStringComparison = assertTransformations!(moveStringComparisonToLeftOperand);
+	alias assertMoveStringComparison = assertTransformations!(moveLiteralComparisonToLeftOperand);
 	assertMoveStringComparison(
 		`a === "a"`,
-		`"a" == a`
+		`"a" === a`
 	);
 	assertMoveStringComparison(
 		`a !== "a"`,
-		`"a" != a`
+		`"a" !== a`
 	);
 	assertMoveStringComparison(
 		`b === a !== "a"`,
@@ -428,7 +808,7 @@ unittest
 	);
 	assertMoveStringComparison(
 		`a !== "a" === b`,
-		`"a" != a === b`
+		`"a" !== a === b`
 	);
 	assertMoveStringComparison(
 		`false === "false" < 1`,
@@ -438,6 +818,70 @@ unittest
 		`"abc" < "def" === true`,
 		`"abc" < "def" === true`
 	);
+	assertMoveStringComparison(
+		`b === null`,
+		`null === b`
+	);
+	assertMoveStringComparison(
+		`b === undefined`,
+		`undefined === b`
+	);
+	assertMoveStringComparison(
+		`b === void 0`,
+		`void 0 === b`
+	);
+	assertMoveStringComparison(
+		`b === 4`,
+		`4 === b`
+	);
+	assertMoveStringComparison(
+		`a !== "a"`,
+		`"a" !== a`
+	);
+	assertMoveStringComparison(
+		`a === "a"`,
+		`"a" === a`
+	);
+	assertMoveStringComparison(
+		`b !== a === "a"`,
+		`b !== a === "a"`
+	);
+	assertMoveStringComparison(
+		`a === "a" !== b`,
+		`"a" === a !== b`
+	);
+	assertMoveStringComparison(
+		`false !== "false" < 1`,
+		`false !== "false" < 1`
+	);
+	assertMoveStringComparison(
+		`"abc" < "def" !== true`,
+		`"abc" < "def" !== true`
+	);
+	assertMoveStringComparison(
+		`b !== null`,
+		`null !== b`
+	);
+	assertMoveStringComparison(
+		`b !== undefined`,
+		`undefined !== b`
+	);
+	assertMoveStringComparison(
+		`b !== void 0`,
+		`void 0 !== b`
+	);
+	assertMoveStringComparison(
+		`b !== 4`,
+		`4 !== b`
+	);
+/*	assertMoveStringComparison(		TODO: see moveLiteralComparisonToLeftOperand
+		`typeof a === "function"`,
+		`"function" == typeof a`,
+	);
+	assertMoveStringComparison(
+		`typeof a !== "function"`,
+		`"function" != typeof a`,
+	);*/
 }
 
 void convertHexToDecimalLiterals(HexLiteralNode node, out Node replacedWith)
@@ -893,3 +1337,46 @@ unittest
 		`var Infinity; a = Infinity;`
 	);
 }
+
+bool convertToScientificNotation(DecimalLiteralNode node, out Node replacedWith)
+{
+	import std.format : format;
+	import std.range : retro;
+	auto idx = node.value.retro.countUntil!(c => c != '0');
+	if (idx < 3)
+		return false;
+
+	node.value = cast(const(ubyte)[])format("%se%s",cast(const(char)[])node.value[0..$-idx],idx);
+	
+	return true;
+}
+
+@("convertToScientificNotation")
+unittest
+{
+	alias assertScientificNotation = assertTransformations!(convertToScientificNotation);
+	assertScientificNotation(
+		`1000;`,
+		`1e3;`
+	);
+	assertScientificNotation(
+		`100;`,
+		`100;`
+	);
+	assertScientificNotation(
+		`10001;`,
+		`10001;`
+	);
+	assertScientificNotation(
+		`10000000000;`,
+		`1e10;`
+	);
+	assertScientificNotation(
+		`var eT = 60000, eS = 3600000, eR = 86400000;`,
+		`var eT = 6e4, eS = 36e5, eR = 864e5;`
+	);
+}
+
+
+
+

@@ -80,7 +80,7 @@ struct Variable
 		// and compare indices in their common parent children array.
 
 		size_t depth = reference.calcDepth(node.branch.scp.entry);
-					import std.stdio;
+		import std.stdio;
 
 		size_t idx = references.countUntil!((r){
 			Node item = reference;
@@ -106,6 +106,11 @@ struct Variable
 		else
 			references.insertInPlace(idx, reference);
 	}
+}
+struct Label
+{
+	LabelledStatementNode definition;
+	Node[] references;
 }
 bool isLocal(ref Variable v)
 {
@@ -139,6 +144,13 @@ void linkToDefinition(Scope s, ref Identifier i)
 		i.definition = s.variables[idx].node;
 	}
 }
+void linkToLabel(Scope s, Node node, const(ubyte)[] label)
+{
+	auto idx = s.labels.countUntil!(l => l.definition.label == label);
+	if (idx == -1)
+		return;
+	s.labels[idx].references ~= node;
+}
 class Scope
 {
 	Scope parent;
@@ -149,6 +161,7 @@ class Scope
 	bool isModule = false;
 	/*private*/ Variable[] variables;
 	/*private*/ Identifier[] identifiers;
+	Label[] labels;
 	private Identifier[] globals;
 	private int nextFreeIdentifier = -1;
 	this(Node e, Scope p = null)
@@ -203,6 +216,10 @@ class Scope
 	void addIdentifier(Identifier i)
 	{
 		identifiers ~= i;
+	}
+	void addLabel(LabelledStatementNode n)
+	{
+		labels ~= Label(n);
 	}
 	Variable[] getVariables()
 	{

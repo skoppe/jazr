@@ -19,13 +19,30 @@ module es6.lexer;
 
 @safe:
 
+import es6.bench;
+public import es6.tokens;
 import std.range : empty, front, popFront, save, take, drop, ElementType;
 import std.array : Appender, appender;
 import std.traits : Unqual;
-public import es6.tokens;
+import std.typecons : tuple;
 import core.cpuid : sse42;
-import es6.bench;
-
+import core.simd;
+version(LDC)
+{
+	// TODO: turned off due to tests/angular2-testing-2.0.0.js giving range exception
+	static if (__traits(targetHasFeature, "sse4.2"))
+	{
+		import core.simd;
+		import ldc.simd;
+		import ldc.gccbuiltins_x86;
+		pragma(msg, "Info: inline SSE4.2 instructions are used.");
+		version = ldcsse42;
+	}
+	else
+	{
+		pragma(msg, "Info: inline SSE4.2 instructions are not used.");
+	}
+}
 version (D_InlineAsm_X86_64)
 {
     version (Windows) {}
@@ -51,12 +68,12 @@ struct LexState
 
 enum Goal
 {
-	//InputElementDiv, // this is the default goal
-	//InputElementRegExpOrTemplateTail, // is used in syntactic grammar contexts where a RegularExpressionLiteral, a TemplateMiddle, or a TemplateTail is permitted (only in yield)
-	//InputElementRegExp, // is used in all syntactic grammar contexts where a RegularExpressionLiteral is permitted but neither a TemplateMiddle, nor a TemplateTail is permitted (in primaryexpression)
-	//InputElementTemplateTail, // is used in all syntactic grammar contexts where a TemplateMiddle or a TemplateTail is permitted but a RegularExpressionLiteral is not permitted. (unused)
-	All,
-	ProhibitRegex
+	None = 0,
+	In = 1,
+	Yield = 1 << 1,
+	Return = 1 << 2,
+	Default = 1 << 3,
+	NoRegex = 1 << 4
 }
 
 bool isWhitespace(Char)(Char c) nothrow
@@ -69,7 +86,6 @@ bool isWhitespace(Char)(Char c) nothrow
 		return false;
 	return (c == '\uFEFF' || (c >= '\u02B0' && c <= '\u02FF'));
 }
-// TODO: can we make this into a index computation and switch (1,2,3)?
 size_t getWhiteSpaceLength(Range)(Range r, size_t idx = 0) nothrow
 {
 	if (r[idx] < 0xc0) // 1 byte code point
@@ -123,7 +139,6 @@ unittest
 //{
 //	return (s == 0x0a || s == 0x0d);// || s == '\u2028' || s == '\u2029');
 //}
-// TODO: can we make this into a index computation and switch (1,2,3)?
 size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0) pure nothrow
 {
 	if (r[idx] <= 0x7f)
@@ -316,23 +331,22 @@ unittest
 	isValid3ByteIdentifierTail(0xffdc).shouldBeTrue;
 }
 
-auto getStartIdentifierLength(Range)(Range r) nothrow
+auto getStartIdentifierLength(Range)(Range r, size_t idx = 0) nothrow
 	if (is (ElementType!Range : ubyte))
 {
-	ubyte first = r.front();
-	if (first <= 0x7f)
-		return (first == '$' || first == '_' || (first >= '\x41' && first <= '\x5a') || (first >= '\x61' && first <= '\x7a')) ? 1 : 0;
-	if (first >= 0xf0) // 4 byte unicode
+	if (r[idx] <= 0x7f)
+		return (r[idx] == '$' || r[idx] == '_' || (r[idx] >= '\x41' && r[idx] <= '\x5a') || (r[idx] >= '\x61' && r[idx] <= '\x7a')) ? 1 : 0;
+	if (r[idx] >= 0xf0) // 4 byte unicode
 	{
-		auto hex = r.decodeUnicodeCodePoint!4;	// 4 byte unicode
+		auto hex = r.decodeUnicodeCodePoint!4(idx);	// 4 byte unicode
 		return hex.isValid4ByteIdentifierStart ? 4 : 0;
-	} else if (first >= 0xe0)
+	} else if (r[idx] >= 0xe0)
 	{
-		auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
+		auto hex = r.decodeUnicodeCodePoint!3(idx);	// 3 byte unicode
 		return hex.isValid3ByteIdentifierStart ? 3 : 0;
-	} else if (first >= 0xc0)
+	} else if (r[idx] >= 0xc0)
 	{
-		auto hex = r.decodeUnicodeCodePoint!2;	// 2 byte unicode
+		auto hex = r.decodeUnicodeCodePoint!2(idx);	// 2 byte unicode
 		return hex.isValid2ByteIdentifierStart ? 2 : 0;
 	}
 	return 0;
@@ -360,7 +374,6 @@ unittest {
 	assert([0xE2,0x82,0xAC].decodeUnicodeCodePoint!(3) == 0x20AC);
 	assert([0xF0,0x90,0x8D,0x88].decodeUnicodeCodePoint!(4) == 0x10348);
 }
-// TODO: can we make this into a index computation and switch (1,2,3)?
 size_t getUnicodeLength(Range)(Range r, size_t idx = 0) pure nothrow @nogc
 {
 	if (r[idx] < 0xc0)
@@ -475,58 +488,119 @@ unittest
 	assert(`\\`.coerceToSingleQuotedString == `\\`);
 	`\'`.coerceToSingleQuotedString.shouldEqual(`\'`);
 }
-ulong rangeMatch(bool invert, chars...)(const ubyte*) pure nothrow @trusted @nogc
+size_t rangeMatch(bool invert, chars...)(const ubyte* str) pure nothrow @trusted @nogc
 {
-    static assert (chars.length % 2 == 0);
-    enum constant = ByteCombine!chars;
-    static if (invert)
-        enum rangeMatchFlags = 0b0000_0100;
-    else
-        enum rangeMatchFlags = 0b0001_0100;
-    enum charsLength = chars.length;
-    asm pure nothrow @nogc
-    {
-        naked;
-        movdqu XMM1, [RDI];
-        mov R10, constant;
-        movq XMM2, R10;
-        mov RAX, charsLength;
-        mov RDX, 16;
-        pcmpestri XMM2, XMM1, rangeMatchFlags;
-        mov RAX, RCX;
-        ret;
-    }
+	version (ldcsse42)
+	{
+		static assert (chars.length % 2 == 0);
+		enum byte16 str2E = ByteCombine!chars;
+		static if (invert)
+			enum flags = 0b0000_0100;
+		else
+			enum flags = 0b0001_0100;
+
+		byte16 str1 = loadUnaligned!ubyte16(cast(ubyte*) str);
+		byte16 str2 = str2E;
+
+		return __builtin_ia32_pcmpestri128(str2, chars.length, str1, 16, flags);
+	} else {
+		static assert (chars.length % 2 == 0);
+		enum byte16 str2E = ByteCombine!chars;
+		static if (invert)
+			enum rangeMatchFlags = 0b0000_0100;
+		else
+			enum rangeMatchFlags = 0b0001_0100;
+		enum charsLength = chars.length;
+		byte16 str2 = str2E;
+		asm pure nothrow @nogc
+		{
+			naked;
+			movdqu XMM1, [RDI];
+			movq XMM2, str2;
+			mov RAX, charsLength;
+			mov RDX, 16;
+			pcmpestri XMM2, XMM1, rangeMatchFlags;
+			mov RAX, RCX;
+			ret;
+		}
+	}
 }
-ulong skip(bool matching, chars...)(const ubyte*) pure nothrow
-    @trusted @nogc if (chars.length <= 8)
+
+size_t skip(bool matching, chars...)(const ubyte* str) pure nothrow @trusted @nogc
 {
-    enum constant = ByteCombine!chars;
-    enum charsLength = chars.length;
-    static if (matching)
-        enum flags = 0b0001_0000;
-    else
-        enum flags = 0b0000_0000;
-    asm pure nothrow @nogc
-    {
-        naked;
-        movdqu XMM1, [RDI];
-        mov R10, constant;
-        movq XMM2, R10;
-        mov RAX, charsLength;
-        mov RDX, 16;
-        pcmpestri XMM2, XMM1, flags;
-        mov RAX, RCX;
-        ret;
-    }
+	version (ldcsse42)
+	{
+		enum byte16 str2E = ByteCombine!chars;
+		static if (matching)
+			enum byte flags = 0b0001_0000;
+		else
+			enum byte flags = 0b0000_0000;
+
+		byte16 str1 = loadUnaligned!ubyte16(cast(ubyte*) str);
+		byte16 str2 = str2E;
+
+		return __builtin_ia32_pcmpestri128(str2, chars.length, str1, 16, flags);
+	} else {
+		enum byte16 str2E = ByteCombine!chars;
+		enum charsLength = chars.length;
+		static if (matching)
+			enum flags = 0b0001_0000;
+		else
+			enum flags = 0b0000_0000;
+		byte16 str2 = str2E;
+		asm pure nothrow @nogc
+		{
+			naked;
+			movdqu XMM1, [RDI];
+			movq XMM2, str2;
+			mov RAX, charsLength;
+			mov RDX, 16;
+			pcmpestri XMM2, XMM1, flags;
+			mov RAX, RCX;
+			ret;
+		}
+	}
 }
+
 template ByteCombine(c...)
 {
-    static assert (c.length <= 8);
-    static if (c.length > 1)
-        enum ulong ByteCombine = c[0] | (ByteCombine!(c[1..$]) << 8);
-    else
-        enum ulong ByteCombine = c[0];
+	//version (ldcsse42)
+	//{
+		enum byte16 ByteCombine = [
+			Index!(0, c),
+			Index!(1, c),
+			Index!(2, c),
+			Index!(3, c),
+			Index!(4, c),
+			Index!(5, c),
+			Index!(6, c),
+			Index!(7, c),
+			Index!(8, c),
+			Index!(9, c),
+			Index!(10, c),
+			Index!(11, c),
+			Index!(12, c),
+			Index!(13, c),
+			Index!(14, c),
+			Index!(15, c)
+		];
+	//} else {
+	//	static assert (c.length <= 8);
+	//	static if (c.length > 1)
+	//		enum ulong ByteCombine = c[0] | (ByteCombine!(c[1..$]) << 8);
+	//	else
+	//		enum ulong ByteCombine = c[0];
+	//}
 }
+
+template Index(size_t idx, c...)
+{
+	static if (c.length > idx)
+		enum Index = cast(byte)c[idx];
+	else
+		enum Index = '\0';
+}
+
 // TODO: in general whenever we have an invalid char (e.g. an a-z in a decimalliteral), we need to skip all chars until we hit a separator (whitespace or punctuation)
 struct Lexer
 {
@@ -577,7 +651,7 @@ struct Lexer
 	}
 	version(unittest)
 	{
-		auto scanToken(Goal goal = Goal.All, in string file = __FILE__, in size_t orgLine = __LINE__)
+		auto scanToken(Goal goal = Goal.None, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
 			//return measure!("Scantoken",(){
 				if (_tokenLines > 0)
@@ -589,13 +663,15 @@ struct Lexer
 				tokenLength = 0;
 				_tokenLines = 0;
 				token = lexToken(goal);
-				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); }
+				version(chatty) { 
+					import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); 
+				}
 				return token;
 			//});
 		}
 	} else
 	{
-		auto scanToken(Goal goal = Goal.All)
+		auto scanToken(Goal goal = Goal.None)
 		{
 			//return measure!("Scantoken",(){
 				if (_tokenLines > 0)
@@ -622,50 +698,92 @@ struct Lexer
 		s = s[len..$];
 		return Token(tokenType, match);
 	}
-	Token lexUnicodeEscapeSequence(size_t idx)
+	auto getUnicodeEscapeLength(size_t idx)
 	{
-		import std.format : format;
-		foreach(i; 0..4)
+		auto result(bool valid)(size_t len) { return tuple!("valid","length")(valid,len); }
+		if (s[idx] == '{')
 		{
-			auto chr = s[idx+i];
-			if ((chr <= '0' || chr >= '9') && (chr <= 'a' && chr >= 'z') && (chr <= 'A' && chr >= 'Z'))
+			size_t len = 1;
+			if (s[idx+len] == '}')
+				return result!(false)(2);
+			for(;;len++)
 			{
-				if (chr == 0)
-					return Token(Type.Error,"Found eof before finishing parsing UnicodeEscapeSequence");
-				// TODO: if chr is lineterminator (as well as the \r\n one) we need to reset column and line++
-				return Token(Type.Error,format("Invalid hexdigit %s for UnicodeEscapeSequence",chr));
+				auto chr = s[idx+len];
+				if (chr == '}')
+					return result!(true)(len+1);
+				if ((chr <= '0' || chr >= '9') && (chr <= 'a' && chr >= 'z') && (chr <= 'A' && chr >= 'Z'))
+					return result!(false)(len);
 			}
+		} else
+		{
+			foreach(i; 0..4)
+			{
+				auto chr = s[idx+i];
+				if (chr == 0)
+					return result!(false)(i);
+				if ((chr <= '0' || chr >= '9') && (chr <= 'a' && chr >= 'z') && (chr <= 'A' && chr >= 'Z'))
+					return result!(false)(i);
+			}
+			return result!(true)(4);
 		}
-		return Token(Type.UnicodeEscapeSequence);
 	}
 	Token lexStartIdentifier(ref size_t idx)
 	{
 		import std.format : format;
 		auto chr = s[idx];
-		auto len = s.getStartIdentifierLength();
+		auto len = s.getStartIdentifierLength(idx);
 		if (len > 0)
 		{
-			tokenLength ++;
 			idx += len;
+			tokenLength ++;
 			return Token(Type.StartIdentifier);
 		}
-		if (chr == '\\')
+		if (s[idx] == '\\')
 		{
-			auto chr2 = s[idx];
-			idx++;
-			tokenLength++;
-			if (chr2 != 'u')
-			{
-				if (chr2 == 0)
-					return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
-				return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr2));
-			}
-			idx += 4;
-			tokenLength += 4;
-			return lexUnicodeEscapeSequence(idx-4);
+			return lexUnicodeEscapeSequence(idx);
 		}
 		idx++;
 		return Token(Type.Error,format("Invalid character %s to start identifier",chr));
+	}
+	Token lexUnicodeEscapeSequence(ref size_t idx)
+	{
+		import std.format : format;
+		assert(s[idx] == '\\');
+		idx++;
+		tokenLength += 2;
+		ubyte chr = s[idx++];
+		if (chr != 'u')
+		{
+			s = s[idx..$];
+			if (chr == 0)
+				return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
+			return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
+		}
+		auto escape = getUnicodeEscapeLength(idx);
+		if (!escape.valid)
+		{
+			if (s[idx + escape.length - 1] == 0)
+				return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
+			return Token(Type.Error,format("Invalid UnicodeEscapeSequence \\u%s",cast(const(char)[])s[idx .. idx + escape.length]));
+		}
+		idx += escape.length;
+		tokenLength += escape.length;
+		return Token(Type.UnicodeEscapeSequence);
+	}
+	Token lexTailIdentifier(ref size_t idx)
+	{
+		auto len = s.getTailIdentifierLength(idx);
+		if (len > 0)
+		{
+			idx += len;
+			tokenLength ++;
+			return Token(Type.TailIdentifier);
+		}
+		if (s[idx] == '\\')
+		{
+			return lexUnicodeEscapeSequence(idx);
+		}
+		return Token(Type.EndIdentifier);
 	}
 	Token lexIdentifier() @trusted
 	{
@@ -696,61 +814,58 @@ struct Lexer
 			{
 				s = s[idx..$];
 				return t;
-			}			
+			}
 		}
 		for(;;)
 		{
-			auto len = s.getTailIdentifierLength(idx);
-			if (len == 0)
+			auto t2 = lexTailIdentifier(idx);
+			if (t2.type == Type.Error)
 			{
-				if (s[idx] == '\\')
-				{
-					idx++;
-					tokenLength++;
-					ubyte chr = s[idx++];
-					tokenLength++;
-					if (chr != 'u')
-					{
-						s = s[idx..$];
-						if (chr == 0)
-							return Token(Type.Error,"Invalid eof at UnicodeEscapeSequence");
-						return Token(Type.Error,format("Invalid escaped char (%s) at UnicodeEscapeSequence",chr));
-					}
-					// TODO: when lexUnicodeEscapeSequence fails midway, we have already advanced idx and tokenLength by 4...
-					idx += 4;
-					tokenLength += 4;
-					auto token = lexUnicodeEscapeSequence(idx-4);
-					if (token.type == Type.Error)
-					{
-						s = s[idx..$];
-						return token;
-					}
-				} else {
-					auto tok = Token(Type.Identifier,s[0..idx]);
-					s = s[idx..$];
-					return tok;
-				}
-			} else 
+				s = s[idx..$];
+				return t2;
+			}
+			if (t2.type == Type.EndIdentifier)
 			{
-				idx += len;
-				tokenLength ++;
+				auto tok = Token(Type.Identifier,s[0..idx]);
+				s = s[idx..$];
+				return tok;
 			}
 		}
 	}
-	void popWhitespace()
+	void popWhitespace() @trusted
 	{
 		size_t idx = 0;
 		for (;;)
 		{
-			auto len = s.getWhiteSpaceLength(idx);
-			if (len == 0)
-				break;
-			idx += len;
-			column += 1;
+			version (iasm64NotWindows)
+			{
+				//if (haveSSE42)
+				//{
+					immutable ulong i = skip!(true, '\x09', '\x0B', '\x0C', ' ')(s.ptr + idx);
+					if (i > 0)
+					{
+						idx += i;
+						column += i;
+					} else
+					{
+						auto len = s.getWhiteSpaceLength(idx);
+						if (len == 0)
+							break;
+						idx += len;
+						column += 1;
+					}
+				//}
+			} else
+			{
+				auto len = s.getWhiteSpaceLength(idx);
+				if (len == 0)
+					break;
+				idx += len;
+				column += 1;
+			}
 		}
 		s = s[idx..$];
 	}
-	// TODO: test with nested [ or ]
 	auto lookAheadRegex()
 	{
 		size_t charLen = 0;
@@ -759,13 +874,28 @@ struct Lexer
 			tokenLength += charLen;
 		return len;
 	}
-	Token lexString()
+	Token lexString() @trusted
 	{
 		auto type = s.front();	// either " or '
 		tokenLength++;
 		size_t idx = 1;
 		while (true)
 		{
+			version (iasm64NotWindows)
+			{
+				ulong i;
+				if (type == '\'')
+					i = skip!(false, '\n', '\\', '\'')(s.ptr + idx);
+				else
+					i = skip!(false, '\n', '\\', '\"')(s.ptr + idx);
+				if (i > 0)
+				{
+					idx += i;
+					column += i; // TODO: we might have skipped over multibyte codepoint, at which point we advance the column by too much
+				}
+				if (i == 16)
+					continue;
+			}
 			// TODO: lineterminators are not allowed!
 			auto len = s.getUnicodeLength(idx);
 			switch (len)
@@ -1101,7 +1231,7 @@ struct Lexer
 		}
 		goto start;
 	}
-	Token lexToken(Goal goal = Goal.All)
+	Token lexToken(Goal goal = Goal.None)
 	{
 		popWhitespace();
 		auto chr = s.front();
@@ -1327,7 +1457,7 @@ struct Lexer
 				s.popFront();
 				return Token(Type.Colon);
 			case '/':
-				if (goal != Goal.ProhibitRegex)
+				if (goal != Goal.NoRegex)
 				{
 					auto len = lookAheadRegex;
 					if (len > 0)
@@ -1423,13 +1553,28 @@ unittest
 @("lexIdentifier")
 unittest
 {
-	// TODO: need to test unicode escape sequence stuff
 	auto lexer = createLexer("abcde");
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"abcde"));
 	lexer = createLexer("π");
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"π"));
 	lexer = createLexer("ಠ_ಠ");
 	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,"ಠ_ಠ"));
+	lexer = createLexer(`\u00aa`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,`\u00aa`));
+	lexer = createLexer(`\u{00aaf}`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,`\u{00aaf}`));
+	lexer = createLexer(`\u{}`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Error,`Invalid UnicodeEscapeSequence \u{}`));
+	lexer = createLexer(`\u069`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Error,`Invalid UnicodeEscapeSequence \u069`));
+	lexer = createLexer(`a\u0069`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,`a\u0069`));
+	lexer = createLexer(`a\u{00690}`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Identifier,`a\u{00690}`));
+	lexer = createLexer(`a\u{}`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Error,`Invalid UnicodeEscapeSequence \u{}`));
+	lexer = createLexer(`a\u069`);
+	lexer.lexIdentifier.shouldEqual(Token(Type.Error,`Invalid UnicodeEscapeSequence \u069`));
 }
 @("popWhitespace")
 unittest
@@ -1461,6 +1606,8 @@ unittest
 	lexer.lookAheadRegex.shouldEqual(12);
 	lexer = createLexer(`/^\/(.+)\/([a-z]*)$/`);
 	lexer.lookAheadRegex.shouldEqual(20);
+	lexer = createLexer("/ab[[]]cd/");
+	lexer.lookAheadRegex.shouldEqual(10);
 }
 @("lexString")
 unittest

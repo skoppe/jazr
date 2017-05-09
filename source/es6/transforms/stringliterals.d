@@ -43,84 +43,57 @@ version(unittest)
 	import std.stdio;
 }
 
+// TODO: still need to recongnize \u{123}
 void convertEscapedUnicodeToUnicode(StringLiteralNode str, out Node replacedWith)
 {
 	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
 	import std.array : replaceSlice;
 	import std.conv : to;
-	size_t start = 0;
-	while(start < str.value.length)
+	void convertEscapedHex(string escape, int chars)(const (ubyte)[] value)
 	{
-		auto idx = str.value[start..$].countUntil(cast(const(ubyte)[])"\\u");
-		if (idx == -1)
-			break;
-
-		if (start+idx+6 > str.value.length)
-			break;
-
-		auto cntEscapes = str.value[0..idx+start].retro.countUntil!(b => b != cast(ubyte)'\\');
-		if (cntEscapes != -1 && (cntEscapes & 0x1) != 0)
+		enum escapeLength = escape.length;
+		enum length = escapeLength + chars;
+		size_t start = 0;
+		while(start < str.value.length)
 		{
-			start += idx + 4;
-		} else
-		{
-			auto base10 = (cast(const(char)[])str.value[start+idx+2..start+idx+6]).to!uint(16);
-			if (base10 == 39)
+			auto idx = str.value[start..$].countUntil(cast(const(ubyte)[])escape);
+			if (idx == -1)
+				break;
+
+			if (start+idx+length > str.value.length)
+				break;
+
+			auto cntEscapes = str.value[0..idx+start].retro.countUntil!(b => b != cast(ubyte)'\\');
+			if (cntEscapes != -1 && (cntEscapes & 0x1) != 0)
 			{
-				str.value = str.value.replaceSlice(str.value[start+idx..start+idx+6], cast(const(ubyte)[])`\'`);
-				start += idx + 2;
-			} else {
-				if (!isLineTerminator(base10))
+				start += idx + chars;
+			} else
+			{
+				auto base10 = (cast(const(char)[])str.value[start+idx+escapeLength..start+idx+length]).to!uint(16);
+				if (base10 == 39)
 				{
-					auto unicode = base10.toUnicodeRepresentation;
-					str.value = str.value.replaceSlice(str.value[start+idx..start+idx+6], unicode);
-					start += idx + unicode.length;
-				} else
-					start += idx + 6;
+					str.value = str.value.replaceSlice(str.value[start+idx..start+idx+length], cast(const(ubyte)[])`\'`);
+					start += idx + escapeLength;
+				} else {
+					if (!isLineTerminator(base10))
+					{
+						auto unicode = base10.toUnicodeRepresentation;
+						str.value = str.value.replaceSlice(str.value[start+idx..start+idx+length], unicode);
+						start += idx + unicode.length;
+					} else
+						start += idx + length;
+				}
 			}
 		}
 	}
-	start = 0;
-	while(start < str.value.length)
-	{
-		auto idx = str.value[start..$].countUntil(cast(const(ubyte)[])"\\x");
-		if (idx == -1)
-			return;
-
-		if (start+idx+4 > str.value.length)
-			return;
-		auto cntEscapes = str.value[0..idx+start].retro.countUntil!(b => b != cast(ubyte)'\\');
-		if (cntEscapes != -1 && (cntEscapes & 0x1) != 0)
-		{
-			start += idx + 2;
-		} else
-		{
-			auto base10 = (cast(const(char)[])str.value[start+idx+2..start+idx+4]).to!uint(16);
-			if (base10 == 39)
-			{
-				str.value = str.value.replaceSlice(str.value[start+idx..start+idx+4], cast(const(ubyte)[])`\'`);
-				start += idx + 2;
-			} else {
-				if (!isLineTerminator(base10))
-				{
-					auto unicode = base10.toUnicodeRepresentation;
-					str.value = str.value.replaceSlice(str.value[start+idx..start+idx+4], unicode);
-					start += idx + unicode.length;
-				} else
-					start += idx + 4;
-			}
-		}
-	}
+	convertEscapedHex!("\\u",4)(str.value);
+	convertEscapedHex!("\\x",2)(str.value);
 }
 
 @("convertEscapedUnicodeToUnicode")
 unittest
 {
-
-
-	//We need to determine valid chars here that we want to convert from \\uxxxx to raw form (some arent, like \u2028)....
-
 	alias assertConvertEscapedUnicode = assertTransformations!(convertEscapedUnicodeToUnicode);
 
 	assertConvertEscapedUnicode(
@@ -201,6 +174,7 @@ void factorOutCommonStrings(Scope scp)
 {
 	import std.algorithm : reverse, map, uniq, min;
 	import std.range : zip, retro;
+	// TODO: This can be done simpler by counting depth and then advance to same depth and then in unison up until parent is equal.
 	Scope findCommonScope(Scope a, Scope b)
 	{
 		if (a is b)
@@ -346,5 +320,52 @@ unittest
 		`function z(){var n='a string';function t(){x=n}function e(){y=n;function t(){var n=a*66}}function r(){function t(){l=n}}}`
 	);
 }
+
+
+bool simplifyArrayIndexNode(ArrayIndexNode node, out Node replacedWith)
+{
+	if (node.children[0].type != NodeType.StringLiteralNode)
+		return false;
+	auto strLit = node.children[0].as!StringLiteralNode;
+
+	if (strLit.value.length == 0)
+		return false;
+
+	size_t idx = strLit.value.getStartIdentifierLength;
+	if (idx == 0)
+		return false;
+
+	while(idx < strLit.value.length)
+	{
+		auto len = strLit.value.getTailIdentifierLength(idx);
+		if (len == 0)
+			return false;
+		idx += len;
+	}
+
+	auto accessor = new AccessorNode(strLit.value);
+	replacedWith = node.replaceWith(accessor);
+	return true;
+}
+
+@("simplifyArrayIndexNode")
+unittest
+{
+	alias assertComputedProp = assertTransformations!(simplifyArrayIndexNode);
+
+	assertComputedProp(
+		`a['delete'] = 5;`,
+		`a.delete = 5;`,
+	);
+	assertComputedProp(
+		`a['delete' + b] = 5;`,
+		`a['delete' + b] = 5;`
+	);
+	assertComputedProp(
+		`a['delete-bla'] = 5;`,
+		`a['delete-bla'] = 5;`
+	);
+}
+
 
 

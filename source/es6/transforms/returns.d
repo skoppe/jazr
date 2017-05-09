@@ -748,3 +748,107 @@ unittest
 		"function d(a) { return b = 3,p }"
 	);
 }
+
+bool rewriteReturnUndefined(ReturnStatementNode node, out Node replacedWith)
+{
+	if (node.children.length == 0)
+		return false;
+
+	auto value = node.children[0];
+	if (!(value.isVoid0 || value.isUndefined))
+		return false;
+
+	value.detach();
+	value.shread();
+
+	return true;
+}
+
+@("rewriteReturnUndefined")
+unittest
+{	
+	alias assertReturnUndefined = assertTransformations!(rewriteReturnUndefined);
+
+	assertReturnUndefined(
+		`function a(){ return; }`,
+		`function a(){ return; }`
+	);
+	assertReturnUndefined(
+		`function a(){ return a; }`,
+		`function a(){ return a; }`
+	);
+	assertReturnUndefined(
+		`function a(){ return void 0; }`,
+		`function a(){ return; }`
+	);
+	assertReturnUndefined(
+		`function a(){ return void(sideEffect()); }`,
+		`function a(){ return void(sideEffect()); }`
+	);
+	assertReturnUndefined(
+		`function a(){ return undefined; }`,
+		`function a(){ return; }`
+	);
+}
+
+bool removeUnusedReturn(ReturnStatementNode node, out Node replacedWith)
+{
+	if (node.children.length > 0)
+		return false;
+
+	if (node.inLoop)
+		return false;
+
+	if (!node.isLastInFunctionBody)
+		return false;
+
+	auto parent = node.parent;
+	auto branch = node.branch;
+	if (node.parent.type == NodeType.IfStatementNode)
+	{
+		replacedWith = node.replaceWith(new EmptyStatementNode());
+	} else 
+	{
+		node.detach();
+		node.shread();		
+	}
+	parent.reanalyseHints();
+	branch.reanalyseHints();
+	return true;
+}
+
+@("removeUnusedReturn")
+unittest
+{
+	alias assertRemoveUnused = assertTransformations!(removeUnusedReturn);
+
+	assertRemoveUnused(
+		`function a(){ return; }`,
+		`function a(){ }`
+	);
+	assertRemoveUnused(
+		`function a(){ return b; }`,
+		`function a(){ return b; }`
+	);
+	assertRemoveUnused(
+		`function a(){ if (b) return; d(); }`,
+		`function a(){ if (b) return; d(); }`
+	);
+	assertRemoveUnused(
+		`function a(){ d(); if (b) return; }`,
+		`function a(){ d(); if (b) ; }`
+	);
+	assertRemoveUnused(
+		`function a(){ while(a++) if (b) return; }`,
+		`function a(){ while(a++) if (b) return; }`
+	);
+	assertRemoveUnused(
+		`function a(){ switch(a) {case 5: if (b) return; case 6: return 6; case 7: return; }}`,
+		`function a(){ switch(a) {case 5: if (b) return; case 6: return 6; case 7: ; }}`
+	);
+}
+
+
+
+
+

@@ -26,6 +26,7 @@ version (unittest)
 	import es6.nodes;
 	import es6.parser;
 	import es6.testhelpers;
+	import std.stdio;
 
 	void assertEvalBinaryExpression(string input, ValueType type, string expected = "", in string file = __FILE__, in size_t line = __LINE__)
 	{
@@ -212,6 +213,8 @@ auto processPrefixExpressions(RawValue raw, Node[] prefixs)
 
 RawValue getRawValue(Node node)
 {
+	import std.conv : to;
+	import std.math : pow;
 	switch(node.type)
 	{
 		case NodeType.UnaryExpressionNode:
@@ -233,7 +236,20 @@ RawValue getRawValue(Node node)
 			break;
 		case NodeType.BooleanNode: return RawValue.from(node.as!(BooleanNode).value ? "true" : "false",ValueType.Bool);
 		case NodeType.StringLiteralNode: return RawValue(node.as!(StringLiteralNode).value,ValueType.String);
-		case NodeType.DecimalLiteralNode: return RawValue(node.as!(DecimalLiteralNode).value,ValueType.Numeric);
+		case NodeType.DecimalLiteralNode:
+			auto n = node.as!(DecimalLiteralNode);
+			auto idx = n.value.countUntil!(c => c == 'e' || c == 'E');
+			if (idx != -1)
+			{
+				//extract number
+				auto number = (cast(const(char)[])n.value[0..idx]).to!int;
+				//extract exponent
+				auto exponent = (cast(const(char)[])n.value[idx+1..$]).to!int;
+				auto multiplier = pow(10,exponent);
+				auto val = number * multiplier;
+				return RawValue(cast(const(ubyte)[])val.to!string,ValueType.Numeric);
+			}
+			return RawValue(node.as!(DecimalLiteralNode).value,ValueType.Numeric);
 		case NodeType.ObjectLiteralNode: return RawValue.from("",ValueType.Object);
 		case NodeType.BinaryExpressionNode:
 			return resolveBinaryExpression(node.as!BinaryExpressionNode);
@@ -248,8 +264,8 @@ RawValue toNumber(RawValue raw)
 	final switch (raw.type)
 	{
 		case ValueType.NotKnownAtCompileTime:
-		case ValueType.Numeric:
 		case ValueType.NaN:
+		case ValueType.Numeric:
 		case ValueType.Infinity: break;
 		case ValueType.Undefined: raw.type = ValueType.NaN; raw.setValue("NaN"); break;
 		case ValueType.Null: raw.type = ValueType.Numeric; raw.setValue("0"); break;
@@ -448,6 +464,22 @@ unittest
 	import unit_threaded;
 	RawValue.from("",ValueType.Object).coerceAsBoolean.shouldThrow();
 }
+Ternary coerceToTernary(RawValue raw)
+{
+	final switch (raw.type)
+	{
+		case ValueType.Undefined: return Ternary.False;
+		case ValueType.NaN: return Ternary.False;
+		case ValueType.Infinity: return Ternary.True;
+		case ValueType.Null: return Ternary.False;
+		case ValueType.Bool: return raw.value == "true" ? Ternary.True : Ternary.False;
+		case ValueType.String: return raw.value.length == 0 ? Ternary.False : Ternary.True;
+		case ValueType.Numeric: return (raw.value == "0" || raw.value == "-0") ? Ternary.False : Ternary.True;
+		case ValueType.Object:
+		case ValueType.NotKnownAtCompileTime:
+			return Ternary.None;
+	}
+}
 Ternary coerceToTernary(Node node)
 {
 	switch (node.type)
@@ -585,6 +617,7 @@ auto toRawValue(bool v)
 {
 	return v ? RawValue.from("true",ValueType.Bool) : RawValue.from("false",ValueType.Bool);
 }
+// TODO: this doens't handle floats well or bigints.......
 auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 {
 	import std.conv : to;

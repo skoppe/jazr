@@ -39,6 +39,11 @@ version(unittest)
 	import std.stdio;
 }
 
+enum MinifyFlags {
+	SmallRaw,
+	SmallGZip
+}
+
 void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 {
 	debug {
@@ -56,6 +61,15 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 
 	measure!("Transform", (){
 		root.runTransform!(
+			//simplifyVoid0Conditionals,	// does well on almost all files, except very bad on migration-reporter.max (worth looking into). Also we might want to consider transforming into if statement instead of a conditional
+			simplifyComparisions,
+			convertToScientificNotation,		// some files get 1-2 bytes bigger
+			simplifyLogicalOperations,
+			minifyLabels,
+			simplifyArrayIndexNode,
+			rewriteReturnUndefined,
+			removeUnusedReturn,
+			inlineVariables,	// tests/inferno-1.2.2.js and tests/acorn-4.0.4.js and tests/react-0.13.3.js get a little bigger (7-17 chars)
 			reuseVariable,	// tests/jquery-3.1.1.js and tests/angular-1.6.1.js grow a 3-6 bytes, otherwise good gains 20-300 bytes
 			convertUndefinedToVoid0,
 			convertInfinityTo1div0,
@@ -64,31 +78,31 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 			invertBinaryExpressions,	// tests/RxJS/dist/rx.all.js actually grows in size
 			convertHexToDecimalLiterals,	// tests/jquery/dist/jquery.js gzip grows by 4 byte
 			removeRedundantUseStrict,
-			mergeDuplicateVariableDeclarations, 	// makes things bigger in general
-			//convertWhileToForLoop,	// makes things bigger in almost all cases
+			//mergeDuplicateVariableDeclarations, 	// makes things bigger in general (and is REALLY SLOW!!!!!!!!!!!) (only tests/migration-reporter-max.js benefits)
+			//convertWhileToForLoop,	// makes things bigger in almost all cases (except small files)
 			//moveVariableDeclarationsIntoForLoops,	// makes things bigger in general
 			mergeNeighbouringVariableDeclarationStatements,
 			//convertEscapedUnicodeToUnicode,	// makes gzip bigger
 			//mergeVariableDeclarationStatements,	// makes gzip bigger
-			moveStringComparisonToLeftOperand,
-			//hoistFunctions,	// makes gzip sometimes bigger (but sometimes 300 bytes profit!)
+			//moveLiteralComparisonToLeftOperand,	// makes most files bigger
+			//hoistFunctions,	// makes gzip bigger in general (0.5-1% difference)
 			shortenLiteralPropertyNames,
 			combineBlockStatementIntoExpression,	// makes only tests/underscore-1.8.3.js 2 bytes bigger with gzip
 			removeRedundantBlockStatements,
-			//combineFunctionBodyIntoExpression,	// makes some files with gzip bigger
+			combineFunctionBodyIntoExpression,	// makes some files with gzip bigger (some files are worthwhile though)
 			combineModuleIntoExpression,	// no impact !?!?
 			simplifyBinaryExpressions,
 			simplifyStaticIfStatement,
 			simplifyStaticConditional,
 			swapNegatedConditionals,	// in general good but sometimes in gzip makes it a byte bigger
 			removeUnnecessaryParenthesis,
-			//moveExpressionsIntoForLoops,	// makes gzip bigger
-			//removeUnusedParameters,	// some bigger, some smaller (generally bigger)
+			//moveExpressionsIntoForLoops,	// makes gzip bigger (some files a few bytes smaller)
+			removeUnusedParameters,	// only tests/react-0.13.3.js gets 80 bytes bigger
 			shortenBooleanNodes,
 			simplifyRedundantAssignmentExpressions,
 			//moveExpressionsIntoIfCond,	// makes gzip bigger
 			//moveExpressionsIntoReturn,	// makes gzip bigger
-			//negateReturningIf,	// some files get bigger
+			//negateReturningIf,	// some files get bigger, most smaller (only 5-30 bytes)
 			convertIfElseAssignmentToConditionalExpression,
 			//combineNestedIfs,		// in gzip some up, some down (but only 3-8 bytes)
 			//convertIfsToExpressionStatements,	// makes bigger in gzip
@@ -934,6 +948,10 @@ unittest
 	assertMinifier(
 		`function updateChildren (parentElm, oldCh, newCh, insertedVnodeQueue, removeOnly) { var newStartIdx = 0; var oldStartVnode = oldCh[0]; var newStartVnode = newCh[0]; var oldKeyToIdx, idxInOld, elmToMove, refElm; var canMove = !removeOnly; while (a) { if (sameVnode(elmToMove, newStartVnode)) { patchVnode(elmToMove, newStartVnode, insertedVnodeQueue); oldCh[idxInOld] = undefined; canMove && nodeOps.insertBefore(parentElm, newStartVnode.elm, oldStartVnode.elm); newStartVnode = newCh[++newStartIdx]; } else { createElm(newStartVnode, insertedVnodeQueue, parentElm, oldStartVnode.elm); newStartVnode = newCh[++newStartIdx]; } } } updateChildren();`,
 		`function updateChildren(e,n,d,t,o){var r=0,l=n[0],w=d[0],m,h,i,v,u=!o;while(a)w=sameVnode(i,w)?(patchVnode(i,w,t),n[h]=void 0,u&&nodeOps.insertBefore(e,w.elm,l.elm),d[++r]):(createElm(w,t,e,l.elm),d[++r])}updateChildren();`
+	);
+	assertMinifier(
+		`var a = 12300 + 1230000`,
+		`var a = 1242300`
 	);
 }
 

@@ -360,10 +360,9 @@ template traceTransformer(string fun)
 {
 	version (tracing) {
 		enum traceTransformer = 
-			`auto sw = StopWatch();
-			sw.start();
+			`auto start = startCounter("`~fun~`");
 			scope(exit) {
-				timingCounter("`~fun~`",sw.peek);
+				stopCounter("`~fun~`",start);
 			}`;
 	} else enum traceTransformer = "";
 }

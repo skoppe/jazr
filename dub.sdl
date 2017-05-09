@@ -23,7 +23,7 @@ configuration "unittest" {
 	excludedSourceFiles "source/app.d"
 	targetType "executable"
 	dependency "unit-threaded" version="==0.7.2"
-	version "chatty"
+	version "chatty" "tracing"
 }
 configuration "pgo-profile" {
 	targetType "executable"
@@ -33,4 +33,17 @@ configuration "pgo-build" {
 	preBuildCommands "./es6-parse \"--DRT-gcopt=disable:1\" -i ./tests/RxJS/dist/rx.all.js --minify --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
 	targetType "executable"
 	dflags "-fprofile-instr-use=profile.data"
+}
+configuration "sse42" {
+	targetType "executable"
+	dflags "-mattr=sse4.2"
+}
+configuration "pgo-profile-sse42" {
+	targetType "executable"
+	dflags "-fprofile-instr-generate=profile.raw" "-mattr=sse4.2"
+}
+configuration "pgo-build-sse42" {
+	preBuildCommands "./es6-parse \"--DRT-gcopt=disable:1\" -i ./tests/RxJS/dist/rx.all.js --minify --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
+	targetType "executable"
+	dflags "-fprofile-instr-use=profile.data" "-mattr=sse4.2"
 }

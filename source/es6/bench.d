@@ -17,7 +17,7 @@
  */
 module es6.bench;
 
-import std.datetime : StopWatch;
+import std.datetime : StopWatch, Clock;
 import std.typecons : Yes, Flag;
 import core.time : TickDuration;
 import std.traits : ReturnType;
@@ -27,36 +27,56 @@ version (unittest)
 	import std.stdio;
 }
 
-private TickDuration[string] timings;
+private long[string] timings;
+private bool[string] open;
 private size_t[string] calls;
 private size_t[string] counters;
 
+long getTick() @trusted
+{
+	return Clock.currStdTime();
+}
+
 auto measure(string name, alias func)()
 {
-	StopWatch sw;
+	if (open.get(name, false))
+		return func();
+	long start = Clock.currStdTime();
+	open[name] = true;
 	try {
-		sw = StopWatch();
-		sw.start();
 	} catch (Exception)
 	{}
 	static if (is(ReturnType!(func) : void))
 		func();
 	else
 		auto r = func();
+	open[name] = false;
 	try {
-		timingCounter(name, sw.peek());
+		stopCounter(name, start);
 	} catch (Exception)
 	{}
 	static if (!is(ReturnType!(func) : void))
 		return r;
 }
 
-auto timingCounter(string name, TickDuration a)
+auto startCounter(string name)
 {
-	auto t = timings.get(name, TickDuration(0));
-	timings[name] = t + a;
-	auto c = calls.get(name,0);
+	if (open.get(name, false))
+		return 0;
+	open[name] = true;
+	return getTick();
+}
+
+auto stopCounter(string name, long start)
+{
+	auto c = calls.get(name, 0);
 	calls[name] = c + 1;
+	if (start == 0)
+		return;
+	open[name] = false;
+	auto time = Clock.currStdTime() - start;
+	auto t = timings.get(name, 0);
+	timings[name] = t + time;
 }
 
 auto setCounter(string name, size_t counter)
@@ -74,11 +94,11 @@ auto dumpMeasures()
 	{
 		auto key = item.key;
 		auto value = item.value;
-		auto c = calls[key];
-		if (value.usecs > 9999)
-			writefln("%s: %s msecs (%d calls)", key, value.msecs(), c);
+		auto c = calls.get(key,0);
+		if (value > 100000)
+			writefln("%s: %s msecs (%d calls)", key, value / 10000, c);
 		else
-			writefln("%s: %s usecs (%d calls)", key, value.usecs(), c);
+			writefln("%s: %s usecs (%d calls)", key, value / 10, c);
 	}
 	foreach(key, value; counters)
 		writefln("%s: %s", key, value);
@@ -90,18 +110,18 @@ auto formatMeasures(string[] measures)
 	import std.format : format;
 	import std.typecons : tuple;
 	import std.array : array;
-	return measures.map!(f => tuple!("key","value")(f,timings.get(f,TickDuration(0)))).map!(t => format("%s: %sms", t.key, t.value.msecs)).array;
+	return measures.map!(f => tuple!("key","value")(f,timings.get(f,0))).map!(t => format("%s: %sms", t.key, t.value / 10000)).array;
 }
 
 auto getMeasure(string measure)
 {
-	return timings.get(measure,TickDuration(0));
+	return timings.get(measure,0);
 }
 
 unittest
 {
 	measure!("test",(){});
-	assert(timings["test"] != TickDuration(0));
+	assert(timings["test"] != 0);
 	assert(formatMeasures([]) == []);
 	assert(formatMeasures(["test"]) == ["test: 0ms"]);
 }

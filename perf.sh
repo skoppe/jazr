@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 
-dub build --config=pgo-profile --build=release --compiler=ldc2
-dub build --config=pgo-build --build=release --compiler=ldc2
+dub build --config=pgo-profile-sse42 --build=release --compiler=ldc2
+dub build --config=pgo-build-sse42 --build=release --compiler=ldc2
 
 if [ ! -f "perf.log" ]; then
 	touch perf.log

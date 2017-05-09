@@ -45,6 +45,7 @@ int main(string[] args)
 	bool selfCheck;
 	bool checkLinesAndColumns;
 	bool nodeModules;
+	bool pretty;
 	string fileIn;
 	string fileOut;
 
@@ -60,6 +61,7 @@ int main(string[] args)
 			"c|check", "Perform check on emitted code", &selfCheck,
 			"v|verify", "Verify line and column counts", &checkLinesAndColumns,
 			"n|node", "Parse input as meant for NodeJS", &nodeModules,
+			"p|pretty", "Output prettified", &pretty,
 			"minify", "Minify js before outputting (default to false)", &doMinify
 		);
 
@@ -125,7 +127,12 @@ int main(string[] args)
 			measure!("Minifying",(){node.minify();});
 		}
 
-		auto min = measure!("Emitting",()=> emit(node));
+		auto min = measure!("Emitting",(){
+			if (pretty)
+				return emit!(true)(node);
+			else
+				return emit!(false)(node);
+		});
 
 		if (selfCheck)
 		{
@@ -162,7 +169,7 @@ int main(string[] args)
 		auto timing = formatMeasures(["Parsing","Analysing","Minifying","Emitting","Total"]);
 		timing ~= format("Size: %d", size);
 		auto total = getMeasure("Total");
-		auto mbPerSec = 0.9536 * (cast(double)size)/total.usecs;
+		auto mbPerSec = 0.9536 * (cast(double)size)/(total / 10);
 		import std.array : insertInPlace;
 		timing.insertInPlace(0,format("Mb/s: "~mbPerSec.to!string));
 		writeln(timing);
