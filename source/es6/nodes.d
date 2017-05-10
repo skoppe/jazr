@@ -288,6 +288,110 @@ struct PrettyPrintSink
 	}
 }
 
+interface NodeVisitor
+{
+	void visit(Node node);
+	void visit(ErrorNode node);
+	void visit(BooleanNode node);
+	void visit(SheBangNode node);
+	void visit(StringLiteralNode node);
+	void visit(BinaryLiteralNode node);
+	void visit(OctalLiteralNode node);
+	void visit(DecimalLiteralNode node);
+	void visit(HexLiteralNode node);
+	void visit(TemplateNode node);
+	void visit(TemplateLiteralNode node);
+	void visit(RegexLiteralNode node);
+	void visit(KeywordNode node);
+	void visit(IdentifierReferenceNode node);
+	void visit(IdentifierNameNode node);
+	void visit(ExpressionNode node);
+	void visit(ParenthesisNode node);
+	void visit(PrefixExpressionNode node);
+	void visit(SuperPropertyNode node);
+	void visit(AccessorNode node);
+	void visit(NewTargetNode node);
+	void visit(SpreadOperatorNode node);
+	void visit(ArgumentsNode node);
+	void visit(ArrayIndexNode node);
+	void visit(NewExpressionNode node);
+	void visit(CallExpressionNode node);
+	void visit(UnaryExpressionNode node);
+	void visit(ExpressionOperatorNode node);
+	void visit(BinaryExpressionNode node);
+	void visit(ConditionalExpressionNode node);
+	void visit(AssignmentExpressionNode node);
+	void visit(ArrowFunctionNode node);
+	void visit(AssignmentOperatorNode node);
+	void visit(ContinueStatementNode node);
+	void visit(BreakStatementNode node);
+	void visit(EmptyStatementNode node);
+	void visit(LabelledStatementNode node);
+	void visit(VariableDeclarationNode node);
+	void visit(VariableStatementNode node);
+	void visit(ReturnStatementNode node);
+	void visit(BlockStatementNode node);
+	void visit(IfStatementNode node);
+	void visit(SwitchStatementNode node);
+	void visit(DoWhileStatementNode node);
+	void visit(WhileStatementNode node);
+	void visit(CaseNode node);
+	void visit(CaseBodyNode node);
+	void visit(DefaultNode node);
+	void visit(ForStatementNode node);
+	void visit(WithStatementNode node);
+	void visit(CatchStatementNode node);
+	void visit(FinallyStatementNode node);
+	void visit(TryStatementNode node);
+	void visit(ThrowStatementNode node);
+	void visit(DebuggerStatementNode node);
+	void visit(ClassDeclarationNode node);
+	void visit(ClassGetterNode node);
+	void visit(ClassMethodNode node);
+	void visit(ClassGeneratorMethodNode node);
+	void visit(ClassSetterNode node);
+	void visit(ComputedPropertyNameNode node);
+	void visit(FormalParameterListNode node);
+	void visit(FunctionDeclarationNode node);
+	void visit(FunctionExpressionNode node);
+	void visit(GeneratorDeclarationNode node);
+	void visit(GeneratorExpressionNode node);
+	void visit(RestElementNode node);
+	void visit(SingleNameBindingNode node);
+	void visit(SpreadElementNode node);
+	void visit(ArrayLiteralNode node);
+	void visit(ObjectLiteralNode node);
+	void visit(PropertyDefinitionNode node);
+	void visit(CoverInitializedName node);
+	void visit(ElisionNode node);
+	void visit(FunctionBodyNode node);
+	void visit(LexicalDeclarationItemNode node);
+	void visit(LexicalDeclarationNode node);
+	void visit(ArrayBindingPatternNode node);
+	void visit(ObjectBindingPatternNode node);
+	void visit(BindingPropertyNode node);
+	void visit(ExportClauseNode node);
+	void visit(ExportDeclarationNode node);
+	void visit(ExportDefaultDeclarationNode node);
+	void visit(ExportSpecifierNode node);
+	void visit(ImportClauseNode node);
+	void visit(ImportDeclarationNode node);
+	void visit(ImportSpecifierNode node);
+	void visit(NamedImportsNode node);
+	void visit(NameSpaceImportNode node);
+	void visit(ModuleNode node);
+	void visit(SemicolonNode node);
+	void visit(BindingElementNode node);
+	void visit(YieldExpressionNode node);
+}
+
+mixin template ImplVisitor(T)
+{
+	override void accept(NodeVisitor visitor) {
+		visitor.visit(cast(T)this);
+	}
+}
+
 class Node
 {
 	Node[] children;
@@ -318,6 +422,9 @@ class Node
 		foreach(c;cs)
 			c.parent = this;
 		children = cs;
+	}
+	void accept(NodeVisitor visitor) {
+		visitor.visit(this);
 	}
 	void toString(scope void delegate(const(char)[]) @safe sink) const
 	{
@@ -557,6 +664,7 @@ class Node
 
 final class ErrorNode : Node
 {
+	mixin ImplVisitor!ErrorNode;
 	const(char)[] value;
 	size_t line;
 	size_t column;
@@ -588,6 +696,7 @@ final class ErrorNode : Node
 }
 final class BooleanNode : Node
 {
+	mixin ImplVisitor!BooleanNode;
 	bool value;
 	this(bool v)
 	{
@@ -606,6 +715,7 @@ final class BooleanNode : Node
 }
 final class SheBangNode : Node
 {
+	mixin ImplVisitor!SheBangNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -630,6 +740,7 @@ final class SheBangNode : Node
 }
 final class StringLiteralNode : Node
 {
+	mixin ImplVisitor!StringLiteralNode;
 	const(ubyte)[] value; // all strings are normalized to single quoted string (meaning original double quoted strings are properly unescaped)
 	this(const(ubyte)[] v)
 	{
@@ -654,6 +765,7 @@ final class StringLiteralNode : Node
 }
 final class BinaryLiteralNode : Node
 {
+	mixin ImplVisitor!BinaryLiteralNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -672,6 +784,7 @@ final class BinaryLiteralNode : Node
 }
 final class OctalLiteralNode : Node
 {
+	mixin ImplVisitor!OctalLiteralNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -690,6 +803,7 @@ final class OctalLiteralNode : Node
 }
 final class DecimalLiteralNode : Node
 {
+	mixin ImplVisitor!DecimalLiteralNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -718,6 +832,7 @@ final class DecimalLiteralNode : Node
 }
 final class HexLiteralNode : Node
 {
+	mixin ImplVisitor!HexLiteralNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -736,6 +851,7 @@ final class HexLiteralNode : Node
 }
 final class TemplateLiteralNode : Node
 {
+	mixin ImplVisitor!TemplateLiteralNode;
 	this(TemplateNode n)
 	{
 		super(NodeType.TemplateLiteralNode,[n]);
@@ -747,6 +863,7 @@ final class TemplateLiteralNode : Node
 }
 final class TemplateNode : Node
 {
+	mixin ImplVisitor!TemplateNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -771,6 +888,7 @@ final class TemplateNode : Node
 }
 final class RegexLiteralNode : Node
 {
+	mixin ImplVisitor!RegexLiteralNode;
 	const(ubyte)[] value;
 	this(const(ubyte)[] v)
 	{
@@ -795,6 +913,7 @@ final class RegexLiteralNode : Node
 }
 final class KeywordNode : Node
 {
+	mixin ImplVisitor!KeywordNode;
 	Keyword keyword;
 	this(Keyword k)
 	{
@@ -837,6 +956,7 @@ class IdentifierNode : Node
 
 final class IdentifierReferenceNode : IdentifierNode
 {
+	mixin ImplVisitor!IdentifierReferenceNode;
 	this(const(ubyte)[] identifier)
 	{
 		super(NodeType.IdentifierReferenceNode,identifier);
@@ -848,6 +968,7 @@ final class IdentifierReferenceNode : IdentifierNode
 }
 final class IdentifierNameNode : IdentifierNode
 {
+	mixin ImplVisitor!IdentifierNameNode;
 	this(const(ubyte)[] identifier)
 	{
 		super(NodeType.IdentifierNameNode,identifier);
@@ -859,6 +980,7 @@ final class IdentifierNameNode : IdentifierNode
 }
 final class ExpressionNode : Node
 {
+	mixin ImplVisitor!ExpressionNode;
 	this(Node[] children)
 	{
 		super(NodeType.ExpressionNode,children);
@@ -885,6 +1007,7 @@ final class ExpressionNode : Node
 }
 final class ParenthesisNode : Node
 {
+	mixin ImplVisitor!ParenthesisNode;
 	this()
 	{
 		super(NodeType.ParenthesisNode);
@@ -901,6 +1024,7 @@ final class ParenthesisNode : Node
 
 final class PrefixExpressionNode : Node
 {
+	mixin ImplVisitor!PrefixExpressionNode;
 	Prefix prefix;
 	this(Prefix p)
 	{
@@ -925,6 +1049,7 @@ final class PrefixExpressionNode : Node
 }
 final class SuperPropertyNode : Node
 {
+	mixin ImplVisitor!SuperPropertyNode;
 	this(Node n)
 	{
 		super(NodeType.SuperPropertyNode,[n]);
@@ -938,6 +1063,7 @@ final class SuperPropertyNode : Node
 }
 final class AccessorNode : Node
 {
+	mixin ImplVisitor!AccessorNode;
 	const(ubyte)[] identifier;
 	this(const(ubyte)[] i)
 	{
@@ -962,6 +1088,7 @@ final class AccessorNode : Node
 }
 final class NewTargetNode : Node
 {
+	mixin ImplVisitor!NewTargetNode;
 	this()
 	{
 		super(NodeType.NewTargetNode);
@@ -969,6 +1096,7 @@ final class NewTargetNode : Node
 }
 final class SpreadOperatorNode : Node
 {
+	mixin ImplVisitor!SpreadOperatorNode;
 	this()
 	{
 		super(NodeType.SpreadOperatorNode);
@@ -976,6 +1104,7 @@ final class SpreadOperatorNode : Node
 }
 final class ArgumentsNode : Node
 {
+	mixin ImplVisitor!ArgumentsNode;
 	this()
 	{
 		super(NodeType.ArgumentsNode);
@@ -987,6 +1116,7 @@ final class ArgumentsNode : Node
 }
 final class ArrayIndexNode : Node
 {
+	mixin ImplVisitor!ArrayIndexNode;
 	this(Node expr)
 	{
 		super(NodeType.ArrayIndexNode,[expr]);
@@ -994,6 +1124,7 @@ final class ArrayIndexNode : Node
 }
 final class NewExpressionNode : Node
 {
+	mixin ImplVisitor!NewExpressionNode;
 	size_t news;
 	this(size_t news, Node[] calls)
 	{
@@ -1012,6 +1143,7 @@ final class NewExpressionNode : Node
 }
 final class CallExpressionNode : Node
 {
+	mixin ImplVisitor!CallExpressionNode;
 	size_t news;
 	this(size_t news, Node[] calls)
 	{
@@ -1030,6 +1162,7 @@ final class CallExpressionNode : Node
 }
 final class UnaryExpressionNode : Node
 {
+	mixin ImplVisitor!UnaryExpressionNode;
 	Node[] prefixs;
 	Postfix postfix = Postfix.None;
 	this(Node[] ps, Node n = null, Postfix postfix = Postfix.None)
@@ -1065,6 +1198,7 @@ final class UnaryExpressionNode : Node
 }
 final class ExpressionOperatorNode : Node
 {
+	mixin ImplVisitor!ExpressionOperatorNode;
 	ExpressionOperator operator;
 	this(ExpressionOperator op)
 	{
@@ -1083,6 +1217,7 @@ final class ExpressionOperatorNode : Node
 }
 final class BinaryExpressionNode : Node
 {
+	mixin ImplVisitor!BinaryExpressionNode;
 	this(Node[] children)
 	{
 		super(NodeType.BinaryExpressionNode,children);
@@ -1119,6 +1254,7 @@ final class BinaryExpressionNode : Node
 }
 final class ConditionalExpressionNode : Node
 {
+	mixin ImplVisitor!ConditionalExpressionNode;
 	this(Node cond, Node truthPath, Node elsePath)
 	{
 		super(NodeType.ConditionalExpressionNode,[cond,truthPath,elsePath]);
@@ -1144,6 +1280,7 @@ final class ConditionalExpressionNode : Node
 }
 final class AssignmentExpressionNode : Node
 {
+	mixin ImplVisitor!AssignmentExpressionNode;
 	this(Node[] children)
 	{
 		super(NodeType.AssignmentExpressionNode,children);
@@ -1158,6 +1295,7 @@ void removeFirstAssignment(AssignmentExpressionNode node)
 }
 final class ArrowFunctionNode : Node
 {
+	mixin ImplVisitor!ArrowFunctionNode;
 	this(Node parameter, Node functionBody)
 	{
 		super(NodeType.ArrowFunctionNode,[parameter,functionBody]);
@@ -1165,6 +1303,7 @@ final class ArrowFunctionNode : Node
 }
 final class AssignmentOperatorNode : Node
 {
+	mixin ImplVisitor!AssignmentOperatorNode;
 	Assignment assignment;
 	this(Assignment a)
 	{
@@ -1183,6 +1322,7 @@ final class AssignmentOperatorNode : Node
 }
 final class ContinueStatementNode : Node
 {
+	mixin ImplVisitor!ContinueStatementNode;
 	const(ubyte)[] label;
 	this(const(ubyte)[] label = null)
 	{
@@ -1192,6 +1332,7 @@ final class ContinueStatementNode : Node
 }
 final class BreakStatementNode : Node
 {
+	mixin ImplVisitor!BreakStatementNode;
 	const(ubyte)[] label;
 	this(const(ubyte)[] label = null)
 	{
@@ -1201,6 +1342,7 @@ final class BreakStatementNode : Node
 }
 final class EmptyStatementNode : Node
 {
+	mixin ImplVisitor!EmptyStatementNode;
 	this()
 	{
 		super(NodeType.EmptyStatementNode);
@@ -1208,6 +1350,7 @@ final class EmptyStatementNode : Node
 }
 final class LabelledStatementNode : Node
 {
+	mixin ImplVisitor!LabelledStatementNode;
 	const(ubyte)[] label;
 	this(const(ubyte)[] l, Node stmt)
 	{
@@ -1226,6 +1369,7 @@ final class LabelledStatementNode : Node
 }
 final class VariableDeclarationNode : Node
 {
+	mixin ImplVisitor!VariableDeclarationNode;
 	this(Node lhs, Node init = null)
 	{
 		if (init is null)
@@ -1236,6 +1380,7 @@ final class VariableDeclarationNode : Node
 }
 final class VariableStatementNode : Node
 {
+	mixin ImplVisitor!VariableStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.VariableStatementNode,children);
@@ -1259,6 +1404,7 @@ final class VariableStatementNode : Node
 }
 final class ReturnStatementNode : Node
 {
+	mixin ImplVisitor!ReturnStatementNode;
 	this(Node expr = null)
 	{
 		super(NodeType.ReturnStatementNode,expr);
@@ -1266,6 +1412,7 @@ final class ReturnStatementNode : Node
 }
 final class BlockStatementNode : Node
 {
+	mixin ImplVisitor!BlockStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.BlockStatementNode,children);
@@ -1450,6 +1597,7 @@ unittest
 }
 final class IfStatementNode : Node
 {
+	mixin ImplVisitor!IfStatementNode;
 	this(Node cond, Node truth, Node falsy = null)
 	{
 		if (falsy is null)
@@ -1499,6 +1647,7 @@ final class IfStatementNode : Node
 }
 final class SwitchStatementNode : Node
 {
+	mixin ImplVisitor!SwitchStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.SwitchStatementNode,children);
@@ -1506,6 +1655,7 @@ final class SwitchStatementNode : Node
 }
 final class DoWhileStatementNode : Node
 {
+	mixin ImplVisitor!DoWhileStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.DoWhileStatementNode,children);
@@ -1513,6 +1663,7 @@ final class DoWhileStatementNode : Node
 }
 final class WhileStatementNode : Node
 {
+	mixin ImplVisitor!WhileStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.WhileStatementNode,children);
@@ -1520,6 +1671,7 @@ final class WhileStatementNode : Node
 }
 final class CaseNode : Node
 {
+	mixin ImplVisitor!CaseNode;
 	this(Node condition, Node caseBody)
 	{
 		super(NodeType.CaseNode,[condition,caseBody]);
@@ -1527,6 +1679,7 @@ final class CaseNode : Node
 }
 final class CaseBodyNode : Node
 {
+	mixin ImplVisitor!CaseBodyNode;
 	this(Node[] children)
 	{
 		super(NodeType.CaseBodyNode,children);
@@ -1542,6 +1695,7 @@ final class CaseBodyNode : Node
 }
 final class DefaultNode : Node
 {
+	mixin ImplVisitor!DefaultNode;
 	this(Node child)
 	{
 		super(NodeType.DefaultNode,child);
@@ -1549,6 +1703,7 @@ final class DefaultNode : Node
 }
 final class ForStatementNode : Node
 {
+	mixin ImplVisitor!ForStatementNode;
 	ForLoop loopType;
 	this(ForLoop l, Node[] children)
 	{
@@ -1584,6 +1739,7 @@ bool isEitherA(Ts...)(Node node)
 }
 final class WithStatementNode : Node
 {
+	mixin ImplVisitor!WithStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.WithStatementNode,children);
@@ -1591,6 +1747,7 @@ final class WithStatementNode : Node
 }
 final class CatchStatementNode : Node
 {
+	mixin ImplVisitor!CatchStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.CatchStatementNode,children);
@@ -1598,6 +1755,7 @@ final class CatchStatementNode : Node
 }
 final class FinallyStatementNode : Node
 {
+	mixin ImplVisitor!FinallyStatementNode;
 	this(Node block)
 	{
 		super(NodeType.FinallyStatementNode,[block]);
@@ -1605,6 +1763,7 @@ final class FinallyStatementNode : Node
 }
 final class TryStatementNode : Node
 {
+	mixin ImplVisitor!TryStatementNode;
 	this(Node[] children)
 	{
 		super(NodeType.TryStatementNode,children);
@@ -1612,6 +1771,7 @@ final class TryStatementNode : Node
 }
 final class ThrowStatementNode : Node
 {
+	mixin ImplVisitor!ThrowStatementNode;
 	this(Node expr)
 	{
 		super(NodeType.ThrowStatementNode,[expr]);
@@ -1619,6 +1779,7 @@ final class ThrowStatementNode : Node
 }
 final class DebuggerStatementNode : Node
 {
+	mixin ImplVisitor!DebuggerStatementNode;
 	this()
 	{
 		super(NodeType.DebuggerStatementNode);
@@ -1626,6 +1787,7 @@ final class DebuggerStatementNode : Node
 }
 final class ClassDeclarationNode : Node
 {
+	mixin ImplVisitor!ClassDeclarationNode;
 	Node name;
 	Node base;
 	Node[] methods;
@@ -1657,6 +1819,7 @@ final class ClassDeclarationNode : Node
 }
 final class ClassGetterNode : Node
 {
+	mixin ImplVisitor!ClassGetterNode;
 	bool isStatic;
 	this(bool isStatic, Node name, Node funcBody)
 	{
@@ -1675,6 +1838,7 @@ final class ClassGetterNode : Node
 }
 final class ClassMethodNode : Node
 {
+	mixin ImplVisitor!ClassMethodNode;
 	bool isStatic;
 	this(bool isStatic, Node name, Node params, Node funcBody)
 	{
@@ -1693,6 +1857,7 @@ final class ClassMethodNode : Node
 }
 final class ClassGeneratorMethodNode : Node
 {
+	mixin ImplVisitor!ClassGeneratorMethodNode;
 	bool isStatic;
 	this(bool isStatic, Node name, Node params, Node funcBody)
 	{
@@ -1711,6 +1876,7 @@ final class ClassGeneratorMethodNode : Node
 }
 final class ClassSetterNode : Node
 {
+	mixin ImplVisitor!ClassSetterNode;
 	bool isStatic;
 	this(bool isStatic, Node name, Node param, Node funcBody)
 	{
@@ -1729,6 +1895,7 @@ final class ClassSetterNode : Node
 }
 final class ComputedPropertyNameNode : Node
 {
+	mixin ImplVisitor!ComputedPropertyNameNode;
 	this(Node expr)
 	{
 		super(NodeType.ComputedPropertyNameNode,[expr]);
@@ -1736,6 +1903,7 @@ final class ComputedPropertyNameNode : Node
 }
 final class FormalParameterListNode : Node
 {
+	mixin ImplVisitor!FormalParameterListNode;
 	this(Node[] children)
 	{
 		super(NodeType.FormalParameterListNode,children);
@@ -1743,6 +1911,7 @@ final class FormalParameterListNode : Node
 }
 final class FunctionDeclarationNode : Node
 {
+	mixin ImplVisitor!FunctionDeclarationNode;
 	this(Node name, Node params, Node funcBody)
 	{
 		if (name is null)
@@ -1753,6 +1922,7 @@ final class FunctionDeclarationNode : Node
 }
 final class FunctionExpressionNode : Node
 {
+	mixin ImplVisitor!FunctionExpressionNode;
 	this(Node name, Node params, Node funcBody)
 	{
 		if (name !is null)
@@ -1763,6 +1933,7 @@ final class FunctionExpressionNode : Node
 }
 final class GeneratorDeclarationNode : Node
 {
+	mixin ImplVisitor!GeneratorDeclarationNode;
 	this(Node name, Node params, Node funcBody)
 	{
 		if (name is null)
@@ -1773,6 +1944,7 @@ final class GeneratorDeclarationNode : Node
 }
 final class GeneratorExpressionNode : Node
 {
+	mixin ImplVisitor!GeneratorExpressionNode;
 	this(Node name, Node params, Node funcBody)
 	{
 		if (name is null)
@@ -1783,6 +1955,7 @@ final class GeneratorExpressionNode : Node
 }
 final class RestElementNode : Node
 {
+	mixin ImplVisitor!RestElementNode;
 	this(Node iden)
 	{
 		super(NodeType.RestElementNode,[iden]);
@@ -1790,6 +1963,7 @@ final class RestElementNode : Node
 }
 final class SingleNameBindingNode : Node
 {
+	mixin ImplVisitor!SingleNameBindingNode;
 	this(Node name, Node expr)
 	{
 		super(NodeType.SingleNameBindingNode,[name,expr]);
@@ -1797,6 +1971,7 @@ final class SingleNameBindingNode : Node
 }
 final class SpreadElementNode : Node
 {
+	mixin ImplVisitor!SpreadElementNode;
 	this(Node iden)
 	{
 		super(NodeType.SpreadElementNode,[iden]);
@@ -1804,6 +1979,7 @@ final class SpreadElementNode : Node
 }
 final class ArrayLiteralNode : Node
 {
+	mixin ImplVisitor!ArrayLiteralNode;
 	this(Node[] children)
 	{
 		super(NodeType.ArrayLiteralNode,children);
@@ -1811,6 +1987,7 @@ final class ArrayLiteralNode : Node
 }
 final class ObjectLiteralNode : Node
 {
+	mixin ImplVisitor!ObjectLiteralNode;
 	this(Node[] children)
 	{
 		super(NodeType.ObjectLiteralNode,children);
@@ -1818,6 +1995,7 @@ final class ObjectLiteralNode : Node
 }
 final class PropertyDefinitionNode : Node
 {
+	mixin ImplVisitor!PropertyDefinitionNode;
 	this(Node name, Node expr)
 	{
 		super(NodeType.PropertyDefinitionNode,[name,expr]);
@@ -1829,6 +2007,7 @@ final class PropertyDefinitionNode : Node
 }
 final class CoverInitializedName : Node
 {
+	mixin ImplVisitor!CoverInitializedName;
 	this(Node iden, Node init)
 	{
 		super(NodeType.CoverInitializedName,[iden,init]);
@@ -1836,6 +2015,7 @@ final class CoverInitializedName : Node
 }
 final class ElisionNode : Node
 {
+	mixin ImplVisitor!ElisionNode;
 	int cnt;
 	this(int cnt)
 	{
@@ -1860,6 +2040,7 @@ final class ElisionNode : Node
 }
 final class FunctionBodyNode : Node
 {
+	mixin ImplVisitor!FunctionBodyNode;
 	this(Node[] children)
 	{
 		super(NodeType.FunctionBodyNode,children);
@@ -1883,6 +2064,7 @@ final class FunctionBodyNode : Node
 }
 final class LexicalDeclarationNode : Node
 {
+	mixin ImplVisitor!LexicalDeclarationNode;
 	LexicalDeclaration declaration;
 	this(LexicalDeclaration decl, Node[] children)
 	{
@@ -1901,6 +2083,7 @@ final class LexicalDeclarationNode : Node
 }
 final class LexicalDeclarationItemNode : Node
 {
+	mixin ImplVisitor!LexicalDeclarationItemNode;
 	this(Node lhs, Node init = null)
 	{
 		if (init is null)
@@ -1911,6 +2094,7 @@ final class LexicalDeclarationItemNode : Node
 }
 final class ArrayBindingPatternNode : Node
 {
+	mixin ImplVisitor!ArrayBindingPatternNode;
 	this(Node[] children)
 	{
 		super(NodeType.ArrayBindingPatternNode,children);
@@ -1918,6 +2102,7 @@ final class ArrayBindingPatternNode : Node
 }
 final class ObjectBindingPatternNode : Node
 {
+	mixin ImplVisitor!ObjectBindingPatternNode;
 	this(Node[] children)
 	{
 		super(NodeType.ObjectBindingPatternNode,children);
@@ -1925,6 +2110,7 @@ final class ObjectBindingPatternNode : Node
 }
 final class BindingPropertyNode : Node
 {
+	mixin ImplVisitor!BindingPropertyNode;
 	this(Node name, Node elem)
 	{
 		super(NodeType.BindingPropertyNode,[name,elem]);
@@ -1932,6 +2118,7 @@ final class BindingPropertyNode : Node
 }
 final class ExportClauseNode : Node
 {
+	mixin ImplVisitor!ExportClauseNode;
 	this(Node[] children)
 	{
 		super(NodeType.ExportClauseNode,children);
@@ -1939,6 +2126,7 @@ final class ExportClauseNode : Node
 }
 final class ExportDeclarationNode : Node
 {
+	mixin ImplVisitor!ExportDeclarationNode;
 	this(Node clause, Node specifier = null)
 	{
 		if (specifier is null)
@@ -1949,6 +2137,7 @@ final class ExportDeclarationNode : Node
 }
 final class ExportDefaultDeclarationNode : Node
 {
+	mixin ImplVisitor!ExportDefaultDeclarationNode;
 	this(Node child)
 	{
 		super(NodeType.ExportDefaultDeclarationNode,child);
@@ -1956,6 +2145,7 @@ final class ExportDefaultDeclarationNode : Node
 }
 final class ExportSpecifierNode : Node
 {
+	mixin ImplVisitor!ExportSpecifierNode;
 	this(Node name, Node as)
 	{
 		super(NodeType.ExportSpecifierNode,[name,as]);
@@ -1963,6 +2153,7 @@ final class ExportSpecifierNode : Node
 }
 final class ImportClauseNode : Node
 {
+	mixin ImplVisitor!ImportClauseNode;
 	this(Node clause, Node imports)
 	{
 		super(NodeType.ImportClauseNode,[clause,imports]);
@@ -1970,6 +2161,7 @@ final class ImportClauseNode : Node
 }
 final class ImportDeclarationNode : Node
 {
+	mixin ImplVisitor!ImportDeclarationNode;
 	this(Node string)
 	{
 		super(NodeType.ImportDeclarationNode,[string]);
@@ -1981,6 +2173,7 @@ final class ImportDeclarationNode : Node
 }
 final class ImportSpecifierNode : Node
 {
+	mixin ImplVisitor!ImportSpecifierNode;
 	this(Node name, Node identifier)
 	{
 		super(NodeType.ImportSpecifierNode,[name,identifier]);
@@ -1988,6 +2181,7 @@ final class ImportSpecifierNode : Node
 }
 final class NamedImportsNode : Node
 {
+	mixin ImplVisitor!NamedImportsNode;
 	this(Node[] children)
 	{
 		super(NodeType.NamedImportsNode,children);
@@ -1995,6 +2189,7 @@ final class NamedImportsNode : Node
 }
 final class NameSpaceImportNode : Node
 {
+	mixin ImplVisitor!NameSpaceImportNode;
 	this(Node child)
 	{
 		super(NodeType.NameSpaceImportNode,child);
@@ -2002,6 +2197,7 @@ final class NameSpaceImportNode : Node
 }
 final class ModuleNode : Node
 {
+	mixin ImplVisitor!ModuleNode;
 	this(Node[] children)
 	{
 		super(NodeType.ModuleNode,children);
@@ -2025,6 +2221,7 @@ final class ModuleNode : Node
 }
 final class SemicolonNode : Node
 {
+	mixin ImplVisitor!SemicolonNode;
 	this()
 	{
 		super(NodeType.SemicolonNode);
@@ -2032,6 +2229,7 @@ final class SemicolonNode : Node
 }
 final class BindingElementNode : Node
 {
+	mixin ImplVisitor!BindingElementNode;
 	this(Node pattern, Node init)
 	{
 		super(NodeType.BindingElementNode,[pattern,init]);
@@ -2039,6 +2237,7 @@ final class BindingElementNode : Node
 }
 final class YieldExpressionNode : Node
 {
+	mixin ImplVisitor!YieldExpressionNode;
 	Node assignExpr;
 	bool _delegate;
 	this(Node assignExpr, bool _delegate)

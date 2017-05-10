@@ -43,8 +43,10 @@ version (unittest)
 		struct Result
 		{
 			string got;
+			string visitorGot;
 			void shouldEqual(string expected, in string file = __FILE__, in size_t line = __LINE__)
 			{
+				visitorGot.shouldEqual(got, file, line);
 				got.shouldEqual(expected,file,line);
 			}
 		}
@@ -52,22 +54,24 @@ version (unittest)
 		parser.scanToken();
 		auto root = parser.parseModule();
 		root.analyseNode();
-		return Result(root.emit!(pretty));
+		auto emit = root.emit!(pretty);
+		auto emitVisitor = root.emitVisitor!(pretty);
+		return Result(emit,emitVisitor);
 	}
 }
 enum Guide
 {
-	None = 1 << 0,
-	RequiresDelimiter = 1 << 1,
-	RequiresSemicolon = 1 << 2,
-	EndOfStatement = 1 << 3,
-	Void = 1 << 4,
-	RequiresWhitespaceBeforeIdentifier = 1 << 5,
-	EndOfList = 1 << 6,
-	PlusRequiresWhitespace = 1 << 7,
-	MinusRequiresWhitespace = 1 << 8,
-	SkipDelimiter = 1 << 9,
-	DelimitLast = 1 << 10
+	None = 1 << 0,									// 1
+	RequiresDelimiter = 1 << 1,						// 2
+	RequiresSemicolon = 1 << 2,						// 4
+	EndOfStatement = 1 << 3,						// 8
+	Void = 1 << 4,									// 16
+	RequiresWhitespaceBeforeIdentifier = 1 << 5,	// 32
+	EndOfList = 1 << 6,								// 64
+	PlusRequiresWhitespace = 1 << 7,				// 128
+	MinusRequiresWhitespace = 1 << 8,				// 256
+	SkipDelimiter = 1 << 9,							// 512
+	DelimitLast = 1 << 10							// 1024
 }
 bool entersStrictMode(Node node)
 {
@@ -584,8 +588,16 @@ template emit(bool pretty = false)
 						mixin(newline!pretty);
 					}
 					sink.put("else");
-					static if (pretty) { if (node.children[2].type != NodeType.BlockStatementNode) { mixin(enterScope!pretty); mixin(newline!pretty); } }
-					auto r2 = node.children[2].emit(sink,Guide.RequiresWhitespaceBeforeIdentifier);
+					Guide elseGuide = Guide.RequiresWhitespaceBeforeIdentifier;
+					static if (pretty) 
+					{
+						if (node.children[2].type != NodeType.BlockStatementNode) { 
+							mixin(enterScope!pretty);
+							mixin(newline!pretty);
+							elseGuide = Guide.None;
+						}
+					}
+					auto r2 = node.children[2].emit(sink,elseGuide);
 					static if (pretty) { if (node.children[2].type != NodeType.BlockStatementNode) mixin(exitScope!pretty); }
 					return r2;					
 				}
@@ -1402,7 +1414,7 @@ while(true){
 `if(a)
   bla();
 else
-   hup();
+  hup();
 if(a){
   bla()
 }
@@ -1412,7 +1424,1120 @@ else{
 `
 	);
 }
+template emitVisitor(bool pretty)
+{
+	class EmitVisitor(Sink) : NodeVisitor
+	{
+		private {
+			Guide guide;
+			Sink sink;
+		}
+		this(Sink sink)
+		{
+			this.sink = sink;
+		}
+		void acceptMany(T)(T[] nodes, Guide g = Guide.None)
+		{
+			foreach(c; nodes)
+			{
+				c.accept(this);
+				if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+					guide |= Guide.RequiresWhitespaceBeforeIdentifier;
+				else
+					guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
+			}
+		}
+		Guide acceptManyDelimited(T)(T[] nodes, string delimiter, Guide g = Guide.None)
+		{
+			if (nodes.length == 0)
+				return Guide.Void;
+			foreach(c; nodes[0..$-1])
+			{
+				c.accept(this);
+				if (guide & Guide.RequiresSemicolon) {
+					sink.put(";");
+					mixin(newline!pretty);
+				}
+				else if (!(guide & Guide.SkipDelimiter) && (!(guide & Guide.EndOfStatement) || delimiter != ";")) {
+					sink.put(delimiter);
+					if (delimiter == ";") {
+						mixin(newline!pretty);
+					} else if (delimiter == ",") {
+						mixin(whitespace!pretty);
+					}
+				}
+				guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
+			}
+			guide |= Guide.EndOfList;
+			nodes[$-1].accept(this);
+			if ((g & Guide.DelimitLast) && (guide & (Guide.RequiresDelimiter | Guide.RequiresSemicolon)) && delimiter == ";")
+			{
+				sink.put(delimiter);
+				mixin(newline!pretty);
+				return Guide.None;
+			}
+			if (guide & Guide.RequiresSemicolon) {
+				mixin(newline!pretty);
+				return Guide.RequiresSemicolon;
+			}
+			if (guide & Guide.RequiresDelimiter) {
+				if (delimiter == ";") {
+					mixin(newline!pretty);
+				}
+				return Guide.RequiresDelimiter;
+			}
+			return Guide.None; // Todo
+		}
+		void visit(Node node)
+		{
+			foreach(c; node.children)
+				c.accept(this);
+		}
+		void visit(ErrorNode node){}
+		void visit(BooleanNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put(node.value ? "true": "false");
+			guide = Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
+		}
+		void visit(SheBangNode node)
+		{
+			sink.put(node.value);
+			sink.put("\n");
+			guide = Guide.None;
+		}
+		void visit(StringLiteralNode node)
+		{
+			sink.put("\'");
+			sink.put(node.value);
+			sink.put("\'");
+			guide = Guide.None;
+		}
+		void visit(BinaryLiteralNode node)
+		{
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("0b");
+			sink.put(node.value);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(OctalLiteralNode node)
+		{
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("0o");
+			sink.put(node.value);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(DecimalLiteralNode node)
+		{
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put(node.value);
+			guide = Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
+		}
+		void visit(HexLiteralNode node)
+		{
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("0x");
+			sink.put(node.value);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(TemplateNode node)
+		{
+			sink.put(node.value);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(TemplateLiteralNode node)
+		{
+			sink.put("`");
+			node.children[0].accept(this);
+			import std.range : chunks;
+			foreach(chunk; node.children[1..$].chunks(2))
+			{
+				sink.put("${");
+				chunk[0].accept(this);
+				sink.put("}");
+				chunk[1].accept(this);
+			}
+			sink.put("`");
+			guide = Guide.EndOfStatement;
+		}
+		void visit(RegexLiteralNode node)
+		{
+			sink.put(node.value);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(KeywordNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			switch(node.keyword)
+			{
+				case Keyword.This: sink.put("this"); break;
+				case Keyword.Null: sink.put("null"); break; default: assert(0);
+			}
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(IdentifierReferenceNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put(node.identifier);
+			guide = Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
+		}
+		void visit(IdentifierNameNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put(node.identifier);
+			guide = Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
+		}
+		void visit(ExpressionNode node)
+		{
+			acceptManyDelimited(node.children,",");
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(ParenthesisNode node)
+		{
+			sink.put('(');
+			acceptManyDelimited(node.children,",");
+			sink.put(')');
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(PrefixExpressionNode node)
+		{
+			final switch(node.prefix)
+			{
+				case Prefix.Delete: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("delete"); guide = Guide.RequiresWhitespaceBeforeIdentifier; return;
+				case Prefix.Void: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("void"); guide = Guide.RequiresWhitespaceBeforeIdentifier; return;
+				case Prefix.Typeof: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("typeof"); guide = Guide.RequiresWhitespaceBeforeIdentifier; return;
+				case Prefix.Increment:
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("++"); 
+					break;
+				case Prefix.Decrement:
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("--");
+					break;
+				case Prefix.Positive:
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("+");
+					break;
+				case Prefix.Negative:
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("-");
+					break;
+				case Prefix.Tilde: sink.put("~"); break;
+				case Prefix.Negation: sink.put("!"); break;
+			}
+			guide = Guide.None;
+		}
+		void visit(SuperPropertyNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("super");
+			if (node.children[0].type == NodeType.IdentifierNameNode)
+				sink.put(".");
+			node.children[0].accept(this);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(AccessorNode node)
+		{
+			sink.put(".");
+			sink.put(node.identifier);
+			guide = Guide.RequiresDelimiter | Guide.RequiresWhitespaceBeforeIdentifier;
+		}
+		void visit(NewTargetNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("new.target");
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(SpreadOperatorNode node)
+		{
+			sink.put("...");
+			guide = Guide.None;
+		}
+		void visit(ArgumentsNode node)
+		{
+			sink.put("(");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put(")");
+			guide = Guide.None;
+		}
+		void visit(ArrayIndexNode node)
+		{
+			sink.put("[");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("]");
+			guide = Guide.None;
+		}
+		void visit(NewExpressionNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			"new ".repeat(node.news).copy(sink);
+			guide = Guide.None;
+			acceptMany(node.children);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(CallExpressionNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			"new ".repeat(node.news).copy(sink);
+			guide = Guide.None;
+			acceptMany(node.children);
+			guide |= Guide.RequiresDelimiter; 
+		}
+		void visit(UnaryExpressionNode node)
+		{
+			if (node.prefixs.length > 0)
+				acceptMany(node.prefixs);
+			node.children[0].accept(this);
+			final switch(node.postfix)
+			{
+				case Postfix.Increment: 
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("++");
+					guide = Guide.RequiresDelimiter; return;
+				case Postfix.Decrement: 
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("--");
+					guide = Guide.RequiresDelimiter; return;
+				case Postfix.None: break;
+			}
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(ExpressionOperatorNode node)
+		{
+			final switch(node.operator)
+			{
+				case ExpressionOperator.InstanceOf: sink.put(" instanceof"); guide = Guide.RequiresWhitespaceBeforeIdentifier; return;
+				case ExpressionOperator.In: if (guide & Guide.RequiresWhitespaceBeforeIdentifier) sink.put(" "); sink.put("in"); guide = Guide.RequiresWhitespaceBeforeIdentifier; return;
+				case ExpressionOperator.LogicalAnd: sink.put("&&"); break;
+				case ExpressionOperator.LogicalOr: sink.put("||"); break;
+				case ExpressionOperator.BitwiseAnd: sink.put("&"); break;
+				case ExpressionOperator.BitwiseOr: sink.put("|"); break;
+				case ExpressionOperator.BitwiseXor: sink.put("^"); break;
+				case ExpressionOperator.StrictEqual: sink.put("==="); break;
+				case ExpressionOperator.Equal: sink.put("=="); break;
+				case ExpressionOperator.StrictNotEqual: sink.put("!=="); break;
+				case ExpressionOperator.NotEqual: sink.put("!="); break;
+				case ExpressionOperator.LessOrEqual: sink.put("<="); break;
+				case ExpressionOperator.LessThan: sink.put("<"); break;
+				case ExpressionOperator.GreaterOrEqual: sink.put(">="); break;
+				case ExpressionOperator.GreaterThan: sink.put(">"); break;
+				case ExpressionOperator.LeftShift: sink.put("<<"); break;
+				case ExpressionOperator.TripleRightSift: sink.put(">>>"); break;
+				case ExpressionOperator.RightShift: sink.put(">>"); break;
+				case ExpressionOperator.Add: 
+					if (guide & Guide.PlusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("+");
+					guide = Guide.PlusRequiresWhitespace; return;
+				case ExpressionOperator.Minus:
+					if (guide & Guide.MinusRequiresWhitespace)
+						sink.put(" ");
+					sink.put("-");
+					guide = Guide.MinusRequiresWhitespace; return;
+				case ExpressionOperator.Multiply: sink.put("*"); break;
+				case ExpressionOperator.Division: sink.put("/"); break;
+				case ExpressionOperator.Mod: sink.put("%"); break;
+			}
+			guide = Guide.None;
+		}
+		void visit(BinaryExpressionNode node)
+		{
+			node.children[0].accept(this);
+			for(int i = 1; i < node.children.length; i+=2)
+			{
+				visit(node.children[i].as!(ExpressionOperatorNode));
+				node.children[i+1].accept(this);
+			}
+		}
+		void visit(ConditionalExpressionNode node)
+		{
+			node.children[0].accept(this);
+			mixin(whitespace!pretty);
+			sink.put("?");
+			mixin(whitespace!pretty);
+			guide = Guide.None;
+			node.children[1].accept(this);
+			mixin(whitespace!pretty);
+			sink.put(":");
+			mixin(whitespace!pretty);
+			guide = Guide.None;
+			node.children[2].accept(this);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(AssignmentExpressionNode node)
+		{
+			acceptMany(node.children);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(ArrowFunctionNode node)
+		{
+			node.children[0].accept(this);
+			mixin(whitespace!pretty);
+			sink.put("=>");
+			guide = Guide.None;
+			mixin(whitespace!pretty);
+			node.children[1].accept(this);
+		}
+		void visit(AssignmentOperatorNode node)
+		{
+			mixin(whitespace!pretty);
+			final switch(node.assignment)
+			{
+				case Assignment.LeftShiftAssignment: sink.put("<<="); break;
+				case Assignment.TripleRightShiftAssignment: sink.put(">>>="); break;
+				case Assignment.RightShiftAssignment: sink.put(">>="); break;
+				case Assignment.Assignment: sink.put("="); break;
+				case Assignment.AdditiveAssignment: sink.put("+="); break;
+				case Assignment.DecrementalAssignment: sink.put("-="); break;
+				case Assignment.MultiplicativeAssignment: sink.put("*="); break;
+				case Assignment.DivisionAssignment: sink.put("/="); break;
+				case Assignment.ModAssignment: sink.put("%="); break;
+				case Assignment.BitwiseAndAssignment: sink.put("&="); break;
+				case Assignment.BitwiseOrAssignment: sink.put("|="); break;
+				case Assignment.BitwiseXorAssignment: sink.put("^="); break;
+			}
+			mixin(whitespace!pretty);
+			guide = Guide.None;
+		}
+		void visit(ContinueStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("continue");
+			if (node.label)
+			{
+				sink.put(" ");
+				sink.put(cast(const(char)[])node.label);
+			}
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(BreakStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("break");
+			if (node.label)
+			{
+				sink.put(" ");
+				sink.put(cast(const(char)[])node.label);
+			}
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(EmptyStatementNode node)
+		{
+			sink.put(";");
+			guide = Guide.EndOfStatement;
+		}
+		void visit(LabelledStatementNode node)
+		{
+			sink.put(node.label);
+			sink.put(":");
+			node.children[0].accept(this);
+		}
+		void visit(VariableDeclarationNode node)
+		{
+			node.children[0].accept(this);
+			guide = Guide.None;
+			if (node.children.length ==2)
+			{
+				mixin(whitespace!pretty);
+				sink.put("=");
+				mixin(whitespace!pretty);
+				node.children[1].accept(this);
+			}
 
+		}
+		void visit(VariableStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("var");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			acceptManyDelimited(node.children,",");
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(ReturnStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("return");
+			if (node.children.length == 1)
+			{
+				guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				node.children[0].accept(this);
+			}
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(BlockStatementNode node)
+		{
+			sink.put("{");
+			mixin(enterScope!pretty);
+			mixin(newline!pretty);
+			guide = Guide.None;
+			acceptManyDelimited(node.children,";");
+			mixin(exitScope!pretty);
+			sink.put("}");
+			mixin(newline!pretty);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(IfStatementNode node)
+		{
+			if (guide == Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("if(");
+			guide = Guide.None;
+			node.children[0].accept(this);
+			sink.put(")");
+			guide = Guide.None;
+			static if (pretty) { if (node.children[1].type != NodeType.BlockStatementNode) { mixin(enterScope!pretty); mixin(newline!pretty); } }
+			node.children[1].accept(this);
+			static if (pretty) { if (node.children[1].type != NodeType.BlockStatementNode) mixin(exitScope!pretty); }
+			if (node.children.length > 2)
+			{
+				if (guide != Guide.EndOfStatement)
+				{
+					sink.put(";");
+					mixin(newline!pretty);
+				}
+				sink.put("else");
+				static if (pretty) {
+					if (node.children[2].type != NodeType.BlockStatementNode) {
+						mixin(enterScope!pretty);
+						mixin(newline!pretty);
+					} else
+						guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				}
+				else
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				node.children[2].accept(this);
+				static if (pretty) { if (node.children[2].type != NodeType.BlockStatementNode) mixin(exitScope!pretty); }
+				return;
+			}
+		}
+		void visit(SwitchStatementNode node)
+		{
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
+			guide = Guide.None;
+			sink.put("switch(");
+			node.children[0].accept(this);
+			sink.put("){");
+			acceptManyDelimited(node.children[1..$],";");
+			sink.put("}");
+			guide = Guide.EndOfStatement;
+		}
+		void visit(DoWhileStatementNode node)
+		{
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
+			sink.put("do");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			node.children[0].accept(this);
+			if (guide & (Guide.RequiresSemicolon | Guide.RequiresDelimiter))
+				sink.put(";");
+			sink.put("while(");
+			guide = Guide.None;
+			node.children[1].accept(this);
+			sink.put(")");
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(WhileStatementNode node)
+		{
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
+			sink.put("while(");
+			guide = Guide.None;
+			node.children[0].accept(this);
+			sink.put(")");
+			static if (pretty) { if (node.children[1].type != NodeType.BlockStatementNode) { mixin(enterScope!pretty); mixin(newline!pretty); } }
+			guide = Guide.None;
+			node.children[1].accept(this);
+			static if (pretty) { if (node.children[1].type != NodeType.BlockStatementNode) mixin(exitScope!pretty); }
+		}
+		void visit(CaseNode node)
+		{
+			sink.put("case");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			node.children[0].accept(this);
+			sink.put(":");
+			if (node.children.length == 2)
+			{
+				node.children[1].accept(this);
+				return;
+			}
+			guide = Guide.EndOfStatement;
+		}
+		void visit(CaseBodyNode node)
+		{
+			guide = Guide.None;
+			acceptManyDelimited(node.children,";");
+			guide = node.children.length > 0 ? Guide.RequiresSemicolon : Guide.EndOfStatement;
+		}
+		void visit(DefaultNode node)
+		{
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
+			sink.put("default:");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,";");
+			guide = Guide.None;
+		}
+		void visit(ForStatementNode node)
+		{
+			if (guide & (Guide.RequiresWhitespaceBeforeIdentifier))
+				sink.put(" ");
+			sink.put("for(");
+			guide = Guide.None;
+			switch(node.loopType)
+			{
+				case ForLoop.ExprCStyle:
+				case ForLoop.VarCStyle:
+				case ForLoop.ConstCStyle:
+				case ForLoop.LetCStyle:
+					acceptMany(node.children[0..$-1]);
+					break;
+				case ForLoop.VarIn:
+				case ForLoop.VarOf:
+					sink.put("var");
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
+					goto default;
+				case ForLoop.ConstIn:
+				case ForLoop.ConstOf:
+					sink.put("const");
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
+					goto default;
+				case ForLoop.LetIn:
+				case ForLoop.LetOf:
+					sink.put("let");
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
+					goto default;
+				default:
+					node.children[0].accept(this);
+					switch (node.loopType)
+					{
+						case ForLoop.ExprIn:
+						case ForLoop.VarIn:
+						case ForLoop.ConstIn:
+						case ForLoop.LetIn:
+							if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+								sink.put(" ");
+							sink.put("in");
+							break;
+						case ForLoop.ExprOf:
+						case ForLoop.VarOf:
+						case ForLoop.ConstOf:
+						case ForLoop.LetOf:
+							if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+								sink.put(" ");
+							sink.put("of");
+							break;
+						default:
+							assert(0);
+					}
+					guide = Guide.RequiresWhitespaceBeforeIdentifier;
+					node.children[1].accept(this);
+					break;
+			}
+			sink.put(")");
+			guide = Guide.None;
+			static if (pretty) { if (node.children[$-1].type != NodeType.BlockStatementNode) { mixin(enterScope!pretty); mixin(newline!pretty); } }
+			node.children[$-1].accept(this);
+			static if (pretty) { if (node.children[$-1].type != NodeType.BlockStatementNode) mixin(exitScope!pretty); }
+		}
+		void visit(WithStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("with(");
+			guide = Guide.None;
+			node.children[0].accept(this);
+			sink.put(")");
+			guide = Guide.None;
+			node.children[1].accept(this);
+		}
+		void visit(CatchStatementNode node)
+		{
+			sink.put("catch(");
+			guide = Guide.None;
+			node.children[0].accept(this);
+			sink.put(")");
+			guide = Guide.None;
+			node.children[1].accept(this);
+		}
+		void visit(FinallyStatementNode node)
+		{
+			sink.put("finally");
+			node.children[0].accept(this);
+		}
+		void visit(TryStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("try");
+			acceptMany(node.children);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ThrowStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("throw");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			node.children[0].accept(this);
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(DebuggerStatementNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("debugger");
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(ClassDeclarationNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("class");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			if (node.name !is null)
+				node.name.accept(this);
+			if (node.base !is null)
+			{
+				sink.put(" extends");
+				node.base.accept(this);
+			}
+			sink.put("{");
+			guide = Guide.None;
+			acceptMany(node.methods);
+			sink.put("}");
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ClassGetterNode node)
+		{
+			if (node.isStatic)
+				sink.put("static ");
+			sink.put("get ");
+			node.children[0].accept(this);
+			sink.put("()");
+			node.children[1].accept(this);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ClassMethodNode node)
+		{
+			if (node.isStatic)
+				sink.put("static ");
+			node.children[0].accept(this);
+			node.children[1].accept(this);
+			node.children[2].accept(this);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ClassGeneratorMethodNode node)
+		{
+			if (node.isStatic)
+				sink.put("static ");
+			sink.put("*");
+			node.children[0].accept(this);
+			node.children[1].accept(this);
+			node.children[2].accept(this);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ClassSetterNode node)
+		{
+			if (node.isStatic)
+				sink.put("static ");
+			sink.put("set ");
+			node.children[0].accept(this);
+			sink.put("(");
+			guide = Guide.None;
+			node.children[1].accept(this);
+			sink.put(")");
+			guide = Guide.None;
+			node.children[2].accept(this);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ComputedPropertyNameNode node)
+		{
+			sink.put('[');
+			guide = Guide.None;
+			node.children[0].accept(this);
+			sink.put(']');
+			guide = Guide.None;
+		}
+		void visit(FormalParameterListNode node)
+		{
+			sink.put("(");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put(")");
+			guide = Guide.None;
+		}
+		void visit(FunctionDeclarationNode node)
+		{
+			bool emittedNewLine = false;
+			if (node.children.length == 3)
+				emittedNewLine = sink.newlineOpportunity();
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier && !emittedNewLine)
+				sink.put(" ");
+			sink.put("function");
+			if (node.children.length == 3)
+			{
+				guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				node.children[0].accept(this);
+				guide = Guide.None;
+			}
+			acceptMany(node.children[$-2..$]);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(FunctionExpressionNode node)
+		{
+			bool emittedNewLine = false;
+			if (node.children.length == 3)
+				emittedNewLine = sink.newlineOpportunity();
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier && !emittedNewLine)
+				sink.put(" ");
+			sink.put("function");
+			if (node.children.length == 3)
+			{
+				guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				node.children[0].accept(this);
+				guide = Guide.None;
+			}
+			acceptMany(node.children[$-2..$]);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(GeneratorDeclarationNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("function*");
+			if (node.children.length == 3)
+			{
+				guide = Guide.None;
+				node.children[0].accept(this);
+			}
+			acceptMany(node.children[$-2..$]);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(GeneratorExpressionNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("function*");
+			if (node.children.length == 3)
+			{
+				guide = Guide.None;
+				node.children[0].accept(this);
+			}
+			acceptMany(node.children[$-2..$]);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(RestElementNode node)
+		{
+			sink.put("...");
+			node.children[0].accept(this);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(SingleNameBindingNode node)
+		{
+			guide = Guide.None;
+			acceptManyDelimited(node.children,"=");
+			guide = Guide.None;
+		}
+		void visit(SpreadElementNode node)
+		{
+			sink.put("...");
+			node.children[0].accept(this);
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(ArrayLiteralNode node)
+		{
+			sink.put("[");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("]");
+			guide = Guide.None;
+		}
+		void visit(ObjectLiteralNode node)
+		{
+			sink.put("{");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("}");
+			guide = Guide.None;
+		}
+		void visit(PropertyDefinitionNode node)
+		{
+			node.children[0].accept(this);
+			sink.put(":");
+			guide = Guide.None;
+			node.children[1].accept(this);
+		}
+		void visit(CoverInitializedName node)
+		{
+			node.children[0].accept(this);
+			sink.put("=");
+			node.children[1].accept(this);
+		}
+		void visit(ElisionNode node)
+		{
+			if (node.cnt > 0 && !(guide & Guide.EndOfList))
+				",".repeat(node.cnt-1).copy(sink);
+			else
+				",".repeat(node.cnt).copy(sink);
+			guide = Guide.None;
+		}
+		void visit(FunctionBodyNode node)
+		{
+			sink.put("{");
+			mixin(enterScope!pretty);
+			mixin(newline!pretty);
+			if (node.entersStrictMode && (node.parent.parent is null || node.parent.parent.type != NodeType.ClassDeclarationNode))
+				sink.put(`"use strict";`);
+			guide = Guide.None;
+			acceptManyDelimited(node.children,";");
+			mixin(exitScope!pretty);
+			sink.put("}");
+			mixin(newline!pretty);
+			guide = Guide.EndOfStatement;
+		}
+		void visit(LexicalDeclarationItemNode node)
+		{
+			node.children[0].accept(this);
+			if (node.children.length == 2)
+			{
+				sink.put("=");
+				node.children[1].accept(this);
+			}
+			guide = Guide.RequiresDelimiter;
+		}
+		void visit(LexicalDeclarationNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			if (node.declaration == LexicalDeclaration.Let)
+				sink.put("let");
+			else
+				sink.put("const");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			acceptManyDelimited(node.children,",");
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(ArrayBindingPatternNode node)
+		{
+			sink.put("[");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("]");
+			guide = Guide.None;
+		}
+		void visit(ObjectBindingPatternNode node)
+		{
+			sink.put("{");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("}");
+			guide = Guide.None;
+		}
+		void visit(BindingPropertyNode node)
+		{
+			node.children[0].accept(this);
+			sink.put(":");
+			node.children[1].accept(this);
+			guide = Guide.None;
+		}
+		void visit(ExportClauseNode node)
+		{
+			sink.put("{");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("}");
+			guide = Guide.EndOfStatement;
+		}
+		void visit(ExportDeclarationNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("export");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			node.children[0].accept(this);
+			if (node.children.length == 2)
+			{
+				if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+					sink.put(" ");
+				sink.put("from");
+				guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				node.children[1].accept(this);
+			}
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(ExportDefaultDeclarationNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("export default");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			node.children[0].accept(this);
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(ExportSpecifierNode node)
+		{
+			node.children[0].accept(this);
+			sink.put(" as ");
+			guide = Guide.None;
+			node.children[1].accept(this);
+			guide = Guide.None;
+		}
+		void visit(ImportClauseNode node)
+		{
+			acceptManyDelimited(node.children,",");
+			guide = Guide.None;
+		}
+		void visit(ImportDeclarationNode node)
+		{
+			if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
+				sink.put(" ");
+			sink.put("import");
+			guide = Guide.RequiresWhitespaceBeforeIdentifier;
+			node.children[0].accept(this);
+			if (node.children.length == 2)
+			{
+				if (guide != Guide.EndOfStatement)
+					sink.put(" ");
+				sink.put("from");
+				guide = Guide.RequiresWhitespaceBeforeIdentifier;
+				node.children[1].accept(this);
+			}
+			guide = Guide.RequiresSemicolon;
+		}
+		void visit(ImportSpecifierNode node)
+		{
+			node.children[0].accept(this);
+			sink.put(" as ");
+			guide = Guide.None;
+			node.children[1].accept(this);
+			guide = Guide.None;
+		}
+		void visit(NamedImportsNode node)
+		{
+			sink.put("{");
+			guide = Guide.None;
+			acceptManyDelimited(node.children,",");
+			sink.put("}");
+			guide = Guide.EndOfStatement;
+		}
+		void visit(NameSpaceImportNode node)
+		{
+			sink.put("* as ");
+			guide = Guide.None;
+			node.children[0].accept(this);
+			guide = Guide.None;
+		}
+		void visit(ModuleNode node)
+		{
+			if (node.entersStrictMode)
+				sink.put(`"use strict";`);
+			if (Guide.RequiresSemicolon & acceptManyDelimited(node.children,";",Guide.DelimitLast))
+				sink.put(";");
+			guide = Guide.None;
+		}
+		void visit(SemicolonNode node)
+		{
+			sink.put(";");
+			guide = Guide.Void;
+		}
+		void visit(BindingElementNode node)
+		{
+			guide = Guide.None;
+			acceptManyDelimited(node.children,"=");
+			guide = Guide.Void;
+		}
+		void visit(YieldExpressionNode node)
+		{
+			// TODO: not implemented
+		}
+	}
 
-
-
+	string emitVisitor(Node node) @trusted
+	{
+		import std.array : appender;
+		class NewLineAppender
+		{
+			private {
+				Appender!string app;
+				size_t columnCnt;
+				static if (pretty) {
+					size_t indent;
+				}
+			}
+			void put(T)(T t) @safe
+			{
+				import std.traits : isArray;
+				static if (pretty)
+				{
+					if (columnCnt == 0)
+					{
+						foreach(i; 0..indent)
+							app.put("  ");
+					}
+				}
+				static if (isArray!T)
+					columnCnt += t.length;
+				else
+					columnCnt ++;
+				app.put(t);
+			}
+			bool newlineOpportunity() @safe
+			{
+				if (columnCnt > 30000)
+				{
+					put('\n');
+					columnCnt = 0;
+					return true;
+				}
+				return false;
+			}
+			string data() @safe
+			{
+				return app.data;
+			}
+			static if (pretty)
+			{
+				@safe:
+				void newLine() {
+					put("\n");
+					columnCnt = 0;
+				}
+				void enterScope() {
+					indent++;
+				}
+				void exitScope() {
+					indent--;
+				}
+			}
+		}
+		auto app = new NewLineAppender();
+		auto visitor = new EmitVisitor!(NewLineAppender)(app);
+		node.accept(visitor);
+		return app.data;
+	}
+}
