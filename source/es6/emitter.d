@@ -1426,7 +1426,7 @@ else{
 }
 template emitVisitor(bool pretty)
 {
-	class EmitVisitor(Sink) : NodeVisitor
+	final class EmitVisitor(Sink) : NodeVisitor
 	{
 		private {
 			Guide guide;
@@ -1436,24 +1436,31 @@ template emitVisitor(bool pretty)
 		{
 			this.sink = sink;
 		}
-		void acceptMany(T)(T[] nodes, Guide g = Guide.None)
+		void acceptMany(T)(T[] nodes)
 		{
 			foreach(c; nodes)
 			{
 				c.accept(this);
-				if (guide & Guide.RequiresWhitespaceBeforeIdentifier)
-					guide |= Guide.RequiresWhitespaceBeforeIdentifier;
-				else
-					guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
 			}
 		}
-		Guide acceptManyDelimited(T)(T[] nodes, string delimiter, Guide g = Guide.None)
+		void visitManyAs(U,T)(T[] nodes)
+		{
+			foreach(c; nodes)
+			{
+				visit(c.as!U);
+			}
+		}
+		Guide acceptManyDelimited(U = Node)(Node[] nodes, string delimiter, Guide g = Guide.None)
 		{
 			if (nodes.length == 0)
 				return Guide.Void;
 			foreach(c; nodes[0..$-1])
 			{
-				c.accept(this);
+				static if (!is(U : Node))
+				{
+					visit(c.as!U);
+				} else
+					c.accept(this);
 				if (guide & Guide.RequiresSemicolon) {
 					sink.put(";");
 					mixin(newline!pretty);
@@ -1469,7 +1476,11 @@ template emitVisitor(bool pretty)
 				guide &= ~Guide.RequiresWhitespaceBeforeIdentifier;
 			}
 			guide |= Guide.EndOfList;
-			nodes[$-1].accept(this);
+			static if (!is(U : Node))
+			{
+				visit(nodes[$-1].as!U);
+			} else
+				nodes[$-1].accept(this);
 			if ((g & Guide.DelimitLast) && (guide & (Guide.RequiresDelimiter | Guide.RequiresSemicolon)) && delimiter == ";")
 			{
 				sink.put(delimiter);
@@ -1704,7 +1715,7 @@ template emitVisitor(bool pretty)
 		void visit(UnaryExpressionNode node)
 		{
 			if (node.prefixs.length > 0)
-				acceptMany(node.prefixs);
+				visitManyAs!(PrefixExpressionNode)(node.prefixs);
 			node.children[0].accept(this);
 			final switch(node.postfix)
 			{
@@ -1786,7 +1797,12 @@ template emitVisitor(bool pretty)
 		}
 		void visit(AssignmentExpressionNode node)
 		{
-			acceptMany(node.children);
+			node.children[0].accept(this);
+			for(int i = 1; i < node.children.length; i+=2)
+			{
+				visit(node.children[i].as!(AssignmentOperatorNode));
+				node.children[i+1].accept(this);
+			}
 			guide = Guide.RequiresDelimiter;
 		}
 		void visit(ArrowFunctionNode node)
@@ -1873,7 +1889,7 @@ template emitVisitor(bool pretty)
 				sink.put(" ");
 			sink.put("var");
 			guide = Guide.RequiresWhitespaceBeforeIdentifier;
-			acceptManyDelimited(node.children,",");
+			acceptManyDelimited!(VariableDeclarationNode)(node.children,",");
 			guide = Guide.RequiresSemicolon;
 		}
 		void visit(ReturnStatementNode node)
@@ -2202,7 +2218,7 @@ template emitVisitor(bool pretty)
 			if (node.children.length == 3)
 			{
 				guide = Guide.RequiresWhitespaceBeforeIdentifier;
-				node.children[0].accept(this);
+				visit(node.children[0].as!IdentifierReferenceNode);
 				guide = Guide.None;
 			}
 			acceptMany(node.children[$-2..$]);
@@ -2219,7 +2235,7 @@ template emitVisitor(bool pretty)
 			if (node.children.length == 3)
 			{
 				guide = Guide.RequiresWhitespaceBeforeIdentifier;
-				node.children[0].accept(this);
+				visit(node.children[0].as!IdentifierReferenceNode);
 				guide = Guide.None;
 			}
 			acceptMany(node.children[$-2..$]);
@@ -2233,7 +2249,7 @@ template emitVisitor(bool pretty)
 			if (node.children.length == 3)
 			{
 				guide = Guide.None;
-				node.children[0].accept(this);
+				visit(node.children[0].as!IdentifierReferenceNode);
 			}
 			acceptMany(node.children[$-2..$]);
 			guide = Guide.EndOfStatement;
@@ -2246,7 +2262,7 @@ template emitVisitor(bool pretty)
 			if (node.children.length == 3)
 			{
 				guide = Guide.None;
-				node.children[0].accept(this);
+				visit(node.children[0].as!IdentifierReferenceNode);
 			}
 			acceptMany(node.children[$-2..$]);
 			guide = Guide.EndOfStatement;
@@ -2260,7 +2276,9 @@ template emitVisitor(bool pretty)
 		void visit(SingleNameBindingNode node)
 		{
 			guide = Guide.None;
-			acceptManyDelimited(node.children,"=");
+			node.children[0].accept(this);
+			sink.put("=");
+			node.children[1].accept(this);
 			guide = Guide.None;
 		}
 		void visit(SpreadElementNode node)

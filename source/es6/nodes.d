@@ -439,17 +439,28 @@ class Node
 		sink.formattedWrite("\n");
 		sink.print(children,level+1);
 	}
-	auto as(Type)(in string file = __FILE__, in size_t line = __LINE__)
+	version (unittest)
 	{
-		auto r = cast(Type)this;
-		version (unittest)
+		auto as(Type)(in string file = __FILE__, in size_t line = __LINE__)
 		{
-			import std.format;
-			if (r is null)
-				throw new UnitTestException([format("Tried to interpret as %s, but got %s",Type.stringof,this)],file,line);
+			auto r = cast(Type)this;
+			version (unittest)
+			{
+				import std.format;
+				if (r is null)
+					throw new UnitTestException([format("Tried to interpret as %s, but got %s",Type.stringof,this)],file,line);
+			}
+			assert(r !is null,format("Assertion this(%s) != %s. In %s @ %s",this.type,Type.stringof,file,line));
+			return r;
 		}
-		assert(r !is null,format("Assertion this(%s) != %s. In %s @ %s",this.type,Type.stringof,file,line));
-		return r;
+	} else
+	{
+		auto as(Type)()
+		{
+			auto r = cast(Type)this;
+			assert(r !is null,format("Assertion this(%s) != %s.",this.type,Type.stringof));
+			return r;
+		}
 	}
 	auto opt(Type)()
 	{
