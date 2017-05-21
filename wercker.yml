@@ -11,27 +11,37 @@ build:
         code: |
           dub test -b unittest-cov -- -d
     - script:
-        name: minify RxJS
-        code: |
-          dub -- -i ./tests/RxJS/dist/rx.all.js -o ./tests/RxJS/dist/rx.all.min.js --minify
-    - script:
-        name: unittest RxJS
-        code: |
-          ln -s $PWD/tests/RxJS /usr/share/nginx/html/RxJS
-          nginx
-          phantomjs ./tests/run-qunit.js http://localhost/RxJS/tests/rx.all.html
-    - script:
-        name: minify jQuery
-        code: |
-          dub -- -i ./tests/jquery/dist/jquery.js -o ./tests/jquery/dist/jquery.min.js --minify
-    - script:
-        name: unittest jQuery
-        code: |
-          ln -s $PWD/tests/jquery /usr/share/nginx/html/jquery
-          php-fpm
-          cd tests
-          ./run-jquery.sh
-    - script:
         name: upload-coverage
         code: |
           bash <(curl -s https://codecov.io/bash)
+
+instrument:
+  box: skoppe/docker-ldc-afl
+  steps:
+    - script:
+        name: compile to assembly
+        code: |
+          dub build --compiler=ldc2 --config=assembly || true
+          find . -type f -name "jazr.s" | xargs -I '{}' cp '{}' /afl/jazr.s
+    - script:
+        name: instrument binary
+        code: |
+          cd /afl
+          ./afl-clang jazr.s -o jazr -Xlinker -no_compact_unwind -lphobos2-ldc -ldruntime-ldc -lpthread
+          cp jazr $WERCKER_OUTPUT_DIR/jazr
+
+deploy-docker-hub:
+  box: skoppe/afl-dist
+  steps:
+    - script:
+        name: deploy jazr binary
+        code: |
+          mv $WERCKER_SOURCE_DIR/jazr /afl/jazr
+    - internal/docker-push:
+        username: $DOCKERHUBUSER
+        password: $DOCKERHUBPASS
+        email: $DOCKERHUBEMAIL
+        repository: skoppe/jazr-afl-dist
+        working-dir:  "/afl"
+        entrypoint: "./afl-dist --port=8080 --program=/afl/jazr"
+        ports: "8080"
