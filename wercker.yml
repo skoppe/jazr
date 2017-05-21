@@ -34,7 +34,7 @@ deploy-docker-hub:
   box: skoppe/afl-dist
   steps:
     - script:
-        name: deploy jazr binary
+        name: deploy instrumented jazr binary
         code: |
           mv $WERCKER_SOURCE_DIR/jazr /afl/jazr
     - internal/docker-push:
