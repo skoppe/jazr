@@ -63,6 +63,7 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 		root.runTransform!(
 			//simplifyVoid0Conditionals,	// does well on almost all files, except very bad on migration-reporter.max (worth looking into). Also we might want to consider transforming into if statement instead of a conditional
 			simplifyComparisions,
+			simplifyArithmeticOperations,
 			convertToScientificNotation,		// some files get 1-2 bytes bigger
 			simplifyLogicalOperations,
 			minifyLabels,
@@ -91,7 +92,7 @@ void minify(Node root, in string file = __FILE__, in size_t line = __LINE__)
 			removeRedundantBlockStatements,
 			combineFunctionBodyIntoExpression,	// makes some files with gzip bigger (some files are worthwhile though)
 			combineModuleIntoExpression,	// no impact !?!?
-			simplifyBinaryExpressions,
+			//simplifyBinaryExpressions,	// redudant now that we have simplifyComparisions and simplifyLogicalOperations
 			simplifyStaticIfStatement,
 			simplifyStaticConditional,
 			swapNegatedConditionals,	// in general good but sometimes in gzip makes it a byte bigger

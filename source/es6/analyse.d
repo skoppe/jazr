@@ -1253,6 +1253,8 @@ void shread(Node node)
 	{
 		case NodeType.FunctionDeclarationNode:
 		case NodeType.FunctionExpressionNode:
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.GeneratorExpressionNode:
 			Scope parentScp;
 			// remove scope from parent
 			if (node.children[$-1].branch)

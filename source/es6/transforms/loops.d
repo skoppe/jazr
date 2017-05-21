@@ -35,8 +35,10 @@ version (unittest)
 IfStatementNode getSurroundingIfStatement(Node node)
 {
 	auto parent = node.parent;
-	if (parent.type == NodeType.BlockStatementNode && parent.parent.type == NodeType.IfStatementNode)
-		return parent.parent.as!IfStatementNode;
+	if (parent is null)
+		return null;
+	if (parent.type == NodeType.BlockStatementNode)
+		return node.parent.getSurroundingIfStatement();
 	else if (parent.type == NodeType.IfStatementNode)
 		return parent.as!IfStatementNode;
 	return null;
@@ -44,8 +46,10 @@ IfStatementNode getSurroundingIfStatement(Node node)
 ForStatementNode getSurroundingForStatement(Node node)
 {
 	auto parent = node.parent;
-	if (parent.type == NodeType.BlockStatementNode && parent.parent.type == NodeType.ForStatementNode)
-		return parent.parent.as!ForStatementNode;
+	if (parent is null)
+		return null;
+	if (parent.type == NodeType.BlockStatementNode)
+		return node.parent.getSurroundingForStatement();
 	else if (parent.type == NodeType.ForStatementNode)
 		return parent.as!ForStatementNode;
 	return null;
@@ -71,6 +75,8 @@ bool negateIfContinue(ContinueStatementNode cont, out Node replacedWith)
 			break;
 		if (walk.type == NodeType.WhileStatementNode ||
 			walk.type == NodeType.DoWhileStatementNode)
+			return false;
+		if (walk.parent is null)
 			return false;
 		if (walk.parent.type == NodeType.BlockStatementNode)
 			if (walk.parent.children[$-1] !is walk)
@@ -163,6 +169,10 @@ unittest
 
 	alias assertNegateIfContinue = assertTransformations!(negateIfContinue);
 	
+	assertNegateIfContinue(
+		`if(condition=='timeout'){continue;console.log('\'waitFor()\' timeout');phantom.exit(1)}`,
+		`if(condition=='timeout'){continue;console.log('\'waitFor()\' timeout');phantom.exit(1)}`
+	);
 	assertNegateIfContinue(
 		`for(;;) { if (a) continue; b() }`,
 		`for(;;) { if (!a) { b() } }`

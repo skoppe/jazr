@@ -27,9 +27,11 @@ import std.traits : Unqual;
 import std.typecons : tuple;
 import core.cpuid : sse42;
 import core.simd;
+
+//version = tracing;
+//version = chatty;
 version(LDC)
 {
-	// TODO: turned off due to tests/angular2-testing-2.0.0.js giving range exception
 	static if (__traits(targetHasFeature, "sse4.2"))
 	{
 		import core.simd;
@@ -54,6 +56,12 @@ version (unittest)
 	import std.stdio;
 	import std.algorithm : equal;
 }
+version (tracing)
+{
+	import std.stdio;
+}
+enum InvalidUTF8 = size_t.max;
+
 enum State
 {
 	TokensRemaining,
@@ -73,7 +81,8 @@ enum Goal
 	Yield = 1 << 1,
 	Return = 1 << 2,
 	Default = 1 << 3,
-	NoRegex = 1 << 4
+	NoRegex = 1 << 4,
+	NoEmptyParen = 1 << 5
 }
 
 bool isWhitespace(Char)(Char c) nothrow
@@ -88,9 +97,12 @@ bool isWhitespace(Char)(Char c) nothrow
 }
 size_t getWhiteSpaceLength(Range)(Range r, size_t idx = 0) nothrow
 {
-	if (r[idx] < 0xc0) // 1 byte code point
+	if (r[idx] < 0x80) // 1 byte code point
 	{
 		return (r[idx] == 0x09 || r[idx] == 0x0B || r[idx] == 0x0C || r[idx] == 0x20) ? 1 : 0;
+	} else if (r[idx] < 0xc0)
+	{
+		return 0;
 	} else if (r[idx] < 0xe0) // 2 byte code point
 	{
 		return (r.decodeUnicodeCodePoint!(2)(idx) == 0xA0) ? 2 : 0;
@@ -141,7 +153,7 @@ unittest
 //}
 size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0) pure nothrow
 {
-	if (r[idx] <= 0x7f)
+	if (r[idx] < 0x80)
 	{
 		if (r[idx] == 0x0d)
 			return r[idx+1] == 0x0a ? 2 : 1;
@@ -159,18 +171,46 @@ size_t getLineTerminatorLength(Range)(Range r, size_t idx = 0) pure nothrow
 }
 auto getLineTerminatorUnicodeLength(Range)(Range r) pure nothrow
 {
-	if (r[0] < 0xe0 && r[0] >= 0xf0)
+	if (r[0] < 0xe0 || r[0] >= 0xf0)
 		return 0;
 	auto hex = r.decodeUnicodeCodePoint!3;	// 3 byte unicode
 	return (hex == 0x2028 || hex == 0x2029) ? 3 : 0;
 }
-bool isLineTerminator(uint cp)
+bool isLineTerminator(size_t cp)
 {
 	if (cp <= 0x7f)
 	{
 		return cp == 0x0d || cp == 0x0a;
 	}
 	return cp == 0x2028 || cp == 0x2029;
+}
+ulong decodeCodePoint(Range)(Range r, size_t idx = 0) pure nothrow
+{
+	if (r[idx] <= 0x7f)
+		return r[idx];
+	if (r[idx] >= 0xf0) // 4 byte unicode
+	{
+		if (r[idx] >= 0xf7)
+			return InvalidUTF8;
+		return r.decodeUnicodeCodePoint!4(idx);	// 4 byte unicode
+	} else if (r[idx] >= 0xe0)
+	{
+		return r.decodeUnicodeCodePoint!3(idx);	// 3 byte unicode
+	} else if (r[idx] >= 0xc0)
+	{
+		return r.decodeUnicodeCodePoint!2(idx);	// 2 byte unicode
+	}
+	return InvalidUTF8;
+}
+size_t getCodePointLength(ulong cp) pure nothrow @nogc
+{
+	if (cp >= 0xf0)
+		return 4;
+	if (cp >= 0xe0)
+		return 3;
+	if (cp >= 0xc0)
+		return 2;
+	return 1;
 }
 @("isLineTerminator")
 unittest
@@ -220,7 +260,7 @@ auto getRegexLength(Range)(Range r, ref size_t tokenLength) pure nothrow
 				{
 					while (true)
 					{
-						auto len = r[idx..$].getTailIdentifierLength();
+						auto len = r.getTailIdentifierLength(idx);
 						if (len == 0)
 							return idx;
 						tokenLength++;
@@ -230,12 +270,17 @@ auto getRegexLength(Range)(Range r, ref size_t tokenLength) pure nothrow
 				break;
 			default:
 				tokenLength++;
-				auto len = r[idx..$].getLineTerminatorLength();
+				auto len = r.getLineTerminatorLength(idx);
+				if (len == InvalidUTF8)
+					return InvalidUTF8;
 				if (len != 0)
 					return 0;
 				if (r[idx] == 0)
 					return 0;
-				idx += r[idx..$].getUnicodeLength();
+				len = r.getUnicodeLength(idx);
+				if (len == InvalidUTF8)
+					return InvalidUTF8;
+				idx += len;
 				break;
 		}
 	}
@@ -263,6 +308,8 @@ bool isAmongRangeList(size_t cp, const int[] list) nothrow pure
 			offset += (len / 2) + 1;
 			len = (len - 1) / 2;
 			idx = offset + (len / 2);
+			if (len == 0)
+				return false;
 		} else
 			return true;
 	}
@@ -320,6 +367,7 @@ unittest
 	isValid2ByteIdentifierStart(0x2aa).shouldBeTrue;
 	isValid2ByteIdentifierStart(0xd7).shouldBeFalse;
 	isValid2ByteIdentifierStart(0x2c5).shouldBeFalse;
+	isValid2ByteIdentifierStart(0x60c).shouldBeFalse;
 	isValid3ByteIdentifierStart(0xca0).shouldBeTrue;
 }
 @("isValidByteIdentifierTail")
@@ -331,37 +379,52 @@ unittest
 	isValid3ByteIdentifierTail(0xffdc).shouldBeTrue;
 }
 
-auto getStartIdentifierLength(Range)(Range r, size_t idx = 0) nothrow
-	if (is (ElementType!Range : ubyte))
+size_t getStartIdentifierLength(Range)(Range r, size_t idx = 0) nothrow
 {
 	if (r[idx] <= 0x7f)
 		return (r[idx] == '$' || r[idx] == '_' || (r[idx] >= '\x41' && r[idx] <= '\x5a') || (r[idx] >= '\x61' && r[idx] <= '\x7a')) ? 1 : 0;
 	if (r[idx] >= 0xf0) // 4 byte unicode
 	{
+		if (r[idx] >= 0xf7)
+			return InvalidUTF8;
 		auto hex = r.decodeUnicodeCodePoint!4(idx);	// 4 byte unicode
+		if (hex == InvalidUTF8)
+			return InvalidUTF8;
 		return hex.isValid4ByteIdentifierStart ? 4 : 0;
 	} else if (r[idx] >= 0xe0)
 	{
 		auto hex = r.decodeUnicodeCodePoint!3(idx);	// 3 byte unicode
+		if (hex == InvalidUTF8)
+			return InvalidUTF8;
 		return hex.isValid3ByteIdentifierStart ? 3 : 0;
 	} else if (r[idx] >= 0xc0)
 	{
 		auto hex = r.decodeUnicodeCodePoint!2(idx);	// 2 byte unicode
+
+		if (hex == InvalidUTF8)
+			return InvalidUTF8;
 		return hex.isValid2ByteIdentifierStart ? 2 : 0;
 	}
-	return 0;
+	return InvalidUTF8;
 }
 
 size_t decodeUnicodeCodePoint(size_t length, Range)(Range r, size_t idx = 0) pure nothrow
 {
+	// todo we can probably vectorize these utf8 decoding checks
 	static if (length == 2)
 	{
+		if (r[idx+1] < 0x80)
+			return InvalidUTF8;
 		return ((r[idx] & 0x1f) << 6) | (r[idx+1] & 0x3f);
 	} else static if (length == 3)
 	{
+		if (r[idx+1] < 0x80 || r[idx+2] < 0x80)
+			return InvalidUTF8;
 		return ((r[idx] & 0x0f) << 12) | ((r[idx+1] & 0x3f) << 6) | (r[idx+2] & 0x3f);
 	} else static if (length == 4)
 	{
+		if (r[idx+1] < 0x80 || r[idx+2] < 0x80 || r[idx+3] < 0x80)
+			return InvalidUTF8;
 		return ((r[idx] & 0x07) << 18) | ((r[idx+1] & 0x3f) << 12) | ((r[idx+2] & 0x3f) << 6) | (r[idx+3] & 0x3f);
 	}
 	static assert("Invalid unicode code point byte length");
@@ -376,13 +439,15 @@ unittest {
 }
 size_t getUnicodeLength(Range)(Range r, size_t idx = 0) pure nothrow @nogc
 {
-	if (r[idx] < 0xc0)
-		return 1;
-	if (r[idx] < 0xe0)
-		return 2;
-	if (r[idx] < 0xf0)
-		return 3;
-	return 4;
+	size_t length = getCodePointLength(r[idx]);
+	if (length == InvalidUTF8)
+		return InvalidUTF8;
+	version (unittest)
+		assert(r.length > idx+length);
+	foreach(i; 1..length)
+		if (r[idx+i] < 0x80)
+			return InvalidUTF8;
+	return length;
 }
 
 template unicodeRepresentation(uint i) {
@@ -417,18 +482,26 @@ auto getTailIdentifierLength(Range)(Range r, size_t idx = 0) pure nothrow
 		return ((r[idx] >= 0x61 && r[idx] <= 0x7a) || (r[idx] >= 0x41 && r[idx] <= 0x5a) || (r[idx] >= 0x30 && r[idx] <= 0x39) || r[idx] == '$' || r[idx] == '_' || r[idx] == 0x5f) ? 1 : 0;
 	if (r[idx] >= 0xf0) // 4 byte unicode
 	{
+		if (r[idx] >= 0xf7)
+			return InvalidUTF8;
 		auto hex = r.decodeUnicodeCodePoint!4(idx);	// 4 byte unicode
+		if (hex == InvalidUTF8)
+			return InvalidUTF8;
 		return hex.isValid4ByteIdentifierTail ? 4 : 0;
 	} else if (r[idx] >= 0xe0)
 	{
 		auto hex = r.decodeUnicodeCodePoint!3(idx);	// 3 byte unicode
+		if (hex == InvalidUTF8)
+			return InvalidUTF8;
 		return hex.isValid3ByteIdentifierTail ? 3 : 0;
 	} else if (r[idx] >= 0xc0)
 	{
 		auto hex = r.decodeUnicodeCodePoint!2(idx);	// 2 byte unicode
+		if (hex == InvalidUTF8)
+			return InvalidUTF8;
 		return hex.isValid2ByteIdentifierTail ? 2 : 0;
 	}
-	assert(0);
+	return InvalidUTF8;
 }
 
 @("getTailIdentifierLength")
@@ -601,6 +674,17 @@ template Index(size_t idx, c...)
 		enum Index = '\0';
 }
 
+size_t lengthToNextUnicodeCodePoint(Range)(Range s, size_t idx)
+{
+	size_t off = 0;
+	for(;;off++)
+	{
+		if (s[idx+off] < 0x80)
+			break;
+	}
+	return off;
+}
+
 // TODO: in general whenever we have an invalid char (e.g. an a-z in a decimalliteral), we need to skip all chars until we hit a separator (whitespace or punctuation)
 struct Lexer
 {
@@ -613,6 +697,7 @@ struct Lexer
 	Token token;
 	size_t line;
 	size_t column;
+	bool recentSeparator = false;
 	private size_t tokenLength;	// TODO: is actually a wrong name. should be something meaning: the length on the current line
 	private size_t _tokenLines;
 	@property size_t tokenLines() { return _tokenLines; }
@@ -654,6 +739,15 @@ struct Lexer
 		auto scanToken(Goal goal = Goal.None, in string file = __FILE__, in size_t orgLine = __LINE__)
 		{
 			//return measure!("Scantoken",(){
+				if (token.type == Type.SingleLineComment || token.type == Type.LineTerminator || token.type == Type.Semicolon)
+				{
+					recentSeparator = true;
+				} else if (token.type == Type.MultiLineComment)
+				{
+					if (_tokenLines != 0)
+						recentSeparator = true;
+				} else
+					recentSeparator = false;
 				if (_tokenLines > 0)
 				{
 					line += _tokenLines;
@@ -664,7 +758,7 @@ struct Lexer
 				_tokenLines = 0;
 				token = lexToken(goal);
 				version(chatty) { 
-					import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s",token, goal, line, column, tokenLength, file,orgLine); 
+					import std.stdio; writefln("Scan: %s with %s @%s:%s %s called from %s:%s (prev newLine: %s)",token, goal, line, column, tokenLength, file,orgLine, recentSeparator); 
 				}
 				return token;
 			//});
@@ -674,6 +768,15 @@ struct Lexer
 		auto scanToken(Goal goal = Goal.None)
 		{
 			//return measure!("Scantoken",(){
+				if (token.type == Type.SingleLineComment || token.type == Type.LineTerminator || token.type == Type.Semicolon)
+				{
+					recentSeparator = true;
+				} else if (token.type == Type.MultiLineComment)
+				{
+					if (_tokenLines != 0)
+						recentSeparator = true;
+				} else
+					recentSeparator = false;
 				if (_tokenLines > 0)
 				{
 					line += _tokenLines;
@@ -683,17 +786,26 @@ struct Lexer
 				tokenLength = 0;
 				_tokenLines = 0;
 				token = lexToken(goal);
-				version(chatty) { import std.stdio; writefln("Scan: %s with %s @%s:%s %s called",token, goal, line, column, tokenLength); }
+				version(chatty) { 
+					import std.stdio; writefln("Scan: %s with %s @%s:%s %s (prev newLine: %s)",token, goal, line, column, tokenLength, recentSeparator); 
+				}
 				return token;
 			//});
 		}
+	}
+	template traceFunction(string fun)
+	{
+		version (tracing) {
+			enum traceFunction = 
+				`writeln("`~fun~`");`;
+		} else enum traceFunction = "";
 	}
 	private auto createTokenAndAdvance(Type tokenType, size_t len, const (ubyte)[] match) nothrow
 	{
 		s = s[len..$];
 		return Token(tokenType, match);
 	}
-	private auto createTokenAndAdvance(Type tokenType, size_t len, string match) nothrow
+	private auto createTokenAndAdvance(Type tokenType, size_t len, string match = "") nothrow
 	{
 		s = s[len..$];
 		return Token(tokenType, match);
@@ -729,9 +841,16 @@ struct Lexer
 	}
 	Token lexStartIdentifier(ref size_t idx)
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		import std.format : format;
 		auto chr = s[idx];
 		auto len = s.getStartIdentifierLength(idx);
+		if (len == InvalidUTF8)
+		{
+			idx += s.lengthToNextUnicodeCodePoint(idx);
+			tokenLength += 1;
+			return Token(Type.InvalidUTF8);
+		}
 		if (len > 0)
 		{
 			idx += len;
@@ -747,6 +866,7 @@ struct Lexer
 	}
 	Token lexUnicodeEscapeSequence(ref size_t idx)
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		import std.format : format;
 		assert(s[idx] == '\\');
 		idx++;
@@ -772,7 +892,14 @@ struct Lexer
 	}
 	Token lexTailIdentifier(ref size_t idx)
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		auto len = s.getTailIdentifierLength(idx);
+		if (len == InvalidUTF8)
+		{
+			idx += s.lengthToNextUnicodeCodePoint(idx);
+			tokenLength += 1;
+			return Token(Type.InvalidUTF8);
+		}
 		if (len > 0)
 		{
 			idx += len;
@@ -787,6 +914,7 @@ struct Lexer
 	}
 	Token lexIdentifier() @trusted
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		import std.format : format;
 		size_t idx = 0;
 		version (iasm64NotWindows)
@@ -801,7 +929,7 @@ struct Lexer
 				} else
 				{
 					auto t = lexStartIdentifier(idx);
-					if (t.type == Type.Error)
+					if (t.type == Type.Error || t.type == Type.InvalidUTF8)
 					{
 						s = s[idx..$];
 						return t;
@@ -810,7 +938,7 @@ struct Lexer
 			//}
 		} else {
 			auto t = lexStartIdentifier(idx);
-			if (t.type == Type.Error)
+			if (t.type == Type.Error || t.type == Type.InvalidUTF8)
 			{
 				s = s[idx..$];
 				return t;
@@ -819,7 +947,7 @@ struct Lexer
 		for(;;)
 		{
 			auto t2 = lexTailIdentifier(idx);
-			if (t2.type == Type.Error)
+			if (t2.type == Type.Error || t2.type == Type.InvalidUTF8)
 			{
 				s = s[idx..$];
 				return t2;
@@ -834,6 +962,7 @@ struct Lexer
 	}
 	void popWhitespace() @trusted
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		size_t idx = 0;
 		for (;;)
 		{
@@ -876,8 +1005,9 @@ struct Lexer
 	}
 	Token lexString() @trusted
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		auto type = s.front();	// either " or '
-		tokenLength++;
+		column++;
 		size_t idx = 1;
 		while (true)
 		{
@@ -885,9 +1015,9 @@ struct Lexer
 			{
 				ulong i;
 				if (type == '\'')
-					i = skip!(false, '\n', '\\', '\'')(s.ptr + idx);
+					i = skip!(false, '\n', '\\', '\'', '\0')(s.ptr + idx);
 				else
-					i = skip!(false, '\n', '\\', '\"')(s.ptr + idx);
+					i = skip!(false, '\n', '\\', '\"', '\0')(s.ptr + idx);
 				if (i > 0)
 				{
 					idx += i;
@@ -896,42 +1026,60 @@ struct Lexer
 				if (i == 16)
 					continue;
 			}
-			// TODO: lineterminators are not allowed!
-			auto len = s.getUnicodeLength(idx);
-			switch (len)
+			auto codePoint = s.decodeCodePoint(idx);
+			if (codePoint < 0x80)
 			{
-				case 1:
-					ubyte chr = s[idx++];
-					tokenLength++;
-					if (chr == type)
-					{
-						if (type == '"')
-							return createTokenAndAdvance(Type.StringLiteral,idx,s[1..idx-1].coerceToSingleQuotedString);
-						return createTokenAndAdvance(Type.StringLiteral,idx,s[1..idx-1]);
-					}
-					switch (chr)
-					{
-						case '\\':
-							if (s[idx] == 0)
-								goto eof;
-							idx += s.getUnicodeLength(idx);
-							tokenLength++;
-							break;
-						case 0:
+				ubyte chr = s[idx++];
+				column++;
+				if (chr == type)
+				{
+					if (type == '"')
+						return createTokenAndAdvance(Type.StringLiteral,idx,s[1..idx-1].coerceToSingleQuotedString);
+					return createTokenAndAdvance(Type.StringLiteral,idx,s[1..idx-1]);
+				}
+				switch (chr)
+				{
+					case 0x0d:
+						if (s[idx] == '\x0a')
+						{
+							column++;
+							idx++;
+						}
+						goto case 0x0a;
+					case 0x0a:
+						return createTokenAndAdvance(Type.Error,idx,"Invalid new line in string");
+					case '\\':
+						if (s[idx] == 0)
 							goto eof;
-						default:
-							break;
-					}
-					break;
-				default:
-					idx += len;
-					break;
+						auto cp = s.decodeCodePoint(idx);
+						auto len = cp == InvalidUTF8 ? 1 : getCodePointLength(cp);
+						idx += len;
+						column++;
+						break;
+					case 0:
+						goto eof;
+					default:
+						break;
+				}
+			} else {
+				if (codePoint == InvalidUTF8)
+				{
+					idx += 1;
+					column ++;
+					continue;
+				}
+				idx += getCodePointLength(codePoint);
+				column ++;
+				if (codePoint == 0x2028 || codePoint == 0x2029)
+					return createTokenAndAdvance(Type.Error,idx,"Invalid new line in string");
+				break;
 			}
 		}
 		eof: return createTokenAndAdvance(Type.Error,idx,"Invalid eof while lexing string");
 	}
 	Token lexBaseLiteral(int base, alias TokenType)(bool isFloat = false)
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		static assert(base >= 1 && base <= 16,"Can only lex base 1..16 NumericLiterals");
 		import std.array : appender;
 		import std.format : format;
@@ -1010,7 +1158,8 @@ struct Lexer
 					auto len = s.getTailIdentifierLength(idx);
 					if (len == 0)
 						return createTokenAndAdvance(TokenType,idx,s[0..idx]);
-					// if it is whitespace we are done, else we need to advance the idx with unicodeLength and
+					if (len == InvalidUTF8)
+						return createTokenAndAdvance(Type.InvalidUTF8,idx);
 					return createTokenAndAdvance(Type.Error,idx,format("Invalid char (%s) in NumericLiteral",cast(char)chr));
 			}
 		}
@@ -1034,6 +1183,7 @@ struct Lexer
 	}
 	Token lexTemplateLiteral(Type t = Type.Template)
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		import std.array : appender;
 		size_t idx = 0;
 		while (true)
@@ -1056,18 +1206,22 @@ struct Lexer
 					idx++;
 					if (s[idx] == 0)
 						goto eof;
-					idx += s.getUnicodeLength(idx);
+					auto len = s.getUnicodeLength(idx);
+					if (len == InvalidUTF8)
+						return createTokenAndAdvance(Type.InvalidUTF8,idx,s[0..idx]);
+					idx += len;
 					break;
 				default:
-					auto len = s.getLineTerminatorLength(idx);
-					if (len == 0)
-						idx += s.getUnicodeLength(idx);
-					else {
+					auto cp = s.decodeCodePoint(idx);
+					if (cp == InvalidUTF8)
+						return createTokenAndAdvance(Type.InvalidUTF8,idx,s[0..idx]);
+					if (cp.isLineTerminator)
+					{
 						line += 1;
 						column = 0;
 						tokenLength = 0;
-						idx += len;
 					}
+					idx += cp.getCodePointLength();
 			}
 		}
 		eof: return Token(Type.Error,"Found eof before finishing lexing TemplateLiteral");
@@ -1117,6 +1271,7 @@ struct Lexer
 	}
 	Token lexMultiLineComment() @trusted
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		size_t idx = 0;
 		for(;;)
 		{
@@ -1147,17 +1302,22 @@ struct Lexer
 				continue;
 			} else if (chr == 0)
 				goto eof;
-			// TODO: we can do better here by determining line terminator and unicode length in one (there are also other places)
-			auto len = s.getLineTerminatorLength(idx);
-			if (len == 0)
+
+			auto cp = s.decodeCodePoint(idx);
+			if (cp == InvalidUTF8)
 			{
-				len = s.getUnicodeLength(idx);
-				idx += len;
+				idx ++;
 				column++;
-			} else {
-				idx += len;
+			}
+			else if (cp.isLineTerminator())
+			{
+				idx++;
 				_tokenLines++;
 				column=0;
+			} else
+			{
+				idx += cp.getCodePointLength();
+				column++;
 			}
 		}
 		eof:
@@ -1165,74 +1325,79 @@ struct Lexer
 	}
 	Token lexSingleLineComment() @trusted
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		size_t idx = 0;
-		start:
-		version (iasm64NotWindows)
+		size_t cp;
+		for(;;)
 		{
-			//if (haveSSE42)
-			//{
-				// NOTE: if whole comment is full with unicode stuff we waste alot of time calling the expensive sse4.2 instruction
-				immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
-				idx += i;
-				tokenLength += i;
-				if (i == 16)
-					goto start;
-			//}
+			version (iasm64NotWindows)
+			{
+				//if (haveSSE42)
+				//{
+					// NOTE: if whole comment is full with unicode stuff we waste alot of time calling the expensive sse4.2 instruction
+					immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
+					idx += i;
+					tokenLength += i;
+					if (i == 16)
+						continue;
+				//}
+			}
+			cp = s.decodeCodePoint(idx);
+			if (cp == InvalidUTF8)
+			{
+				idx++;
+			} else if (cp.isLineTerminator() || cp == 0)
+				break;
+			else
+				idx += cp.getCodePointLength();
 		}
-		auto len = s.getLineTerminatorLength(idx);
-		if (len == 0 && s[idx] != 0)
-		{
-			len = s.getUnicodeLength(idx);
-			idx += len;
-			tokenLength++;
-		} else
-		{
-			auto tok = Token(Type.SingleLineComment,s[0..idx]);
-			idx += len;
-			_tokenLines++;
-			tokenLength = 0;
-			s = s[idx..$];
-			return tok;
-		}
-		goto start;
+		auto tok = Token(Type.SingleLineComment,s[0..idx]);
+		idx += cp.getCodePointLength();
+		_tokenLines++;
+		tokenLength = 0;
+		s = s[idx..$];
+		return tok;
 	}
 	Token lexSheBang() @trusted
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		assert(s[0] == '#');
 		assert(s[1] == '!');
 		size_t idx = 0;
-		start:
-		version (iasm64NotWindows)
+		size_t cp;
+		for(;;)
 		{
-			//if (haveSSE42)
-			//{
-				// NOTE: if whole she-bang is full with unicode stuff we waste alot of time calling the expensive sse4.2 instruction
-				immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
-				idx += i;
-				tokenLength += i;
-				if (i == 16)
-					goto start;
-			//}
+			version (iasm64NotWindows)
+			{
+				//if (haveSSE42)
+				//{
+					// NOTE: if whole comment is full with unicode stuff we waste alot of time calling the expensive sse4.2 instruction
+					immutable ulong i = skip!(false, '\n', '\r', '\xE2', '\x00')(s.ptr + idx);
+					idx += i;
+					tokenLength += i;
+					if (i == 16)
+						continue;
+				//}
+			}
+			cp = s.decodeCodePoint(idx);
+			if (cp == InvalidUTF8)
+			{
+				idx++;
+			} else if (cp.isLineTerminator() || cp == 0)
+				break;
+			else
+				idx += cp.getCodePointLength();
 		}
-		auto len = s.getLineTerminatorLength(idx);
-		if (len == 0 && s[idx] != 0)
-		{
-			len = s.getUnicodeLength(idx);
-			idx += len;
-			column ++;
-		} else
-		{
-			auto tok = Token(Type.SheBang,s[0..idx]);
-			idx += len;
-			_tokenLines += 1;
-			column = 0;
-			s = s[idx..$];
-			return tok;
-		}
-		goto start;
+		auto tok = Token(Type.SingleLineComment,s[0..idx]);
+		idx += cp.getCodePointLength();
+		_tokenLines++;
+		tokenLength = 0;
+		s = s[idx..$];
+		return tok;
 	}
 	Token lexToken(Goal goal = Goal.None)
 	{
+		mixin(traceFunction!(__FUNCTION__));
 		popWhitespace();
 		auto chr = s.front();
 
@@ -1460,6 +1625,12 @@ struct Lexer
 				if (goal != Goal.NoRegex)
 				{
 					auto len = lookAheadRegex;
+					if (len == InvalidUTF8)
+					{
+						len = lengthToNextUnicodeCodePoint(s,0);
+						tokenLength++;
+						return createTokenAndAdvance(Type.InvalidUTF8,len,s[0..len]);
+					}
 					if (len > 0)
 						return createTokenAndAdvance(Type.Regex,len,s[0..len]);
 				}
@@ -1942,7 +2113,165 @@ unittest
 	lexer = createLexer("..");
 	lexer.scanToken().shouldEqual(Token(Type.Error,"One dot too few or too less"));
 }
+@("Invalid UTF8")
+unittest
+{
+// we can also tests unicode code points where the encoding is missing its last byte
 
+	[0x81].getWhiteSpaceLength().shouldEqual(0);
+	[0xa0].getWhiteSpaceLength().shouldEqual(0);
+	[0xff].getWhiteSpaceLength().shouldEqual(0);
+
+	[0x81].getLineTerminatorLength().shouldEqual(0);
+	[0xa0].getLineTerminatorLength().shouldEqual(0);
+	[0xff].getLineTerminatorLength().shouldEqual(0);
+
+	[0x81,0x00,0x00].getLineTerminatorUnicodeLength().shouldEqual(0);
+	[0xa0,0x00,0x00].getLineTerminatorUnicodeLength().shouldEqual(0);
+	[0xe0,0x00,0x00].getLineTerminatorUnicodeLength().shouldEqual(0);
+	[0xff,0x00,0x00].getLineTerminatorUnicodeLength().shouldEqual(0);
+
+	[0x81,0x00,0x00,0x00].decodeCodePoint().shouldEqual(InvalidUTF8);
+	[0xa0,0x00,0x00,0x00].decodeCodePoint().shouldEqual(InvalidUTF8);
+	[0xc0,0x00,0x00,0x00].decodeCodePoint().shouldEqual(InvalidUTF8);
+	[0xe0,0x00,0x00,0x00].decodeCodePoint().shouldEqual(InvalidUTF8);
+	[0xff,0x00,0x00,0x00].decodeCodePoint().shouldEqual(InvalidUTF8);
+
+	//getCodePointLength(0x81).shouldEqual(InvalidUTF8);
+	//getCodePointLength(0xf8).shouldEqual(InvalidUTF8);
+
+	{
+		size_t dummy;
+		// slash followed by incomplete code point (missing last byte)
+		['/',0xF0,0x90,0x8D,0x0,0x0].getRegexLength(dummy).shouldEqual(InvalidUTF8);
+		['/',0xF0,0x90,0x8D,0x0,0x0].getRegexLength(dummy).shouldEqual(InvalidUTF8);
+		['/',0xE0,0x90,0x00,0x0,0x0].getRegexLength(dummy).shouldEqual(InvalidUTF8);
+		['/',0xC0,0x00,0x00,0x0,0x0].getRegexLength(dummy).shouldEqual(InvalidUTF8);
+	}
+
+	[0x81].getStartIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xFF].getStartIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xF0,0x00,0x00,0x00].getStartIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xE0,0x00,0x00].getStartIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xC0,0x00,0x00].getStartIdentifierLength().shouldEqual(InvalidUTF8);
+
+	[0xF0,0x00,0x00,0x00].decodeUnicodeCodePoint!4().shouldEqual(InvalidUTF8);
+	[0xE0,0x00,0x00].decodeUnicodeCodePoint!3().shouldEqual(InvalidUTF8);
+	[0xC0,0x00].decodeUnicodeCodePoint!2().shouldEqual(InvalidUTF8);
+
+	//[0xFF].getUnicodeLength().shouldEqual(InvalidUTF8);
+	[0xF0,0x00,0x00,0x00,0x00].getUnicodeLength().shouldEqual(InvalidUTF8);
+	[0xE0,0x00,0x00,0x00].getUnicodeLength().shouldEqual(InvalidUTF8);
+	[0xC0,0x00,0x00].getUnicodeLength().shouldEqual(InvalidUTF8);
+
+	[0x81].getTailIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xFF].getTailIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xF0,0x00,0x00,0x00].getTailIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xE0,0x00,0x00].getTailIdentifierLength().shouldEqual(InvalidUTF8);
+	[0xC0,0x00,0x00].getTailIdentifierLength().shouldEqual(InvalidUTF8);
+
+	auto lexStartIdentifier(const (ubyte)[] data)
+	{
+		size_t dummy;
+		auto lexer = createLexer(data);
+		return lexer.lexStartIdentifier(dummy);
+	}
+	lexStartIdentifier([cast(ubyte)0x81]).shouldEqual(Token(Type.InvalidUTF8));
+	lexStartIdentifier([cast(ubyte)0xFF]).shouldEqual(Token(Type.InvalidUTF8));
+	lexStartIdentifier([cast(ubyte)0xF0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexStartIdentifier([cast(ubyte)0xE0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexStartIdentifier([cast(ubyte)0xC0]).shouldEqual(Token(Type.InvalidUTF8));
+	
+	auto lexTailIdentifier(const (ubyte)[] data)
+	{
+		size_t dummy;
+		auto lexer = createLexer(data);
+		return lexer.lexTailIdentifier(dummy);
+	}
+	lexTailIdentifier([cast(ubyte)0x81]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTailIdentifier([cast(ubyte)0xFF]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTailIdentifier([cast(ubyte)0xF0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTailIdentifier([cast(ubyte)0xE0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTailIdentifier([cast(ubyte)0xC0]).shouldEqual(Token(Type.InvalidUTF8));
+
+	auto lexIdentifier(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexIdentifier();
+	}
+	lexIdentifier([cast(ubyte)0x81]).shouldEqual(Token(Type.InvalidUTF8));
+	lexIdentifier([cast(ubyte)0xFF]).shouldEqual(Token(Type.InvalidUTF8));
+	lexIdentifier([cast(ubyte)0xF0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexIdentifier([cast(ubyte)0xE0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexIdentifier([cast(ubyte)0xC0]).shouldEqual(Token(Type.InvalidUTF8));
+
+	auto lexString(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexString();
+	}
+	lexString([cast(ubyte)'"',0x81,'"']).shouldEqual(Token(Type.StringLiteral,"\x81"));
+	lexString([cast(ubyte)'"',0xFF,'"']).shouldEqual(Token(Type.StringLiteral,"\xFF"));
+	lexString([cast(ubyte)'"',0xF0,'"']).shouldEqual(Token(Type.StringLiteral,"\xF0"));
+	lexString([cast(ubyte)'"',0xE0,'"']).shouldEqual(Token(Type.StringLiteral,"\xE0"));
+	lexString([cast(ubyte)'"',0xC0,'"']).shouldEqual(Token(Type.StringLiteral,"\xC0"));
+
+	auto lexBinaryLiteral(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexBinaryLiteral();
+	}
+	lexBinaryLiteral([cast(ubyte)0x81]).shouldEqual(Token(Type.InvalidUTF8));
+	lexBinaryLiteral([cast(ubyte)0xFF]).shouldEqual(Token(Type.InvalidUTF8));
+	lexBinaryLiteral([cast(ubyte)0xF0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexBinaryLiteral([cast(ubyte)0xE0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexBinaryLiteral([cast(ubyte)0xC0]).shouldEqual(Token(Type.InvalidUTF8));
+
+	auto lexTemplateLiteral(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexTemplateLiteral();
+	}
+	lexTemplateLiteral([cast(ubyte)0x81]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTemplateLiteral([cast(ubyte)0xFF]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTemplateLiteral([cast(ubyte)0xF0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTemplateLiteral([cast(ubyte)0xE0]).shouldEqual(Token(Type.InvalidUTF8));
+	lexTemplateLiteral([cast(ubyte)0xC0]).shouldEqual(Token(Type.InvalidUTF8));
+
+	auto lexMultiLineComment(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexMultiLineComment();
+	}
+	lexMultiLineComment([cast(ubyte)0x81]).shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
+	lexMultiLineComment([cast(ubyte)0xFF]).shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
+	lexMultiLineComment([cast(ubyte)0xF0]).shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
+	lexMultiLineComment([cast(ubyte)0xE0]).shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
+	lexMultiLineComment([cast(ubyte)0xC0]).shouldEqual(Token(Type.Error,"Expected end of MultiLineComment before eof"));
+
+	auto lexSingleLineComment(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexSingleLineComment();
+	}
+	lexSingleLineComment([cast(ubyte)0x81]).shouldEqual(Token(Type.SingleLineComment,"\x81"));
+	lexSingleLineComment([cast(ubyte)0xFF]).shouldEqual(Token(Type.SingleLineComment,"\xFF"));
+	lexSingleLineComment([cast(ubyte)0xF0]).shouldEqual(Token(Type.SingleLineComment,"\xF0"));
+	lexSingleLineComment([cast(ubyte)0xE0]).shouldEqual(Token(Type.SingleLineComment,"\xE0"));
+	lexSingleLineComment([cast(ubyte)0xC0]).shouldEqual(Token(Type.SingleLineComment,"\xC0"));
+
+	auto lexSheBang(const (ubyte)[] data)
+	{
+		auto lexer = createLexer(data);
+		return lexer.lexSheBang();
+	}
+	lexSheBang([cast(ubyte)'#','!',0x81]).shouldEqual(Token(Type.SingleLineComment,"#!\x81"));
+	lexSheBang([cast(ubyte)'#','!',0xFF]).shouldEqual(Token(Type.SingleLineComment,"#!\xFF"));
+	lexSheBang([cast(ubyte)'#','!',0xF0]).shouldEqual(Token(Type.SingleLineComment,"#!\xF0"));
+	lexSheBang([cast(ubyte)'#','!',0xE0]).shouldEqual(Token(Type.SingleLineComment,"#!\xE0"));
+	lexSheBang([cast(ubyte)'#','!',0xC0]).shouldEqual(Token(Type.SingleLineComment,"#!\xC0"));
+
+}
 auto byLines(string input)
 {
 	import std.stdio;

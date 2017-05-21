@@ -286,6 +286,8 @@ unittest
 
 bool simplifyComparisions(BinaryExpressionNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	import std.algorithm : remove;
 	bool didWork = false;
 	size_t off;
@@ -352,10 +354,24 @@ unittest
 		`6 > 8 && b || 'bla' !== 'bla' && 6 < c`,
 		`false && b || false && 6 < c;`
 	);
+	assertSimplifyComparisions(
+		`if (123 < 456) a();`,
+		`if (true) a();`
+	);
+	assertSimplifyComparisions(
+		`if (123 > 456) a();`,
+		`if (false) a();`
+	);
+	assertSimplifyComparisions(
+		`if (123 > b) a();`,
+		`if (123 > b) a();`
+	);
 }
 
 bool simplifyLogicalOperations(BinaryExpressionNode node, out Node replacedWith)
 {
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
 	Node getOuterBinaryExprOperand(Node node)
 	{
 		switch (node.parent.type)
@@ -621,6 +637,167 @@ unittest
 	);
 }
 
+bool simplifyArithmeticOperations(BinaryExpressionNode node, out Node replacedWith)
+{
+	version(tracing) mixin(traceTransformer!(__FUNCTION__));
+
+	import std.algorithm : remove;
+	import es6.emitter;
+
+	bool didWork = false;
+	size_t off;
+	auto ops = node.getOperators();
+	foreach (i, op; ops)
+	{
+		if (!op.operator.isArithmetic)
+			continue;
+
+		// have to check whether prev and next operators are lower precedence
+		if (i*2 > 1+off)
+		{
+			auto prevOperator = node.children[i*2-1-off].as!ExpressionOperatorNode;
+			if (prevOperator.operator.compareExprOperatorPrecedence(op.operator) > 0)
+				continue;
+		}
+		if (i+1 < ops.length)
+		{
+			auto nextOperator = node.children[i*2+3-off].as!ExpressionOperatorNode;
+			if (op.operator.compareExprOperatorPrecedence(nextOperator.operator) < 0)
+				continue;
+		}
+		
+		auto left = node.children[i*2-off].getRawValue();
+		auto right = node.children[i*2+2-off].getRawValue();
+
+		if (left.type == ValueType.NotKnownAtCompileTime ||
+			right.type == ValueType.NotKnownAtCompileTime)
+			continue;
+
+		auto result = left.doOperator(right, op.operator);
+
+		if (result.type == ValueType.NotKnownAtCompileTime)
+			continue;
+
+		auto expr = result.toUnaryExpression();
+
+		auto opLength = emit!false(op).length;
+		auto leftLength = emit!false(node.children[i*2-off]).length;
+		auto rightLength = emit!false(node.children[i*2+2-off]).length;
+
+		auto exprLength = emit!false(expr).length;
+
+		if (exprLength >= opLength+leftLength+rightLength)
+			continue;
+
+		expr.hints.add(Hint.Visited);
+		node.replaceAt(i*2-off, expr);
+
+		node.children = node.children.remove(i*2-off+1,i*2-off+2);
+
+		off += 2;
+		didWork = true;
+	}
+	if (node.children.length == 1)
+	{
+		replacedWith = node.replaceWith(node.children[0]);
+		if (replacedWith)
+			replacedWith.reanalyseHints();
+		else
+			node.reanalyseHints();
+		return true;
+	}
+	if (didWork)
+	{
+		simplifyArithmeticOperations(node, replacedWith);
+		if (replacedWith)
+			replacedWith.reanalyseHints();
+		else
+			node.reanalyseHints();
+		return true;
+	}
+	return false;
+}
+
+@("simplifyArithmeticOperations")
+unittest
+{
+	alias assertSimplifyArithmetic = assertTransformations!(simplifyArithmeticOperations);
+
+	assertSimplifyArithmetic(
+		`var a = 123 + 123`,
+		`var a = 246`
+	);
+	assertSimplifyArithmetic(
+		`var a = 123e2 + 123e4`,
+		`var a = 1242300`
+	);
+	assertSimplifyArithmetic(
+		`var a = "some" + "stuff" + "concatenated" +
+		"together";`,
+		`var a = "somestuffconcatenatedtogether"`
+	);
+	assertSimplifyArithmetic(
+		`1/0;`,
+		`1/0;`
+	);
+	assertSimplifyArithmetic(
+		`1*0.3`,
+		`0.3;`
+	);
+	assertSimplifyArithmetic(
+		`1*0.3*1.5`,
+		`0.45;`
+	);
+	assertSimplifyArithmetic(
+		`1<<23;`,
+		`1<<23;`
+	);
+	assertSimplifyArithmetic(
+		`1<<1;`,
+		`2;`
+	);
+	assertSimplifyArithmetic(
+		`1/7`,
+		`1/7`
+	);
+	assertSimplifyArithmetic(
+		`4/2`,
+		`2`
+	);
+	assertSimplifyArithmetic(
+		`7/7`,
+		`1`
+	);
+	assertSimplifyArithmetic(
+		`30/100`,
+		`0.3`
+	);
+	assertSimplifyArithmetic(
+		`'1'+2+'='`,
+		`'12='`
+	);
+	assertSimplifyArithmetic(
+		`l-2+'='`,
+		`l-2+'='`
+	);
+	assertSimplifyArithmetic(
+		`e+1+': '`,
+		`e+1+': '`
+	);
+	assertSimplifyArithmetic(
+		`56-10+12`,
+		`58`
+	);
+	assertSimplifyArithmetic(
+		`77-3+3`,
+		`77`
+	);
+	assertSimplifyArithmetic(
+		`Object({ 'toString': 0 } + '');`,
+		`Object({ 'toString': 0 } + '');`
+	);
+}
+
 bool simplifyBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 {
 	auto raw = node.resolveBinaryExpression();
@@ -634,7 +811,6 @@ bool simplifyBinaryExpressions(BinaryExpressionNode node, out Node replacedWith)
 @("simplifyBinaryExpressions")
 unittest
 {
-	version(tracing) mixin(traceTransformer!(__FUNCTION__));
 
 	alias assertSimplifyBinaryExpr = assertTransformations!(simplifyBinaryExpressions);
 	assertSimplifyBinaryExpr(
@@ -651,16 +827,32 @@ unittest
 		`var a = "somestuffconcatenatedtogether"`
 	);
 	assertSimplifyBinaryExpr(
-		`if (123 < 456) a();`,
-		`if (true) a();`
+		`1/0;`,
+		`1/0;`
 	);
 	assertSimplifyBinaryExpr(
-		`if (123 > 456) a();`,
-		`if (false) a();`
+		`1*0.3`,
+		``
 	);
 	assertSimplifyBinaryExpr(
-		`if (123 > b) a();`,
-		`if (123 > b) a();`
+		`1*0.3*1.5`,
+		``
+	);
+	assertSimplifyBinaryExpr(
+		`1*0.3*1.5`,
+		`1<<23`
+	);
+	assertSimplifyBinaryExpr(
+		`1/7`,
+		`1/7`
+	);
+	assertSimplifyBinaryExpr(
+		`4/2`,
+		`2`
+	);
+	assertSimplifyBinaryExpr(
+		`7/7`,
+		`1`
 	);
 }
 bool shortenBooleanNodes(BooleanNode node, out Node replacedWith)

@@ -222,7 +222,8 @@ enum Type {
 	UnicodeEscapeSequence,
 	StartIdentifier,
 	TailIdentifier,
-	EndIdentifier
+	EndIdentifier,
+	InvalidUTF8
 }
 
 struct Token

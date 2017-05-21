@@ -33,7 +33,7 @@ string generateErrorMessage(ErrorNode error, const(char)[] input, int around = 2
 	auto start = max(0,(cast(int)error.line)-around);
 	auto pre = (cast(int)error.line)-start+1;
 
-	auto lines = input.lineSplitter().drop(start).take((around*2)+1);
+	auto lines = input.byCodeUnit.lineSplitter().drop(start).take((around*2)+1);
 	auto lead = lines;
 	auto tail = lines.drop(pre-1);
 	auto tailLen = tail.walkLength();
@@ -46,7 +46,7 @@ string generateErrorMessage(ErrorNode error, const(char)[] input, int around = 2
 	else
 		s = "";
 	
-	return format("\n%s\n%s^ %s\n%s at %s:%s",lead.take(pre).joiner("\n"),s,cast(const(char)[])error.value,tail.drop(1).joiner("\n"),error.line,error.column);
+	return format("\n%s\n%s^ %s\n%s at %s:%s",lead.take(pre).joiner("\n".byCodeUnit),s,cast(const(char)[])error.value,tail.drop(1).joiner("\n".byCodeUnit),error.line,error.column);
 }
 void reportError(ErrorNode error, const(ubyte)[] input, int around = 2, string prefix = "")
 {

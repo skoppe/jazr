@@ -303,6 +303,7 @@ auto runTransform(fun...)(Node node, in string file = __FILE__, in size_t line =
 			replacedWith = transformNodes(c);
 			if (c.parent is null)
 			{
+				//i++;
 				continue;
 			}
 			if (replacedWith is c && replacedWith.getIndex() != i)

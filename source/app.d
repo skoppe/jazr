@@ -102,7 +102,7 @@ int main(string[] args)
 		}
 		else
 		{
-			input = cast(const(ubyte)[])stdin.byChunk(4096).map!(c=>cast(char[])c).joiner.to!string;
+			input = cast(const(ubyte)[])stdin.byChunk(4096).joiner.array;
 			auto parser = parser(input,false,parserFlags);
 			parser.scanToken();
 			node = measure!("Parsing", () => parser.parseModule());

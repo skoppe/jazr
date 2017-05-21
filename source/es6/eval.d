@@ -755,11 +755,21 @@ auto doOperator(RawValue a, RawValue b, ExpressionOperator operator)
 			try
 			{
 				if (operator == ExpressionOperator.Multiply)
-					return RawValue.from((a.to!int * b.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!double * b.to!double).to!string,ValueType.Numeric);
 				else if (operator == ExpressionOperator.Mod)
-					return RawValue.from((a.to!int % b.to!int).to!string,ValueType.Numeric);
+					return RawValue.from((a.to!double % b.to!double).to!string,ValueType.Numeric);
 				else
-					return RawValue.from((a.to!double / b.to!double).to!string,ValueType.Numeric);
+				{
+					double r = (a.to!double / b.to!double);
+					if (r == double.infinity)
+					{
+						return RawValue(cast(const(ubyte)[])"Infinity", ValueType.Infinity);
+					} else if (r == double.nan)
+					{
+						return RawValue(cast(const(ubyte)[])"NaN", ValueType.NaN);
+					}
+					return RawValue.from(r.to!string,ValueType.Numeric);
+				}
 			} catch (Exception e)
 			{
 				return RawValue.from("NaN",ValueType.NaN);
@@ -1071,6 +1081,8 @@ unittest
 	assertEvalBinaryExpression(`3 >> NaN`, ValueType.Numeric, "3");
 	assertEvalBinaryExpression(`NaN * 3`, ValueType.NaN, "NaN");
 	assertEvalBinaryExpression(`3 * NaN`, ValueType.NaN, "NaN");
+
+	assertEvalBinaryExpression(`1*0.3`, ValueType.Numeric, "0.3");
 }
 @("Test BinaryExpression evaluations")
 unittest

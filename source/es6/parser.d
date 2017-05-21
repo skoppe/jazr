@@ -30,6 +30,7 @@ import std.array : appender;
 import es6.bench;
 
 version = customallocator;
+
 version(chatty)
 {
 	version = tracing;
@@ -46,7 +47,8 @@ version (unittest)
 	import unit_threaded;
 	import es6.reporter;
 	import std.stdio;
-	auto parseNode(alias parseFunction, Type = ModuleNode, int flags = Parser.Flags.None)(string r, bool exhaustInput = true, in string file = __FILE__, in size_t line = __LINE__)
+	import std.conv : text;
+	auto parseNode(alias parseFunction, Type = ModuleNode, int flags = Parser.Flags.None, bool prettyError = true)(string r, bool exhaustInput = true, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		auto parser = parser(r, flags);
 		parser.scanToken();
@@ -54,11 +56,19 @@ version (unittest)
 		if (n.type == NodeType.ErrorNode)
 		{
 			auto err = n.shouldBeOfType!(ErrorNode);
-			throw new UnitTestException([generateErrorMessage(err,r,1)],file,line);
+			static if (prettyError)
+				throw new UnitTestException([generateErrorMessage(err,r,1)],file,line);
+			else
+				throw new UnitTestException(err.value.text,file,line);
 		}
 		auto errs = n.collectErrors();
 		if (errs.length > 0)
-			throw new UnitTestException([generateErrorMessage(errs[0],r,1)],file,line);
+		{
+			static if (prettyError)
+				throw new UnitTestException([generateErrorMessage(errs[0],r,1)],file,line);
+			else
+				throw new UnitTestException(errs[0].value.text,file,line);
+		}
 		if (exhaustInput)
 		{
 			if (n.type != NodeType.ErrorNode && !parser.lexer.empty)
@@ -169,7 +179,7 @@ final class Parser
 		void traceExit(string fun, long a)
 		{
 			stopCounter(fun, a);
-			version (chatty) { writefln("%s%s: (%susecs)",traceIndent,fun,a.usecs); }
+			version (chatty) { writefln("%s%s: (%susecs)",traceIndent,fun,a/10); }
 			traceDepth--;
 		}
 	}
@@ -235,7 +245,8 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		auto children = appender!(Node[]);
-		while(token.type != Type.EndOfFile)
+		bool needsSeparator = false;
+		outer: while(token.type != Type.EndOfFile)
 		{
 			switch(token.type)
 			{
@@ -246,12 +257,14 @@ final class Parser
 						children.put(parseExportDeclaration());
 					else
 						goto default;
+					needsSeparator = true;
 					break;
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
 				case Type.LineTerminator:
 				case Type.Semicolon:
 					scanAndSkipCommentsAndTerminators();
+					needsSeparator = false;
 					break;
 				case Type.SheBang:
 					if (children.data.length == 0)
@@ -264,8 +277,14 @@ final class Parser
 					}
 					scanToken();
 					break;
+				case Type.InvalidUTF8:
+					children.put(error("Invalid UTF8"));
+					break outer;
 				default:
+					if (needsSeparator && !lexer.recentSeparator)
+						children.put(error("Expected newline or semicolon"));
 					children.put(parseStatementListItem(rootAttributes));
+					needsSeparator = true;
 					break;
 			}
 		}
@@ -691,9 +710,15 @@ final class Parser
 	{
 		mixin(traceFunction!(__FUNCTION__));
 		assert(token.type == Type.OpenParenthesis);
-		scanToken(attributes.filter!(Goal.NoRegex));
+		scanAndSkipCommentsAndTerminators(attributes.filter!(Goal.NoRegex));
 		if (token.type == Type.CloseParenthesis)
 		{
+			if (attributes & Goal.NoEmptyParen)
+			{
+				auto node = error("Expected AssignmentExpression");
+				scanToken();
+				return node;
+			}
 			auto node = make!(ParenthesisNode)();
 			scanToken();
 			return node;
@@ -758,6 +783,10 @@ final class Parser
 					auto exprNode = make!(ExpressionNode)(children);
 					return make!(ParenthesisNode)(exprNode);
 				default:
+					if (children.length != 0 && comma == false)
+					{
+						children ~= error("Expected comma in parenthesis expression");
+					}
 					comma = false;
 					auto expr = parseAssignmentExpression(Goal.In | attributes);
 					if (expr.type == NodeType.ErrorNode)
@@ -1283,7 +1312,9 @@ final class Parser
 					auto tmplNode = make!(TemplateNode)(token.match);
 					primary = make!(TemplateLiteralNode)(tmplNode); scanToken(primAttr); goto member;
 				case Type.Regex: primary = make!(RegexLiteralNode)(token.match); scanToken(primAttr); goto member;
-				case Type.OpenParenthesis: primary = parseParenthesisExpression(primAttr); goto member;
+				case Type.OpenParenthesis:
+					primary = parseParenthesisExpression(primAttr | Goal.NoEmptyParen);
+					goto member;
 				case Type.LineTerminator:
 				case Type.SingleLineComment:
 				case Type.MultiLineComment:
@@ -1292,11 +1323,11 @@ final class Parser
 					scanToken(unaryAttr);
 					continue;
 				default:
-					primary = error(format("unexpected %s token (%s)",token.type,cast(const(char)[])token.match));
+					unary = primary = error(format("unexpected %s token (%s)",token.type,cast(const(char)[])token.match));
 					scanToken(primAttr);
 					goto end;
 				case Type.EndOfFile:
-					primary = error(format("expected PrimaryExpression before eof"));
+					unary = primary = error(format("expected PrimaryExpression before eof"));
 					goto end;
 			}
 			hadNewLine = false;
@@ -1636,6 +1667,9 @@ final class Parser
 		ArrayBuilder!(Node,4) args;
 		if (token.type == Type.Comma)
 			return error("Expected argument before comma");
+
+		if (token.type == Type.Error)
+			return error(token.match);
 		while (1) // this while loop is ok, it can't run forever
 		{
 			if (token.type == Type.MultiLineComment ||
@@ -1670,8 +1704,10 @@ final class Parser
 				{
 					return error("Expected Comma or CloseParenthesis");
 				}
-				args.put(parseAssignmentExpression(Goal.In | attributes));
-				// TODO what if parse fails ?
+				auto assign = parseAssignmentExpression(Goal.In | attributes);
+				args.put(assign);
+				if (assign.type == NodeType.ErrorNode)
+					goto end;
 			}
 		}
 		end: auto node = make!(ArgumentsNode)(args.data);
@@ -1810,8 +1846,8 @@ final class Parser
 	}
 	Node[] parseStatementList(int attributes = 0)
 	{
-
 		auto children = appender!(Node[]);
+		bool needsSeparator = false;
 		while(!isEndOfExpression || token.type == Type.Semicolon)
 		{
 			if (token.type == Type.Identifier && (token.match == "case" || token.match == "default"))
@@ -1823,9 +1859,16 @@ final class Parser
 				case Type.MultiLineComment:
 				case Type.Semicolon:
 					scanAndSkipCommentsAndTerminators();
+					needsSeparator = false;
 					continue;
+				case Type.InvalidUTF8:
+					children.put(error("InvalidUTF8"));
+					return children.data;
 				default:
+					if (needsSeparator && !lexer.recentSeparator)
+						children.put(error("Expected newline or semicolon"));
 					children.put(parseStatementListItem(attributes));
+					needsSeparator = true;
 					break;
 			}
 		}
@@ -2909,11 +2952,13 @@ unittest
 unittest
 {
 	alias parseArguments = parseNode!("parseArguments",ArgumentsNode);
+	alias parseArgumentsError = parseNode!("parseArguments",ArgumentsNode,Parser.Flags.None,false);
 	parseArguments(`()`);
 	parseArguments(`(a)`).children.length.shouldEqual(1);
 	parseArguments(`(a,b,c)`).children.length.shouldEqual(3);
 	parseArguments(`(a,b,c,)`).children.length.shouldEqual(3);
 	parseArguments("(a\n,\nb\n,\nc\n,\n)").children.length.shouldEqual(3);
+	parseArgumentsError("(،ystem');").shouldThrowSaying("Invalid character 216 to start identifier");
 }
 @("parseRightHandSideExpression")
 unittest
@@ -3345,7 +3390,7 @@ unittest
 @("parseRightHandSideExpressionBottomUp")
 unittest
 {
-	alias parseRHSBottomUp(Type) = parseNode!("parseRightHandSideExpressionBottomUp",Type, Parser.Flags.Node);
+	alias parseRHSBottomUp(Type, bool prettyError = true) = parseNode!("parseRightHandSideExpressionBottomUp",Type, Parser.Flags.Node, prettyError);
 	alias parseKeyword = parseRHSBottomUp!(KeywordNode);
 	alias parseBoolean = parseRHSBottomUp!(BooleanNode);
 	alias parseIdentifier = parseRHSBottomUp!(IdentifierReferenceNode);
@@ -3509,6 +3554,10 @@ unittest
 	});
 
 	parseBinaryExpression(`code >= 1 && return`).shouldThrowSaying("Invalid IdentifierReference return");
+
+	alias parseBinaryExpressionError = parseRHSBottomUp!(BinaryExpressionNode,false);
+
+	parseBinaryExpressionError(`fals%`).shouldThrowSaying("expected PrimaryExpression before eof");
 }
 @("parseImportDeclaration")
 unittest
@@ -3603,7 +3652,17 @@ unittest
 	//	= 6;`
 	//);
 }
+@("parseInvalidUTF8")
+unittest
+{
+	alias parseModule = parseNode!("parseModule",ModuleNode, Parser.Flags.Node, false);
 
+	parseModule("\xFF").shouldThrowSaying("Invalid UTF8");
+	parseModule("\xF0").shouldThrowSaying("Invalid UTF8");
+	parseModule("\xC0").shouldThrowSaying("Invalid UTF8");
+	parseModule("\xE0").shouldThrowSaying("Invalid UTF8");
+	parseModule("\x81").shouldThrowSaying("Invalid UTF8");
+}
 
 
 
