@@ -18,7 +18,7 @@ echo "Comparing jazr against uglifyjs"
 echo "\"file\",\"jazr time\",\"jazr mem\",\"uglify time\",\"uglify mem\",\"size\",\"compressed jazr\",\"compressed uglify\",\"gzip jazr\",\"gzip uglify\",\"gzip jazr+ugly\",\"gzip ugly+jazr\"" >> compare.csv
 while read p; do
 	name=`basename "$p"`;
-	resultJazr=`gtime --output=time.tmp --format="%E\",\"%M" ./es6-parse "--DRT-gcopt=disable:1" -i $p --minify -o compare/$name.jazr.min 2>/dev/null && cat time.tmp`
+	resultJazr=`gtime --output=time.tmp --format="%E\",\"%M" ./jazr "--DRT-gcopt=disable:1" -i $p --minify -o compare/$name.jazr.min 2>/dev/null && cat time.tmp`
 	if [ $? -ne 0 ]; then
 		echo "Error in jazr $p";
 	fi
@@ -32,7 +32,7 @@ while read p; do
 			cp "compare/$name.jazr.pretty.current" "compare/$name.jazr.pretty.old"
 		fi;
 
-		./es6-parse "--DRT-gcopt=disable:1" -i $p --minify --pretty -o "compare/$name.jazr.pretty.current" 2>/dev/null
+		./jazr "--DRT-gcopt=disable:1" -i $p --minify --pretty -o "compare/$name.jazr.pretty.current" 2>/dev/null
 
 		if [ -f "compare/$name.jazr.pretty.old" ]; then
 			echo -e "\033[01;28mdiff \"$name\":\033[01;0m"
@@ -44,7 +44,7 @@ while read p; do
 	compressedSizeUglify=`stat -f%z compare/$name.ugly.min`
 	# resultJazrUgly=`uglifyjs --compress --mangle -- compare/$name.jazr.min  > compare/$name.jazr.ugly.min 2>/dev/null`
 	# compressedSizeJazrUgly=`stat -f%z compare/$name.jazr.ugly.min`
-	resultUglyJazr=`./es6-parse "--DRT-gcopt=disable:1" -i compare/$name.ugly.min --minify -o compare/$name.ugly.jazr.min 2>/dev/null`
+	resultUglyJazr=`./jazr "--DRT-gcopt=disable:1" -i compare/$name.ugly.min --minify -o compare/$name.ugly.jazr.min 2>/dev/null`
 	compressedSizeUglifyJazr=`stat -f%z compare/$name.ugly.jazr.min`
 	gzip -k "compare/$name.jazr.min"
 	gzip -k "compare/$name.ugly.min"

@@ -1,4 +1,4 @@
-name "es6-parse"
+name "jazr"
 description "A minimal D application."
 copyright "Copyright © 2016, skoppe"
 authors "skoppe"
@@ -30,7 +30,7 @@ configuration "pgo-profile" {
 	dflags "-fprofile-instr-generate=profile.raw"
 }
 configuration "pgo-build" {
-	preBuildCommands "./es6-parse \"--DRT-gcopt=disable:1\" -i ./tests/RxJS/dist/rx.all.js --minify --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
+	preBuildCommands "./jazr \"--DRT-gcopt=disable:1\" -i ./tests/RxJS/dist/rx.all.js --minify --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
 	targetType "executable"
 	dflags "-fprofile-instr-use=profile.data"
 }
@@ -43,7 +43,11 @@ configuration "pgo-profile-sse42" {
 	dflags "-fprofile-instr-generate=profile.raw" "-mattr=sse4.2"
 }
 configuration "pgo-build-sse42" {
-	preBuildCommands "./es6-parse \"--DRT-gcopt=disable:1\" -i ./tests/RxJS/dist/rx.all.js --minify --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
+	preBuildCommands "./jazr \"--DRT-gcopt=disable:1\" -i ./tests/RxJS/dist/rx.all.js --minify --time -o /dev/null && ldc-profdata merge -output=profile.data profile.raw"
 	targetType "executable"
 	dflags "-fprofile-instr-use=profile.data" "-mattr=sse4.2"
+}
+configuration "assembly" {
+	dflags "-output-s" "-mattr=sse4.2"
+	targetType "executable"
 }

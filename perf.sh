@@ -19,7 +19,7 @@ while read p; do
   	echo $p;
 	for i in `seq 1 100`;
 	do
-		`./es6-parse "--DRT-gcopt=disable:1" -i $p --time --minify -o /dev/null >> perf.tmp`
+		`./jazr "--DRT-gcopt=disable:1" -i $p --time --minify -o /dev/null >> perf.tmp`
 	done
 
 	median=`sort perf.tmp | tail -n50 | head -n1`
