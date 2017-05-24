@@ -21,13 +21,14 @@ instrument:
     - script:
         name: compile to assembly
         code: |
-          dub build --compiler=ldc2 --config=assembly || true
-          find . -type f -name "jazr.s" | xargs -I '{}' cp '{}' /afl/jazr.s
+          mkdir -p /tmp
+          dub build --compiler=ldc2 --build=release --config=assembly || true
+          cp jazr /tmp/jazr.s
     - script:
         name: instrument binary
         code: |
           cd /afl
-          ./afl-clang jazr.s -o jazr -Xlinker -no_compact_unwind -lphobos2-ldc -ldruntime-ldc -lpthread
+          ./afl-gcc -g /tmp/jazr.s -o jazr -lz -lm -lldruntime -llphobos2 -lpthread
           cp jazr $WERCKER_OUTPUT_DIR/jazr
 
 deploy-docker-hub:
