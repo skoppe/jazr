@@ -17,6 +17,7 @@ build:
 
 instrument:
   box: skoppe/docker-ldc-afl
+  cmd: /bin/sh
   steps:
     - script:
         name: compile to assembly
