@@ -16,8 +16,9 @@ build:
           bash <(curl -s https://codecov.io/bash)
 
 instrument:
-  box: skoppe/docker-ldc-afl
-  cmd: /bin/sh
+  box:
+    id: skoppe/docker-ldc-afl
+    cmd: /bin/sh
   steps:
     - script:
         name: compile to assembly
