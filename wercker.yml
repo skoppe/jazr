@@ -39,6 +39,8 @@ deploy-docker-hub:
     - script:
         name: deploy instrumented jazr binary
         code: |
+          mkdir -p /afl/cases
+          cp tests/cases/* /afl/cases/
           mv $WERCKER_SOURCE_DIR/jazr /afl/jazr
     - internal/docker-push:
         username: $DOCKERHUBUSER
