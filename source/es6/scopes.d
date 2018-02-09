@@ -24,6 +24,7 @@ import es6.utils;
 import std.format : formattedWrite;
 import std.algorithm : each, countUntil, remove;
 import std.array : insertInPlace;
+import std.range : lockstep;
 import option;
 
 version (unittest)

@@ -692,7 +692,7 @@ final class ErrorNode : Node
 	override void prettyPrint(PrettyPrintSink sink, int level = 0) const
 	{
 		sink.indent(level);
-		sink.formattedWrite("Error: %s at line %s at column %s\n",value,line,column);
+		sink.formattedWrite("Error: %s at line %s at column %s %s\n",value,line,column,debugMessage);
 		sink.print(children,level+1);
 	}
 	override Diff diff(Node other)
@@ -1587,7 +1587,7 @@ unittest
 	{
 		auto node = parseNode!("parseBlockStatement",BlockStatementNode)(input);
 		auto assignExpr = node.convertToAssignmentExpression();
-		assignExpr.emit().shouldEqual(output,file,line);
+		assignExpr.emitVisitor().shouldEqual(output,file,line);
 	}
 	assertConvertBlockStatementToAssignmentExpression(
 		`{ d = 5; b = 6 }`,
@@ -2897,6 +2897,32 @@ bool partOfCondition(Node node)
 			return true;
 		default:
 			return false;
+	}
+}
+// Whether a node requires a semicolon of line-break after it
+bool requiresSeparator(Node node)
+{
+	switch (node.type) {
+		case NodeType.FunctionDeclarationNode:
+		case NodeType.FunctionExpressionNode:
+		case NodeType.GeneratorDeclarationNode:
+		case NodeType.GeneratorExpressionNode:
+		case NodeType.ClassDeclarationNode:
+		case NodeType.SwitchStatementNode:
+		case NodeType.BlockStatementNode:
+			return false;
+		case NodeType.LabelledStatementNode:
+			return node.children[$-1].requiresSeparator;
+		case NodeType.IfStatementNode:
+			auto ifStmt = node.as!(IfStatementNode);
+			if (ifStmt.hasElsePath)
+				return ifStmt.elsePath.node.requiresSeparator;
+			return ifStmt.truthPath.node.requiresSeparator;
+		case NodeType.ForStatementNode:
+			return !node.children[$-1].type == NodeType.BlockStatementNode;
+		case NodeType.WhileStatementNode:
+			return !node.children[$-1].type == NodeType.BlockStatementNode;
+		default: return true;
 	}
 }
 

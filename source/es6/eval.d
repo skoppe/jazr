@@ -19,6 +19,7 @@ module es6.eval;
 
 import es6.nodes;
 import es6.lexer;
+import std.algorithm : countUntil;
 
 version (unittest)
 {

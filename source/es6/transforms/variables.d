@@ -361,7 +361,7 @@ unittest
 		auto ar = analyseNode(root);
 		ar.scp.findGlobals();
 		ar.scp.shortenVariables();
-		auto got = root.emit();
+		auto got = root.emitVisitor();
 		got.shouldEqual(expected,file,line);
 	}
 	assertVariableRenaming(
@@ -488,8 +488,8 @@ unittest
 		"function bla(a, b, c) { function n() { return 7 * c } return a * b * n() }"
 	);
 	assertRemoveUnused(
-		`function bla(a, b, c) { var d = function () { return 7 * c } return a * b * d() }`,
-		"function bla(a, b, c) { var d = function () { return 7 * c } return a * b * d() }"
+		`function bla(a, b, c) { var d = function () { return 7 * c }; return a * b * d() }`,
+		"function bla(a, b, c) { var d = function () { return 7 * c }; return a * b * d() }"
 	);
 	assertRemoveUnused(
 		`function bla(a, b, c) { return 7 }`,

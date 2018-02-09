@@ -281,10 +281,12 @@ final class Parser
 					children.put(error("Invalid UTF8"));
 					break outer;
 				default:
+					// TODO: we can avoid many calls to requireSeparator by assuming we need one. Then when we get here and needsSeparator and !recentSeparator are still true, only then call requiresSeparator on last child
 					if (needsSeparator && !lexer.recentSeparator)
 						children.put(error("Expected newline or semicolon"));
-					children.put(parseStatementListItem(rootAttributes));
-					needsSeparator = true;
+					auto item = parseStatementListItem(rootAttributes);
+					children.put(item);
+					needsSeparator = item.requiresSeparator();
 					break;
 			}
 		}
@@ -1313,7 +1315,10 @@ final class Parser
 					primary = make!(TemplateLiteralNode)(tmplNode); scanToken(primAttr); goto member;
 				case Type.Regex: primary = make!(RegexLiteralNode)(token.match); scanToken(primAttr); goto member;
 				case Type.OpenParenthesis:
-					primary = parseParenthesisExpression(primAttr | Goal.NoEmptyParen);
+					if (binaryChildren.length > 0)
+						primary = parseParenthesisExpression(primAttr | Goal.NoEmptyParen);
+					else
+						primary = parseParenthesisExpression(primAttr);
 					goto member;
 				case Type.LineTerminator:
 				case Type.SingleLineComment:
@@ -1867,8 +1872,9 @@ final class Parser
 				default:
 					if (needsSeparator && !lexer.recentSeparator)
 						children.put(error("Expected newline or semicolon"));
-					children.put(parseStatementListItem(attributes));
-					needsSeparator = true;
+					auto item = parseStatementListItem(attributes);
+					children.put(item);
+					needsSeparator = item.requiresSeparator();
 					break;
 			}
 		}

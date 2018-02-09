@@ -33,6 +33,7 @@ version (unittest) {
 	import std.traits : fullyQualifiedName;
 	version = verbose;
 	import std.stdio;
+	import std.format : format;
 	import es6.parser;
 	import es6.analyse;
 	import es6.emitter;
@@ -77,7 +78,7 @@ version (unittest) {
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 }
 // NOTE: Can be replaced with `import std.traits : Parameters;` when gdc/ldc support it
@@ -115,7 +116,7 @@ version (unittest)
 		import es6.analyse;
 		import unit_threaded;
 		node.assertTreeInternals(file,line);
-		auto str = emit(node);
+		auto str = emitVisitor(node);
 		writeln(str);
 		auto expected = parseModule(str,true,file,line);
 		expected.analyseNode();

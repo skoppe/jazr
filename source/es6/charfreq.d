@@ -579,10 +579,10 @@ unittest
 {
 	assertSortMostUsedLetters(
 		`function b(){ var B = "_$$hup"; switch(b){case 5: return function(){}}};`,
-		"ncutirab$efhsowv_pdZYXWVUTSRQPONMLKqIHGFEDCBAzyxgjklmJ"
+		"nctuirabefhos$pvw_dgjklmqxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	);
 	assertSortMostUsedLetters(
 		"function b(){ var b = function() {return 6;}; switch(6) { case 4: break; default: return 5 }};",
-		"rtnueacibfsovwlkhdYXWK$ZVUTSRQPONML_IHGFEDCBAzyxqpmjgJ"
+		"nrteuacbfiosdhklvwgjmpqxyzABCDEFGHIJKLMNOPQRSTUVWXYZ$_"
 	);
 }

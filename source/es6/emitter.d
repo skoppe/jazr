@@ -23,6 +23,8 @@ import es6.nodes;
 import es6.lexer;
 import std.range : repeat;
 import std.algorithm : copy;
+import std.array : Appender;
+import std.format : format;
 
 version (unittest)
 {
@@ -43,20 +45,21 @@ version (unittest)
 		struct Result
 		{
 			string got;
-			string visitorGot;
 			void shouldEqual(string expected, in string file = __FILE__, in size_t line = __LINE__)
 			{
-				visitorGot.shouldEqual(got, file, line);
-				got.shouldEqual(expected,file,line);
+				got.shouldEqual(expected, file, line);
 			}
 		}
 		auto parser = parser(input);
 		parser.scanToken();
 		auto root = parser.parseModule();
 		root.analyseNode();
-		auto emit = root.emit!(pretty);
+		auto errors = root.collectErrors();
+		if (errors.length) {
+			throw new UnitTestException([format("%s",errors[0])]);
+		}
 		auto emitVisitor = root.emitVisitor!(pretty);
-		return Result(emit,emitVisitor);
+		return Result(emitVisitor);
 	}
 }
 enum Guide
@@ -110,7 +113,7 @@ template exitScope(bool pretty)
 	else
 		enum exitScope = ``;
 }
-template emit(bool pretty = false)
+/*template emit(bool pretty = false)
 {
 	Guide emitDelimited(Sink)(Node[] nodes, Sink sink, string delimiter, int guide = Guide.None)
 	{
@@ -977,6 +980,15 @@ template emit(bool pretty = false)
 		}
 		return node.children.emit(sink,guide);
 	}
+}*/
+@("Semicolon")
+unittest
+{
+	assertEmitted(`var b=function a(){};c=6;`);
+	assertEmitted(`function d(){var b=function a(){};c=6}`);
+	assertEmitted(`for(;;){}var b=4;`);
+	assertEmitted(`while(false){}var b=4;`);
+	assertEmitted(`n:for(;bla;){break n}t:for(;hup;){continue t}`);
 }
 @("Expression")
 unittest
@@ -1333,6 +1345,7 @@ unittest
 	assertEmitted(`function a(a,{b,c}){return this}`);
 	assertEmitted(`function a(a,{b,c}){return null}`);
 	assertEmitted(`function a(){}var b;`);
+	assertEmitted(`function b(){function a(){}var c}`);
 }
 @("Prefix Expression")
 unittest
@@ -1424,7 +1437,7 @@ else{
 `
 	);
 }
-template emitVisitor(bool pretty)
+template emitVisitor(bool pretty = false)
 {
 	final class EmitVisitor(Sink) : NodeVisitor
 	{
@@ -2278,6 +2291,7 @@ template emitVisitor(bool pretty)
 			guide = Guide.None;
 			node.children[0].accept(this);
 			sink.put("=");
+			guide = Guide.None;
 			node.children[1].accept(this);
 			guide = Guide.None;
 		}
@@ -2474,6 +2488,7 @@ template emitVisitor(bool pretty)
 		{
 			if (node.entersStrictMode)
 				sink.put(`"use strict";`);
+			guide = Guide.None;
 			if (Guide.RequiresSemicolon & acceptManyDelimited(node.children,";",Guide.DelimitLast))
 				sink.put(";");
 			guide = Guide.None;

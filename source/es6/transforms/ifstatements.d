@@ -93,7 +93,7 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected), file, line); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected), file, line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertCombineNestedIfs(
 		"function a() { if (a) if (c && d) return bla; }",
@@ -213,7 +213,7 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertConvertIfsToExpressionStatements(
 		"if (a) d = 5;",

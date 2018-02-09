@@ -25,7 +25,7 @@ import es6.lexer;
 import es6.transforms.expressions;
 import std.algorithm : each, countUntil;
 import std.range : retro;
-import std.array : appender, Appender;
+import std.array : appender, Appender, array;
 import es6.bench;
 
 version(tracing)
@@ -288,7 +288,7 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 
 	assertFactorOutStrings(

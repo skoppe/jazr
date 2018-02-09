@@ -126,7 +126,7 @@ unittest
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected),file,line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	// Note: Need to test that we don't apply this optimisation if the `if (c) return;` is nested in a if-statement
 	assertReturnIfNegation(

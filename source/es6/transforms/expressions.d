@@ -21,11 +21,12 @@ import es6.nodes;
 import es6.scopes;
 import es6.transforms.conditionals;
 import es6.transforms.returns : createVoid0Node;
+import es6.tokens : Keyword;
 import option;
 import es6.analyse;
 import es6.eval;
 import std.range : retro, enumerate;
-import std.algorithm : all, each, map, reduce, sum, any;
+import std.algorithm : all, each, map, reduce, sum, any, countUntil;
 
 version(tracing)
 {
@@ -112,7 +113,7 @@ unittest {
 		if (diff.type == Diff.No || diff.type == Diff.IdentifiersCount)
 			return;
 
-		emit(got.getRoot()).shouldEqual(emit(expected), file, line); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got.getRoot()).shouldEqual(emitVisitor(expected), file, line); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 	assertCombineExpressions(`a`,`b`,`a or b`).shouldThrow();
 	assertCombineExpressions(`a`,`b`,`a && b`);
@@ -680,11 +681,11 @@ bool simplifyArithmeticOperations(BinaryExpressionNode node, out Node replacedWi
 
 		auto expr = result.toUnaryExpression();
 
-		auto opLength = emit!false(op).length;
-		auto leftLength = emit!false(node.children[i*2-off]).length;
-		auto rightLength = emit!false(node.children[i*2+2-off]).length;
+		auto opLength = emitVisitor!false(op).length;
+		auto leftLength = emitVisitor!false(node.children[i*2-off]).length;
+		auto rightLength = emitVisitor!false(node.children[i*2+2-off]).length;
 
-		auto exprLength = emit!false(expr).length;
+		auto exprLength = emitVisitor!false(expr).length;
 
 		if (exprLength >= opLength+leftLength+rightLength)
 			continue;

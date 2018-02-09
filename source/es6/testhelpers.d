@@ -21,6 +21,7 @@ version(unittest)
 {
 	import unit_threaded;
 	import es6.nodes;
+	import std.format : format;
 	Type shouldBeOfType(Type)(Node n, in string file = __FILE__, in size_t line = __LINE__)
 	{
 		import std.format : format;

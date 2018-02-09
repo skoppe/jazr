@@ -20,6 +20,7 @@ module es6.analyse;
 @safe:
 
 import std.algorithm : each;
+import std.format : format;
 import es6.bench;
 
 version (unittest)
@@ -982,7 +983,7 @@ unittest
 	{auto s = getScope(`var a;`);
 	assertIsLeafScope(s);
 	s.branch.children.length.shouldEqual(0);
-	s.entry.emit.shouldEqual(`var a;`);}
+	s.entry.emitVisitor.shouldEqual(`var a;`);}
 
 	void testFirstChildScopeToContainReturn1(string js, in string file = __FILE__, in size_t line = __LINE__)
 	{
@@ -991,7 +992,7 @@ unittest
 		s.children.length.shouldEqual(1,file,line);
 		s.children[0].parent.shouldBeObject(s,file,line);
 		assertIsLeafScope(s.children[0],s);
-		s.children[0].entry.emit.shouldEqual(`{return 1}`,file,line);
+		s.children[0].entry.emitVisitor.shouldEqual(`{return 1}`,file,line);
 	}
 
 	testFirstChildScopeToContainReturn1(`function abc(){return 1}`);
@@ -1021,57 +1022,57 @@ unittest
 {
 	auto b = getBranch(`if(a)b;else c;`);
 	b.children.length.shouldEqual(2);
-	b.children[0].entry.emit.shouldEqual(`b`);
-	b.children[1].entry.emit.shouldEqual(`c`);
+	b.children[0].entry.emitVisitor.shouldEqual(`b`);
+	b.children[1].entry.emitVisitor.shouldEqual(`c`);
 
 	b = getBranch(`if(a){b}else{c}`);
 	b.children.length.shouldEqual(2);
-	b.children[0].entry.emit.shouldEqual(`{b}`);
-	b.children[1].entry.emit.shouldEqual(`{c}`);
+	b.children[0].entry.emitVisitor.shouldEqual(`{b}`);
+	b.children[1].entry.emitVisitor.shouldEqual(`{c}`);
 
 	b = getBranch(`if(a)b;`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`b`);
+	b.children[0].entry.emitVisitor.shouldEqual(`b`);
 
 	b = getBranch(`if(a){b}`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`{b}`);
+	b.children[0].entry.emitVisitor.shouldEqual(`{b}`);
 
 	b = getBranch(`switch(a){case 1:b;case 2:{c};case 3:case 4:break;default:d}`);
 	b.children.length.shouldEqual(5);
-	b.children[0].entry.emit.shouldEqual(`b`);
-	b.children[1].entry.emit.shouldEqual(`{c}`);
-	b.children[2].entry.emit.shouldEqual(``);
-	b.children[3].entry.emit.shouldEqual(`break`);
-	b.children[4].entry.emit.shouldEqual(`d`);
+	b.children[0].entry.emitVisitor.shouldEqual(`b`);
+	b.children[1].entry.emitVisitor.shouldEqual(`{c}`);
+	b.children[2].entry.emitVisitor.shouldEqual(``);
+	b.children[3].entry.emitVisitor.shouldEqual(`break`);
+	b.children[4].entry.emitVisitor.shouldEqual(`d`);
 
 	b = getBranch(`switch(a){case 1:b;default:}`);
 	b.children.length.shouldEqual(2);
-	b.children[0].entry.emit.shouldEqual(`b`);
+	b.children[0].entry.emitVisitor.shouldEqual(`b`);
 
 	b = getBranch(`for(;;){a}`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`{a}`);
+	b.children[0].entry.emitVisitor.shouldEqual(`{a}`);
 
 	b = getBranch(`for(;;)a;`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`a`);
+	b.children[0].entry.emitVisitor.shouldEqual(`a`);
 
 	b = getBranch(`do a;while(1);`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`a`);
+	b.children[0].entry.emitVisitor.shouldEqual(`a`);
 
 	b = getBranch(`do{a}while(1);`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`{a}`);
+	b.children[0].entry.emitVisitor.shouldEqual(`{a}`);
 
 	b = getBranch(`while(1)a;`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`a`);
+	b.children[0].entry.emitVisitor.shouldEqual(`a`);
 
 	b = getBranch(`while(1){a}`);
 	b.children.length.shouldEqual(1);
-	b.children[0].entry.emit.shouldEqual(`{a}`);
+	b.children[0].entry.emitVisitor.shouldEqual(`{a}`);
 }
 @("Variable Statements")
 unittest

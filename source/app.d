@@ -108,8 +108,9 @@ int main(string[] args)
 			node = measure!("Parsing", () => parser.parseModule());
 		}
 
-		if (checkLinesAndColumns)
-			checkLineAndColumnCounts(cast(string)input);
+		// NOTE: no longer works since change to visitor
+		//if (checkLinesAndColumns)
+			//checkLineAndColumnCounts(cast(string)input);
 
 		size = input.length;
 		auto errors = measure!("Collect Errors", (){
@@ -129,9 +130,9 @@ int main(string[] args)
 
 		auto min = measure!("Emitting",(){
 			if (pretty)
-				return emit!(true)(node);
+				return emitVisitor!(true)(node);
 			else
-				return emit!(false)(node);
+				return emitVisitor!(false)(node);
 		});
 
 		if (selfCheck)

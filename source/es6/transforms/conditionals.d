@@ -50,7 +50,7 @@ version(unittest)
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 
 	void assertNegateCondition(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
@@ -64,7 +64,7 @@ version(unittest)
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 
 	void assertNegateNode(string input, string output, in string file = __FILE__, in size_t line = __LINE__)
@@ -80,7 +80,7 @@ version(unittest)
 		auto diff = diffTree(got,expected);
 		if (diff.type == Diff.No)
 			return;
-		emit(got).shouldEqual(emit(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
+		emitVisitor(got).shouldEqual(emitVisitor(expected)); throw new UnitTestException([diff.getDiffMessage()], file, line);
 	}
 }
 

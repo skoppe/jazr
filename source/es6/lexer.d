@@ -212,6 +212,16 @@ size_t getCodePointLength(ulong cp) pure nothrow @nogc
 		return 2;
 	return 1;
 }
+size_t getCodePointEncodedLength(ulong cp) pure nothrow @nogc
+{
+	if (cp >= 0x10000)
+		return 4;
+	if (cp >= 0x800)
+		return 3;
+	if (cp >= 0x80)
+		return 2;
+	return 1;
+}
 @("isLineTerminator")
 unittest
 {
@@ -1052,7 +1062,7 @@ struct Lexer
 						if (s[idx] == 0)
 							goto eof;
 						auto cp = s.decodeCodePoint(idx);
-						auto len = cp == InvalidUTF8 ? 1 : getCodePointLength(cp);
+						auto len = cp == InvalidUTF8 ? 1 : getCodePointEncodedLength(cp);
 						idx += len;
 						column++;
 						break;
@@ -1068,7 +1078,7 @@ struct Lexer
 					column ++;
 					continue;
 				}
-				idx += getCodePointLength(codePoint);
+				idx += getCodePointEncodedLength(codePoint);
 				column ++;
 				if (codePoint == 0x2028 || codePoint == 0x2029)
 					return createTokenAndAdvance(Type.Error,idx,"Invalid new line in string");
@@ -1221,7 +1231,7 @@ struct Lexer
 						column = 0;
 						tokenLength = 0;
 					}
-					idx += cp.getCodePointLength();
+					idx += cp.getCodePointEncodedLength();
 			}
 		}
 		eof: return Token(Type.Error,"Found eof before finishing lexing TemplateLiteral");
@@ -1312,11 +1322,13 @@ struct Lexer
 			else if (cp.isLineTerminator())
 			{
 				idx++;
+				if (cp == 0x0d && s[idx+1] == 0x0a)
+					idx++;
 				_tokenLines++;
 				column=0;
 			} else
 			{
-				idx += cp.getCodePointLength();
+				idx += cp.getCodePointEncodedLength();
 				column++;
 			}
 		}
@@ -1347,12 +1359,22 @@ struct Lexer
 			{
 				idx++;
 			} else if (cp.isLineTerminator() || cp == 0)
+			{
+				if (cp == 0x0d && s[idx+1] == 0x0a) {
+					auto tok = Token(Type.SingleLineComment,s[0..idx]);
+					_tokenLines++;
+					tokenLength = 0;
+					s = s[idx+2..$];
+					return tok;
+				}
 				break;
-			else
-				idx += cp.getCodePointLength();
+			}
+			else {
+				idx += cp.getCodePointEncodedLength();
+			}
 		}
 		auto tok = Token(Type.SingleLineComment,s[0..idx]);
-		idx += cp.getCodePointLength();
+		idx += cp.getCodePointEncodedLength();
 		_tokenLines++;
 		tokenLength = 0;
 		s = s[idx..$];
@@ -1386,10 +1408,10 @@ struct Lexer
 			} else if (cp.isLineTerminator() || cp == 0)
 				break;
 			else
-				idx += cp.getCodePointLength();
+				idx += cp.getCodePointEncodedLength();
 		}
 		auto tok = Token(Type.SingleLineComment,s[0..idx]);
-		idx += cp.getCodePointLength();
+		idx += cp.getCodePointEncodedLength();
 		_tokenLines++;
 		tokenLength = 0;
 		s = s[idx..$];
@@ -2342,7 +2364,8 @@ auto byLines(string input)
 	return Lines(input);
 }
 
-void checkLineAndColumnCounts(string input)
+// NOTE: no longer works since change to visitor
+/*void checkLineAndColumnCounts(string input)
 {
 	import std.stdio;
 	void checkContentByToken(Line)(Line line, Token token, ref Lexer lexer, ptrdiff_t lineOffset = 0)
@@ -2487,4 +2510,4 @@ unittest
 identifier, b = \"basdfas\"");
 	checkLineAndColumnCounts("var a =
 	44, b = 0b01, c = 0x01, d = 0o55");
-}
+}*/
