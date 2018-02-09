@@ -30,7 +30,7 @@ instrument:
         name: instrument binary
         code: |
           cd /afl
-          ./afl-gcc -g /tmp/jazr.s -o jazr -lz -lm -lldruntime -llphobos2 -lpthread
+          ./afl-gcc -g /tmp/jazr.s -o jazr -lz -lm -ldruntime-ldc -lphobos2-ldc -lpthread -ldl
           cp jazr $WERCKER_OUTPUT_DIR/jazr
 
 deploy-docker-hub:
