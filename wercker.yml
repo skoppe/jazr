@@ -32,6 +32,11 @@ instrument:
           cd /afl
           ./afl-gcc -g /tmp/jazr.s -o jazr -lz -lm -lphobos2-ldc -ldruntime-ldc -lpthread -ldl
           cp jazr $WERCKER_OUTPUT_DIR/jazr
+    - script:
+        name: copy test cases
+        code: |
+          mkdir -p $WERCKER_OUTPUT_DIR/cases
+          cp tests/cases/* $WERCKER_OUTPUT_DIR/cases
 
 deploy-docker-hub:
   box: skoppe/afl-dist
@@ -40,8 +45,9 @@ deploy-docker-hub:
         name: deploy instrumented jazr binary
         code: |
           mkdir -p /afl/cases
-          cp tests/cases/* /afl/cases/
+          cp $WERCKER_OUTPUT_DIR/cases/* /afl/cases
           mv $WERCKER_SOURCE_DIR/jazr /afl/jazr
+
     - internal/docker-push:
         username: $DOCKERHUBUSER
         password: $DOCKERHUBPASS
